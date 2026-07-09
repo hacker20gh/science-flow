@@ -78,10 +78,20 @@ export default function ExperimentsPage() {
 
   return (
     <main className="p-8 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">🧪 实验设计</h1>
-      <p className="text-gray-500 mb-6 text-sm">
-        基于机制矩阵和假设，AI 帮你设计实验方案
-      </p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">🧪 实验设计</h1>
+          <p className="text-gray-500 text-sm">
+            基于机制矩阵和假设，AI 帮你设计实验方案
+          </p>
+        </div>
+        <a
+          href="experiments/troubleshoot"
+          className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+        >
+          🔬 实验排障
+        </a>
+      </div>
 
       {/* 过程助手 */}
       <ProcessAssistant
