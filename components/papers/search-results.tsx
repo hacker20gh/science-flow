@@ -101,8 +101,6 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
                       : ""}
                     {" · "}
                     {paper.journal}
-                    {" · "}
-                    {paper.year}
                   </p>
 
                   {paper.tldr && (
@@ -117,35 +115,51 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
                     </p>
                   )}
 
-                  <div className="flex gap-2 mt-2 flex-wrap">
+                  {/* 标签栏 */}
+                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                    {/* 年份 */}
+                    {paper.year > 0 && (
+                      <span className="text-xs px-1.5 py-0.5 bg-gray-50 text-gray-600 rounded">
+                        {paper.year}
+                      </span>
+                    )}
+
+                    {/* 引用量 */}
                     {paper.citationCount > 0 && (
                       <span
-                        className={`text-xs px-2 py-0.5 rounded ${
+                        className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                           paper.citationCount >= 100
-                            ? "bg-amber-100 text-amber-800 font-medium"
-                            : "bg-gray-100 text-gray-600"
+                            ? "bg-amber-100 text-amber-800"
+                            : paper.citationCount >= 20
+                              ? "bg-gray-100 text-gray-700"
+                              : "text-gray-400"
                         }`}
                       >
                         引用 {paper.citationCount}
                       </span>
                     )}
-                    {paper.isOpenAccess && paper.oaPdfUrl && (
-                      <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded font-medium">
-                        ✅ OA 全文可提取
+
+                    {/* OA 状态 */}
+                    {paper.isOpenAccess && paper.oaPdfUrl ? (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                        OA 全文
+                      </span>
+                    ) : paper.isOpenAccess ? (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-600 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+                        OA（待获取）
+                      </span>
+                    ) : (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-50 text-gray-500 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300 inline-block" />
+                        仅摘要
                       </span>
                     )}
-                    {paper.isOpenAccess && !paper.oaPdfUrl && (
-                      <span className="text-xs px-2 py-0.5 bg-green-50 text-green-600 rounded">
-                        Open Access（链接待获取）
-                      </span>
-                    )}
-                    {!paper.isOpenAccess && (
-                      <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded">
-                        📎 仅摘要（可上传 PDF 补充）
-                      </span>
-                    )}
+
+                    {/* 来源 */}
                     {paper.pmid && (
-                      <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-50 text-gray-400">
                         PubMed
                       </span>
                     )}
