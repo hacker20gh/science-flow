@@ -4,6 +4,7 @@ import { useState } from "react";
 import { SearchForm, type SearchOptions } from "@/components/papers/search-form";
 import { SearchResults, type Paper } from "@/components/papers/search-results";
 import { ExtractionReview } from "@/components/papers/extraction-review";
+import { useProjectStore, type StoredPaper } from "@/store/project-store";
 
 interface QueryInfo {
   original: string;
@@ -39,23 +40,16 @@ interface ExtractionResult {
   error?: string;
 }
 
-interface ExtractionResponse {
-  results: ExtractionResult[];
-  summary: {
-    total: number;
-    success: number;
-    errors: number;
-    totalExperiments: number;
-  };
-}
-
 export default function ProjectPaperSearchPage() {
+  const { papers: storedPapers, addPapers, updatePaperExtraction } = useProjectStore();
+
   const [view, setView] = useState<"search" | "extracting" | "review">("search");
   const [results, setResults] = useState<SearchResponse | null>(null);
-  const [extractionData, setExtractionData] = useState<ExtractionResponse | null>(null);
+  const [extractionData, setExtractionData] = useState<ExtractionResult[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPapers, setSelectedPapers] = useState<Paper[]>([]);
+  const [extractionProgress, setExtractionProgress] = useState({ done: 0, total: 0 });
 
   async function handleSearch(query: string, options: SearchOptions) {
     setIsLoading(true);
@@ -78,10 +72,31 @@ export default function ProjectPaperSearchPage() {
     }
   }
 
-  async function handleExtract(papers: Paper[]) {
-    setView("extracting");
+  async function handleSelect(papers: Paper[]) {
     setSelectedPapers(papers);
-    setError(null);
+
+    // 1. 先把选中的论文加入 store
+    const stored: StoredPaper[] = papers.map((p) => ({
+      paperId: p.doi || p.pmid || p.title,
+      title: p.title,
+      authors: p.authors,
+      journal: p.journal,
+      year: p.year,
+      abstract: p.abstract,
+      doi: p.doi,
+      pmid: p.pmid,
+      citationCount: p.citationCount,
+      isOpenAccess: p.isOpenAccess,
+      oaPdfUrl: p.oaPdfUrl,
+      articleType: "研究论文",
+      extractionStatus: "extracting" as const,
+      experiments: [],
+    }));
+    addPapers(stored);
+
+    // 2. 触发提取
+    setView("extracting");
+    setExtractionProgress({ done: 0, total: papers.length });
 
     try {
       const res = await fetch("/api/papers/extract", {
@@ -95,29 +110,54 @@ export default function ProjectPaperSearchPage() {
           })),
         }),
       });
+
       if (!res.ok) throw new Error((await res.json()).error || "提取失败");
+
       const data = await res.json();
-      setExtractionData(data);
+      setExtractionData(data.results);
+
+      // 3. 把提取结果写回 store
+      for (const result of data.results) {
+        if (result.extraction?.experiments) {
+          updatePaperExtraction(
+            result.paperId,
+            "done",
+            result.extraction.experiments
+          );
+        } else {
+          updatePaperExtraction(
+            result.paperId,
+            "error",
+            undefined,
+            result.error || "No experiments found"
+          );
+        }
+      }
+
       setView("review");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "提取失败");
+      // 标记所有为失败
+      for (const p of stored) {
+        updatePaperExtraction(p.paperId, "error", undefined, "Extraction failed");
+      }
       setView("search");
     }
   }
 
-  function handleExtractionConfirm(extractions: unknown[]) {
-    console.log("Confirmed extractions:", extractions);
-    alert(`已确认 ${extractions.length} 篇文献的提取结果，后续将接入机制矩阵`);
+  function handleExtractionConfirm() {
+    // 提取结果已经存入 store，用户确认后跳转到 Brain 页面
+    alert("提取结果已保存！前往知识面板查看机制矩阵");
   }
 
   return (
     <main className="p-8 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-2">🔍 搜索文献</h1>
       <p className="text-gray-500 mb-6 text-sm">
-        搜索 PubMed + Semantic Scholar + OpenAlex，自动发现 Open Access 全文
+        搜索 PubMed + Semantic Scholar + OpenAlex
       </p>
 
-      {/* 搜索表单（提取阶段隐藏） */}
+      {/* 搜索表单 */}
       {view === "search" && (
         <SearchForm onSearch={handleSearch} isLoading={isLoading} />
       )}
@@ -128,13 +168,13 @@ export default function ProjectPaperSearchPage() {
         </div>
       )}
 
-      {/* 加载状态 */}
+      {/* 提取进度 */}
       {view === "extracting" && (
-        <div className="mt-8 text-center text-gray-500 space-y-2">
+        <div className="mt-8 text-center text-gray-500 space-y-3">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-600" />
           <p className="text-sm">正在提取 {selectedPapers.length} 篇文献的信息...</p>
           <p className="text-xs text-gray-400">
-            这可能需要一些时间，请耐心等待
+            这可能需要 1-2 分钟，请耐心等待
           </p>
         </div>
       )}
@@ -145,22 +185,15 @@ export default function ProjectPaperSearchPage() {
           <div className="flex items-start gap-2">
             <span className="mt-0.5">🤖</span>
             <div className="space-y-1">
-              <p>
-                <span className="font-medium">搜索意图：</span>
-                {results.queryInfo.intent}
-              </p>
+              <p><span className="font-medium">搜索意图：</span>{results.queryInfo.intent}</p>
               {results.queryInfo.optimized !== results.queryInfo.original && (
                 <p>
                   <span className="font-medium">优化查询：</span>
-                  <code className="bg-blue-100 px-1 rounded text-xs">
-                    {results.queryInfo.optimized}
-                  </code>
+                  <code className="bg-blue-100 px-1 rounded text-xs">{results.queryInfo.optimized}</code>
                 </p>
               )}
               {results.queryInfo.refinements.length > 0 && (
-                <p className="text-blue-600">
-                  💡 {results.queryInfo.refinements.join(" ")}
-                </p>
+                <p className="text-blue-600">💡 {results.queryInfo.refinements.join(" ")}</p>
               )}
             </div>
           </div>
@@ -173,10 +206,9 @@ export default function ProjectPaperSearchPage() {
           <div className="text-xs text-gray-400 mb-4">
             PubMed: {results.sources.pubmed} · Semantic Scholar:{" "}
             {results.sources.semanticScholar} · OpenAlex:{" "}
-            {results.sources.openAlex} · 合计 {results.total}{" "}
-            篇（已去重）
+            {results.sources.openAlex} · 合计 {results.total} 篇（已去重）
           </div>
-          <SearchResults papers={results.papers} onSelect={handleExtract} />
+          <SearchResults papers={results.papers} onSelect={handleSelect} />
         </div>
       )}
 
@@ -184,20 +216,44 @@ export default function ProjectPaperSearchPage() {
       {extractionData && view === "review" && (
         <div className="mt-4">
           <ExtractionReview
-            extractions={extractionData.results}
+            extractions={extractionData.map((r) => ({
+              paperId: r.paperId,
+              title: r.title,
+              extraction: r.extraction,
+              error: r.error,
+            }))}
             onConfirm={handleExtractionConfirm}
           />
+          <div className="mt-6 flex gap-3">
+            <a
+              href="brain"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+            >
+              查看机制矩阵 →
+            </a>
+            <button
+              onClick={() => setView("search")}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+            >
+              继续搜索
+            </button>
+          </div>
         </div>
       )}
 
-      {/* 返回搜索按钮 */}
-      {view === "review" && (
-        <button
-          onClick={() => setView("search")}
-          className="mt-6 text-sm text-blue-600 hover:text-blue-800"
-        >
-          ← 返回搜索结果
-        </button>
+      {/* 已入库文献统计 */}
+      {storedPapers.length > 0 && view === "search" && !results && (
+        <div className="mt-8 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+          <p className="text-sm text-blue-700">
+            📚 项目中已有 <span className="font-medium">{storedPapers.length}</span> 篇文献，
+            其中 <span className="font-medium">
+              {storedPapers.filter((p) => p.extractionStatus === "done").length}
+            </span> 篇已完成提取
+          </p>
+          <a href="brain" className="text-xs text-blue-600 hover:underline mt-1 inline-block">
+            查看知识面板 →
+          </a>
+        </div>
       )}
     </main>
   );
