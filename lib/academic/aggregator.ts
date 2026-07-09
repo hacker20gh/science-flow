@@ -50,10 +50,11 @@ export async function aggregateSearch(
     maxYear,
     minCitationCount,
     sortBy = "relevance",
+    articleTypes,
   } = options;
 
   const [pubmedResults, s2Results] = await Promise.allSettled([
-    searchPubMed({ query, maxResults, minYear, maxYear }),
+    searchPubMed({ query, maxResults, minYear, maxYear, articleTypes }),
     searchSemanticScholar({
       query,
       maxResults,

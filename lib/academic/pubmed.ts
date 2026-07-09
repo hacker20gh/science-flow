@@ -22,7 +22,20 @@ interface SearchOptions {
   maxResults?: number;
   minYear?: number;
   maxYear?: number;
+  articleTypes?: string[];
 }
+
+/**
+ * PubMed 文献类型映射
+ * SciFlow 类型 ID → PubMed Publication Type
+ */
+const PUBMED_TYPE_MAP: Record<string, string> = {
+  "journal-article": "Journal Article",
+  review: "Review",
+  "meta-analysis": "Meta-Analysis",
+  "clinical-trial": "Clinical Trial",
+  preprint: "Preprint",
+};
 
 /**
  * 搜索 PubMed
@@ -32,18 +45,34 @@ async function searchIds(
   query: string,
   maxResults: number,
   minYear?: number,
-  maxYear?: number
+  maxYear?: number,
+  articleTypes?: string[]
 ): Promise<string[]> {
-  let dateFilter = "";
+  const filters: string[] = [];
+
   if (minYear || maxYear) {
     const from = minYear || "1900";
     const to = maxYear || new Date().getFullYear();
-    dateFilter = ` AND ${from}:${to}[dp]`;
+    filters.push(`${from}:${to}[dp]`);
   }
+
+  // 文献类型过滤：用 OR 组合多种类型
+  if (articleTypes && articleTypes.length > 0) {
+    const pubmedTypes = articleTypes
+      .map((t) => PUBMED_TYPE_MAP[t])
+      .filter(Boolean);
+    if (pubmedTypes.length > 0) {
+      filters.push(pubmedTypes.map((t) => `"${t}"[pt]`).join(" OR "));
+    }
+  }
+
+  const fullQuery = filters.length > 0
+    ? `${query} AND (${filters.join(" AND ")})`
+    : query;
 
   const params = new URLSearchParams({
     db: "pubmed",
-    term: query + dateFilter,
+    term: fullQuery,
     retmax: String(maxResults),
     retmode: "json",
     sort: "relevance",
@@ -158,10 +187,10 @@ function cleanXmlText(text: string): string {
  * 主搜索函数：搜索 + 获取详情
  */
 export async function searchPubMed(options: SearchOptions): Promise<PubMedPaper[]> {
-  const { query, maxResults = 20, minYear, maxYear } = options;
+  const { query, maxResults = 20, minYear, maxYear, articleTypes } = options;
 
   // 速率控制：PubMed 限制 3 req/s（无 API Key）
-  const pmids = await searchIds(query, maxResults, minYear, maxYear);
+  const pmids = await searchIds(query, maxResults, minYear, maxYear, articleTypes);
   if (pmids.length === 0) return [];
 
   await sleep(350); // 速率限制

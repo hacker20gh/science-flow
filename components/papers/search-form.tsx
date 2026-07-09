@@ -18,10 +18,11 @@ export interface SearchOptions {
 }
 
 const ARTICLE_TYPES = [
-  { id: "journal-article", label: "研究论文" },
-  { id: "review", label: "综述" },
-  { id: "case-reports", label: "病例报告" },
-  { id: "editorial", label: "社论" },
+  { id: "journal-article", label: "研究论文", desc: "原创实验研究" },
+  { id: "review", label: "综述", desc: "领域全景梳理" },
+  { id: "meta-analysis", label: "Meta 分析", desc: "多项研究汇总分析" },
+  { id: "clinical-trial", label: "临床试验", desc: "RCT / 临床研究" },
+  { id: "preprint", label: "预印本", desc: "未经同行评审" },
 ];
 
 const YEAR_OPTIONS = [
