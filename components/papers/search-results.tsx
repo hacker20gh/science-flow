@@ -120,13 +120,13 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
                   <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                     {/* 年份 */}
                     {paper.year > 0 && (
-                      <span className="text-xs px-1.5 py-0.5 bg-gray-50 text-gray-600 rounded">
+                      <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">
                         {paper.year}
                       </span>
                     )}
 
                     {/* 文献类型 */}
-                    {paper.articleType && paper.articleType !== "研究论文" && (
+                    {paper.articleType && (
                       <span className="text-xs px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded">
                         {paper.articleType}
                       </span>
@@ -139,8 +139,8 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
                           paper.citationCount >= 100
                             ? "bg-amber-100 text-amber-800"
                             : paper.citationCount >= 20
-                              ? "bg-gray-100 text-gray-700"
-                              : "text-gray-400"
+                              ? "bg-blue-50 text-blue-600"
+                              : "bg-gray-100 text-gray-500"
                         }`}
                       >
                         引用 {paper.citationCount}
@@ -159,8 +159,8 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
                         OA（待获取）
                       </span>
                     ) : (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-50 text-gray-500 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300 inline-block" />
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
                         仅摘要
                       </span>
                     )}
