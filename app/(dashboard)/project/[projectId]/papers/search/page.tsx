@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SearchForm } from "@/components/papers/search-form";
+import { SearchForm, type SearchOptions } from "@/components/papers/search-form";
 import { SearchResults, type Paper } from "@/components/papers/search-results";
 
 interface SearchResponse {
@@ -15,10 +15,7 @@ export default function ProjectPaperSearchPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSearch(
-    query: string,
-    options: { maxResults: number; minYear: number | null; minCitationCount: number | null }
-  ) {
+  async function handleSearch(query: string, options: SearchOptions) {
     setIsLoading(true);
     setError(null);
     setResults(null);
@@ -45,7 +42,6 @@ export default function ProjectPaperSearchPage() {
   }
 
   function handleSelect(papers: Paper[]) {
-    // TODO: 保存到项目 + 发送到 LLM 提取
     console.log("Selected papers for project:", papers);
     alert(`已选择 ${papers.length} 篇文献，后续将接入 LLM 提取功能`);
   }
@@ -75,8 +71,9 @@ export default function ProjectPaperSearchPage() {
       {results && (
         <div className="mt-6">
           <div className="text-xs text-gray-400 mb-4">
-            PubMed: {results.sources.pubmed} 篇 · Semantic Scholar: {results.sources.semanticScholar} 篇
-            · 合计 {results.total} 篇（已去重）
+            PubMed: {results.sources.pubmed} 篇 · Semantic Scholar:{" "}
+            {results.sources.semanticScholar} 篇 · 合计 {results.total}{" "}
+            篇（已去重）
           </div>
           <SearchResults papers={results.papers} onSelect={handleSelect} />
         </div>

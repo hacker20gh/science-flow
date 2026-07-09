@@ -26,35 +26,27 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   function toggle(paper: Paper) {
-    const key = paper.doi || paper.pmid || paper.title;
+    const key = paperKey(paper);
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
 
   function selectAll() {
-    setSelected(new Set(papers.map((p) => p.doi || p.pmid || p.title)));
+    setSelected(new Set(papers.map(paperKey)));
   }
 
   function handleConfirm() {
-    const selectedPapers = papers.filter((p) => {
-      const key = p.doi || p.pmid || p.title;
-      return selected.has(key);
-    });
-    onSelect(selectedPapers);
+    onSelect(papers.filter((p) => selected.has(paperKey(p))));
   }
 
   if (papers.length === 0) return null;
 
   return (
     <div className="space-y-4">
-      {/* 操作栏 */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-500">
           找到 {papers.length} 篇文献，已选 {selected.size} 篇
@@ -76,10 +68,9 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
         </div>
       </div>
 
-      {/* 文献列表 */}
       <div className="space-y-3">
         {papers.map((paper) => {
-          const key = paper.doi || paper.pmid || paper.title;
+          const key = paperKey(paper);
           const isSelected = selected.has(key);
 
           return (
@@ -93,54 +84,68 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
               }`}
             >
               <div className="flex items-start gap-3">
-                {/* Checkbox */}
                 <input
                   type="checkbox"
                   checked={isSelected}
                   onChange={() => toggle(paper)}
                   className="mt-1"
                 />
-
-                {/* Content */}
                 <div className="flex-1 min-w-0">
                   <h3 className="font-medium text-sm leading-5">
                     {paper.title}
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
                     {paper.authors.slice(0, 3).join(", ")}
-                    {paper.authors.length > 3 ? ` 等 ${paper.authors.length} 位` : ""}
+                    {paper.authors.length > 3
+                      ? ` 等 ${paper.authors.length} 位`
+                      : ""}
                     {" · "}
                     {paper.journal}
                     {" · "}
                     {paper.year}
                   </p>
 
-                  {/* TLDR 或摘要截断 */}
                   {paper.tldr && (
                     <p className="text-xs text-blue-600 mt-2">
                       💡 {paper.tldr}
                     </p>
                   )}
 
-                  {/* 标签 */}
+                  {paper.abstract && (
+                    <p className="text-xs text-gray-400 mt-1 line-clamp-2">
+                      {paper.abstract}
+                    </p>
+                  )}
+
                   <div className="flex gap-2 mt-2 flex-wrap">
                     {paper.citationCount > 0 && (
-                      <span className="text-xs px-2 py-0.5 bg-gray-100 rounded">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded ${
+                          paper.citationCount >= 100
+                            ? "bg-amber-100 text-amber-800 font-medium"
+                            : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
                         引用 {paper.citationCount}
                       </span>
                     )}
-                    {paper.isOpenAccess && (
-                      <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">
-                        Open Access
+                    {paper.isOpenAccess && paper.oaPdfUrl && (
+                      <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded font-medium">
+                        ✅ OA 全文可提取
                       </span>
                     )}
-                    {!paper.isOpenAccess && !paper.oaPdfUrl && (
-                      <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">
-                        付费 · 仅摘要提取
+                    {paper.isOpenAccess && !paper.oaPdfUrl && (
+                      <span className="text-xs px-2 py-0.5 bg-green-50 text-green-600 rounded">
+                        Open Access（链接待获取）
+                      </span>
+                    )}
+                    {!paper.isOpenAccess && (
+                      <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded">
+                        📎 仅摘要（可上传 PDF 补充）
                       </span>
                     )}
                     {paper.pmid && (
-                      <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                      <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
                         PubMed
                       </span>
                     )}
@@ -153,4 +158,8 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
       </div>
     </div>
   );
+}
+
+function paperKey(paper: Paper): string {
+  return paper.doi || paper.pmid || paper.title;
 }
