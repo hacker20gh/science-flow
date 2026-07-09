@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aggregateSearch, enrichWithOa } from "@/lib/academic/aggregator";
+import { preprocessQuery } from "@/lib/llm/query-preprocessor";
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,8 +23,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 1. LLM 预处理：自然语言 → 优化的英文搜索查询
+    const processed = await preprocessQuery(query);
+
+    // 2. 用优化后的查询搜学术数据库
     const papers = await aggregateSearch({
-      query,
+      query: processed.optimizedQuery,
       maxResults,
       minYear: minYear ? Number(minYear) : undefined,
       maxYear: maxYear ? Number(maxYear) : undefined,
@@ -32,9 +37,10 @@ export async function POST(req: NextRequest) {
       sortBy,
     });
 
+    // 3. 补充 OA 信息
     const enriched = await enrichWithOa(papers);
 
-    // OA 排序：如果有 onlyOpenAccess 偏好，把有 OA 的排前面
+    // 4. OA 偏好排序
     if (onlyOpenAccess) {
       enriched.sort((a, b) => (b.oaPdfUrl ? 1 : 0) - (a.oaPdfUrl ? 1 : 0));
     }
@@ -42,6 +48,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       total: enriched.length,
       papers: enriched,
+      queryInfo: {
+        original: query,
+        optimized: processed.optimizedQuery,
+        meshTerms: processed.meshTerms,
+        intent: processed.searchIntent,
+        refinements: processed.suggestedRefinements,
+      },
       sources: {
         pubmed: enriched.filter((p) => p.sources.includes("pubmed")).length,
         semanticScholar: enriched.filter((p) =>
