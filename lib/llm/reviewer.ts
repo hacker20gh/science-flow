@@ -1,99 +1,98 @@
 /**
  * 审稿人模拟器
- *
- * AI 模拟 3 位审稿人审阅论文草稿
- * 每位审稿人从不同角度审查
  */
 
-import { z } from "zod";
 import { getLLMClient, MODELS } from "./client";
-import { zodResponseFormat } from "openai/helpers/zod";
 
-// ===== Schema =====
+export interface ReviewerComment {
+  section: string;
+  severity: "major" | "minor" | "suggestion";
+  category: string;
+  comment: string;
+  suggested_fix: string;
+}
 
-export const ReviewerCommentSchema = z.object({
-  section: z.string().describe("对应论文章节"),
-  severity: z.enum(["major", "minor", "suggestion"]),
-  category: z.string().describe("类别：statistical, logical, methodological, writing, clarity"),
-  comment: z.string().describe("具体的审稿意见"),
-  suggested_fix: z.string().describe("建议的修改方案"),
-});
+export interface Reviewer {
+  reviewer_id: string;
+  persona: string;
+  overall_assessment: "accept" | "minor_revision" | "major_revision" | "reject";
+  summary: string;
+  comments: ReviewerComment[];
+  score: number;
+}
 
-export const ReviewerSchema = z.object({
-  reviewer_id: z.string(),
-  persona: z.string().describe("审稿人身份描述"),
-  overall_assessment: z.enum(["accept", "minor_revision", "major_revision", "reject"]),
-  summary: z.string().describe("总体评价（2-3 句）"),
-  comments: z.array(ReviewerCommentSchema),
-  score: z.number().min(1).max(10).describe("1-10 分"),
-});
+export interface ReviewSimulation {
+  reviewers: Reviewer[];
+  overall_verdict: string;
+  priority_fixes: string[];
+}
 
-export const ReviewSimulationSchema = z.object({
-  reviewers: z.array(ReviewerSchema).length(3),
-  overall_verdict: z.string().describe("综合三位审稿人的最终判断"),
-  priority_fixes: z.array(z.string()).describe("优先修改建议（最影响接收的问题）"),
-});
-
-export type ReviewSimulation = z.infer<typeof ReviewSimulationSchema>;
-
-// ===== Prompt =====
-
-const REVIEW_PROMPT = `You are simulating 3 peer reviewers for a biomedical research paper.
-
-Each reviewer has a different focus:
-- Reviewer 1: Methods expert - focuses on experimental design, statistical rigor, reproducibility
-- Reviewer 2: Domain expert - focuses on novelty, significance, biological interpretation
-- Reviewer 3: Writing & clarity expert - focuses on logical flow, clarity, proper citations
-
-For each reviewer, provide:
-1. Overall assessment (accept/minor_revision/major_revision/reject)
-2. Specific comments with severity (major/minor/suggestion)
-3. Suggested fixes for each comment
-4. Score (1-10)
-
-Be critical but fair. Focus on issues that would actually affect acceptance.
-
-Severity levels:
-- major: Must fix before publication (wrong statistics, missing controls, logical errors)
-- minor: Should fix (unclear writing, formatting, minor omissions)
-- suggestion: Nice to have (additional experiments, alternative interpretations)`;
-
-// ===== 审稿函数 =====
+const REVIEW_TOOL = {
+  name: "review_manuscript",
+  description: "Simulate 3 peer reviewers reviewing a biomedical manuscript",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      reviewers: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            reviewer_id: { type: "string" as const },
+            persona: { type: "string" as const },
+            overall_assessment: { type: "string" as const, enum: ["accept", "minor_revision", "major_revision", "reject"] },
+            summary: { type: "string" as const },
+            comments: {
+              type: "array" as const,
+              items: {
+                type: "object" as const,
+                properties: {
+                  section: { type: "string" as const },
+                  severity: { type: "string" as const, enum: ["major", "minor", "suggestion"] },
+                  category: { type: "string" as const },
+                  comment: { type: "string" as const },
+                  suggested_fix: { type: "string" as const },
+                },
+                required: ["section", "severity", "category", "comment", "suggested_fix"],
+              },
+            },
+            score: { type: "number" as const },
+          },
+          required: ["reviewer_id", "persona", "overall_assessment", "summary", "comments", "score"],
+        },
+      },
+      overall_verdict: { type: "string" as const },
+      priority_fixes: { type: "array" as const, items: { type: "string" as const } },
+    },
+    required: ["reviewers", "overall_verdict", "priority_fixes"],
+  },
+};
 
 export async function simulateReview(params: {
-  manuscript: {
-    abstract?: string;
-    introduction?: string;
-    methods?: string;
-    results?: string;
-    discussion?: string;
-  };
+  manuscript: { abstract?: string; introduction?: string; methods?: string; results?: string; discussion?: string };
   journal?: string;
 }): Promise<ReviewSimulation> {
   const client = getLLMClient();
-
   const sections = Object.entries(params.manuscript)
     .filter(([, v]) => v)
     .map(([k, v]) => `## ${k}\n${v}`)
     .join("\n\n");
 
-  const context = `## 目标期刊
-${params.journal || "一般性生物医学期刊（IF 5-10）"}
+  const context = `目标期刊: ${params.journal || "一般性生物医学期刊"}\n\n${sections}`;
 
-${sections}`;
-
-  const response = await client.chat.completions.parse({
+  const response = await client.messages.create({
     model: MODELS.analysis,
     max_tokens: 8192,
-    messages: [
-      { role: "system", content: REVIEW_PROMPT },
-      { role: "user", content: `Review this manuscript:\n\n${context}` },
-    ],
-    response_format: zodResponseFormat(ReviewSimulationSchema, "review"),
+    system: "Simulate 3 peer reviewers for a biomedical paper: Reviewer 1 (methods expert), Reviewer 2 (domain expert), Reviewer 3 (writing expert). Be critical but fair. Focus on real issues that would affect acceptance.",
+    tools: [REVIEW_TOOL as any],
+    tool_choice: { type: "tool", name: "review_manuscript" },
+    messages: [{ role: "user", content: `Review this manuscript:\n\n${context}` }],
   });
 
-  const parsed = response.choices[0]?.message?.parsed;
-  if (!parsed) throw new Error("Failed to simulate review");
-
-  return parsed;
+  for (const block of response.content) {
+    if (block.type === "tool_use" && block.name === "review_manuscript") {
+      return block.input as ReviewSimulation;
+    }
+  }
+  throw new Error("Failed to simulate review");
 }

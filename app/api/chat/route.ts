@@ -26,28 +26,24 @@ export async function POST(req: NextRequest) {
   }
 
   const systemPrompt = buildSystemPrompt(projectContext);
-
   const client = getLLMClient();
-
   const encoder = new TextEncoder();
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const completion = await client.chat.completions.create({
+        const response = await client.messages.create({
           model: MODELS.chat,
           max_tokens: 4096,
           stream: true,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages,
-          ],
+          system: systemPrompt,
+          messages,
         });
 
-        for await (const chunk of completion) {
-          const text = chunk.choices[0]?.delta?.content;
-          if (text) {
+        for await (const event of response) {
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: "text", text })}\n\n`)
+              encoder.encode(`data: ${JSON.stringify({ type: "text", text: event.delta.text })}\n\n`)
             );
           }
         }
@@ -58,9 +54,7 @@ export async function POST(req: NextRequest) {
       } catch (error) {
         console.error("Chat error:", error);
         controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "error", message: "AI 服务暂时不可用，请稍后重试" })}\n\n`
-          )
+          encoder.encode(`data: ${JSON.stringify({ type: "error", message: "AI 服务暂时不可用" })}\n\n`)
         );
       }
       controller.close();
@@ -87,20 +81,18 @@ function buildSystemPrompt(ctx?: ChatRequest["projectContext"]): string {
 - 解释统计方法和实验设计概念
 
 规则：
-- 用用户的语言回答（中文问中文答，英文问英文答）
-- 回答要准确、简洁，不要过度发挥
-- 不确定的内容明确说"不确定"，不要编造
-- 当被问到具体实验建议时，引用用户项目中的文献作为依据
+- 用用户的语言回答
+- 回答要准确、简洁
+- 不确定的内容明确说"不确定"
+- 引用用户项目中的文献作为依据
 - 保持科研严谨性`;
 
   if (ctx) {
     prompt += `\n\n## 当前项目：${ctx.name}`;
-
-    if (ctx.papers && ctx.papers.length > 0) {
+    if (ctx.papers?.length > 0) {
       prompt += `\n\n项目中的文献：\n${ctx.papers.map((p) => `- ${p}`).join("\n")}`;
     }
-
-    if (ctx.hypotheses && ctx.hypotheses.length > 0) {
+    if (ctx.hypotheses?.length > 0) {
       prompt += `\n\n当前假设：\n${ctx.hypotheses.map((h) => `- ${h}`).join("\n")}`;
     }
   }
