@@ -2,11 +2,16 @@
 
 import { useMemo } from "react";
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
+import { ProcessAssistant } from "@/components/assistant/process-assistant";
+import { analyzeProjectState } from "@/lib/assistant/process-assistant";
 import { generateMatrix } from "@/lib/matrix/generator";
 import { useProjectStore } from "@/store/project-store";
 import { DEMO_EXTRATIONS } from "@/lib/matrix/demo-data";
+import { useParams } from "next/navigation";
 
 export default function BrainPage() {
+  const params = useParams();
+  const projectId = params.projectId as string;
   const { papers, matrix: storeMatrix } = useProjectStore();
 
   // 从 store 读取真实数据，如果没有则用 demo 数据
@@ -68,6 +73,19 @@ export default function BrainPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
           📋 当前显示的是示例数据。搜索文献并提取后，真实数据会自动替换。
         </div>
+      )}
+
+      {/* 过程助手 */}
+      {!useDemo && (
+        <ProcessAssistant
+          cards={analyzeProjectState({
+            papers,
+            matrix: storeMatrix,
+            hasExperiments: extractedPapers.length > 0,
+            currentPath: `/project/${projectId}/brain`,
+          })}
+          basePath={`/project/${projectId}`}
+        />
       )}
 
       {/* 机制矩阵 */}

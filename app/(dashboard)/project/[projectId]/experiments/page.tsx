@@ -1,11 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { useParams } from "next/navigation";
 import { ExperimentDesignCard } from "@/components/experiment/design-card";
+import { ProcessAssistant } from "@/components/assistant/process-assistant";
+import { analyzeProjectState } from "@/lib/assistant/process-assistant";
 import { useProjectStore } from "@/store/project-store";
 import type { ExperimentDesign } from "@/lib/llm/experiment-design";
 
 export default function ExperimentsPage() {
+  const params = useParams();
+  const projectId = params.projectId as string;
   const { papers, matrix } = useProjectStore();
 
   const [view, setView] = useState<"input" | "generating" | "result">("input");
@@ -77,6 +82,17 @@ export default function ExperimentsPage() {
       <p className="text-gray-500 mb-6 text-sm">
         基于机制矩阵和假设，AI 帮你设计实验方案
       </p>
+
+      {/* 过程助手 */}
+      <ProcessAssistant
+        cards={analyzeProjectState({
+          papers,
+          matrix,
+          hasExperiments: extractedPapers.length > 0,
+          currentPath: `/project/${projectId}/experiments`,
+        })}
+        basePath={`/project/${projectId}`}
+      />
 
       {/* 输入表单 */}
       {view === "input" && (
