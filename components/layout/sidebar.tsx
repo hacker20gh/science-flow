@@ -9,6 +9,7 @@ interface SidebarProps {
 
 const globalNav = [
   { label: "我的项目", href: "/", icon: "📁" },
+  { label: "设置", href: "/settings", icon: "⚙️" },
 ];
 
 function ProjectNav({ projectId }: { projectId: string }) {
