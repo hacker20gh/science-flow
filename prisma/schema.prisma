@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== 用户 =====
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  avatar    String?
+  projects  Project[]
+  createdAt DateTime @default(now())
+}
+
+// ===== 项目 =====
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  papers       Paper[]
+  experiments  Experiment[]
+  hypotheses   Hypothesis[]
+  timeline     TimelineEvent[]
+  manuscripts  Manuscript[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===== 文献 =====
+
+model Paper {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+
+  doi          String?  @unique
+  pmid         String?
+  title        String
+  authors      String[]
+  journal      String?
+  year         Int?
+  impactFactor Float?
+  abstract     String?
+  fullText     String?
+
+  extractions Extraction[]
+
+  source String? // pubmed, semantic_scholar, user_upload
+  oaUrl  String? // Open Access URL
+
+  createdAt DateTime @default(now())
+}
+
+// ===== 文献提取结果 =====
+
+model Extraction {
+  id      String @id @default(cuid())
+  paperId String
+  paper   Paper  @relation(fields: [paperId], references: [id])
+
+  drugName     String?  // 药物/干预名称
+  drugConc     String?  // 药物浓度
+  cellLine     String?  // 细胞系
+  pathway      String?  // 信号通路
+  pathwayDir   String?  // up, down, no_change
+  phenotype    String?  // 表型
+  phenotypeDir String?  // up, down, no_change
+  method       String?  // 实验方法
+  conclusion   String?  // 关键结论
+  rawText      String?  // 原文片段（用于溯源）
+
+  confidence Float?    // LLM 提取置信度 0-1
+  verified   Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+}
+
+// ===== 假设 =====
+
+model Hypothesis {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  statement  String   // 假设陈述
+  status     String   // pending, testing, supported, refused, revised
+  evidence   Json?    // 支持/反对证据
+  basedOn    String[] // 基于哪些文献/实验
+
+  experiments Experiment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ===== 实验 =====
+
+model Experiment {
+  id           String    @id @default(cuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id])
+  hypothesisId String?
+  hypothesis   Hypothesis? @relation(fields: [hypothesisId], references: [id])
+
+  name     String // 实验名称
+  type     String // western_blot, flow_cytometry, qpcr, etc.
+  status   String // designed, running, completed, failed
+  protocol Json   // 结构化 Protocol
+  variables Json  // 自变量、因变量、对照组
+
+  result      Json?     // 分析结果
+  rawData     ExperimentData[]
+
+  troubleshoot Json? // 失败原因和诊断
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ExperimentData {
+  id           String     @id @default(cuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id])
+
+  fileType   String // excel, csv, image
+  fileName   String
+  fileUrl    String // Supabase Storage URL
+  parsedData Json?  // 解析后的结构化数据
+  analysis   Json?  // 统计分析结果
+
+  createdAt DateTime @default(now())
+}
+
+// ===== 时间线事件 =====
+
+model TimelineEvent {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  type       String // literature, hypothesis, experiment_design,
+                    // experiment_fail, experiment_success,
+                    // pivot, manuscript, data_upload
+  title      String
+  content    Json   // 事件详情（结构化）
+  metadata   Json?  // 附加信息
+
+  sortOrder  Int    @default(0)
+  weekNumber Int?
+
+  createdAt DateTime @default(now())
+}
+
+// ===== 论文草稿 =====
+
+model Manuscript {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  journal  String?
+  language String @default("en")
+
+  abstract    String?
+  introduction String?
+  methods     String?
+  results     String?
+  discussion  String?
+  references  Json?
+
+  reviewSimulation Json? // 审稿人模拟
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
