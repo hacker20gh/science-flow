@@ -151,7 +151,7 @@ function fromPubmed(p: PubMedPaper): UnifiedPaper {
     oaPdfUrl: null,
     oaStatus: "unknown",
     tldr: null,
-    articleType: "journal-article",
+    articleType: normalizeArticleType(p.publicationTypes),
     sources: ["pubmed"],
   };
 }
@@ -238,4 +238,32 @@ function mergePaper(target: UnifiedPaper, source: UnifiedPaper): void {
   if (!target.sources.includes(source.sources[0])) {
     target.sources.push(...source.sources);
   }
+}
+
+/**
+ * PubMed 文献类型 → 科研人员易懂的中文标签
+ */
+const ARTICLE_TYPE_MAP: Record<string, string> = {
+  "Journal Article": "研究论文",
+  Review: "综述",
+  "Meta-Analysis": "Meta 分析",
+  "Systematic Review": "系统综述",
+  "Clinical Trial": "临床试验",
+  "Randomized Controlled Trial": "RCT",
+  "Observational Study": "观察性研究",
+  "Case Reports": "病例报告",
+  "Preprint": "预印本",
+  "Editorial": "社论",
+  "Comment": "评论",
+  Letter: "通信",
+};
+
+function normalizeArticleType(pubmedTypes: string[]): string {
+  if (pubmedTypes.length === 0) return "研究论文";
+  // 取第一个匹配的类型（PubMed 通常把最主要的类型放第一个）
+  for (const pt of pubmedTypes) {
+    const mapped = ARTICLE_TYPE_MAP[pt];
+    if (mapped) return mapped;
+  }
+  return "研究论文"; // 默认
 }

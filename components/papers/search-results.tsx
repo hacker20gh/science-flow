@@ -14,6 +14,7 @@ export interface Paper {
   isOpenAccess: boolean;
   oaPdfUrl: string | null;
   tldr: string | null;
+  articleType: string;
   sources: string[];
 }
 
@@ -121,6 +122,13 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
                     {paper.year > 0 && (
                       <span className="text-xs px-1.5 py-0.5 bg-gray-50 text-gray-600 rounded">
                         {paper.year}
+                      </span>
+                    )}
+
+                    {/* 文献类型 */}
+                    {paper.articleType && paper.articleType !== "研究论文" && (
+                      <span className="text-xs px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded">
+                        {paper.articleType}
                       </span>
                     )}
 

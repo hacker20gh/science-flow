@@ -15,6 +15,7 @@ export interface PubMedPaper {
   year: number;
   abstract: string;
   doi: string | null;
+  publicationTypes: string[];
 }
 
 interface SearchOptions {
@@ -139,6 +140,14 @@ function parsePubmedXml(xml: string): PubMedPaper[] {
     }
 
     if (pmid && title) {
+      // 提取 PubMed 文献类型
+      const pubTypes: string[] = [];
+      const typeBlocks = block.split("<PublicationType").slice(1);
+      for (const tb of typeBlocks) {
+        const typeName = tb.match(/>([^<]+)</)?.[1]?.trim();
+        if (typeName) pubTypes.push(typeName);
+      }
+
       papers.push({
         pmid,
         title: cleanXmlText(title),
@@ -147,6 +156,7 @@ function parsePubmedXml(xml: string): PubMedPaper[] {
         year: yearStr ? parseInt(yearStr) : 0,
         abstract: cleanXmlText(abstract || ""),
         doi,
+        publicationTypes: pubTypes,
       });
     }
   }
