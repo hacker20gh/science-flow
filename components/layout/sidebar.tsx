@@ -21,6 +21,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
     { label: "知识面板", href: `${base}/brain`, icon: "🧠" },
     { label: "文献", href: `${base}/papers`, icon: "📖" },
     { label: "实验", href: `${base}/experiments`, icon: "🧪" },
+    { label: "数据", href: `${base}/data`, icon: "📊" },
     { label: "论文", href: `${base}/manuscript`, icon: "📝" },
   ];
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useProjectStore } from "@/store/project-store";
 import type { ManuscriptDraft } from "@/lib/llm/manuscript";
+import type { ReviewSimulation } from "@/lib/llm/reviewer";
 
 const SECTIONS = [
   { id: "abstract", label: "Abstract", icon: "📋", desc: "背景 + 方法 + 结果 + 结论" },
@@ -19,6 +20,8 @@ export default function ManuscriptPage() {
   const [draft, setDraft] = useState<ManuscriptDraft | null>(null);
   const [activeSection, setActiveSection] = useState<string>("abstract");
   const [error, setError] = useState<string | null>(null);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [review, setReview] = useState<ReviewSimulation | null>(null);
 
   const extractedPapers = papers.filter(
     (p) => p.extractionStatus === "done" && p.experiments.length > 0
@@ -88,6 +91,32 @@ export default function ManuscriptPage() {
               </button>
               <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
                 下载 Word
+              </button>
+              <button
+                onClick={async () => {
+                  setIsReviewing(true);
+                  try {
+                    const res = await fetch("/api/manuscript/review", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        manuscript: Object.fromEntries(
+                          Object.entries(draft).map(([k, v]) => [k, v.content])
+                        ),
+                      }),
+                    });
+                    if (!res.ok) throw new Error("审稿失败");
+                    setReview(await res.json());
+                  } catch {
+                    setError("审稿人模拟失败");
+                  } finally {
+                    setIsReviewing(false);
+                  }
+                }}
+                disabled={isReviewing}
+                className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+              >
+                {isReviewing ? "模拟审稿中..." : "🎭 审稿人模拟"}
               </button>
             </>
           )}
@@ -210,6 +239,80 @@ export default function ManuscriptPage() {
               重新生成当前章节
             </button>
           </div>
+        </div>
+      )}
+
+      {/* 审稿人模拟结果 */}
+      {review && (
+        <div className="mt-8 space-y-4">
+          <h2 className="text-lg font-semibold">🎭 审稿人模拟结果</h2>
+
+          {/* 综合判断 */}
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm">
+            <p className="font-medium text-purple-700 mb-1">综合判断</p>
+            <p className="text-purple-600">{review.overall_verdict}</p>
+          </div>
+
+          {/* 优先修改 */}
+          {review.priority_fixes.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
+              <p className="font-medium text-amber-700 mb-1">🎯 优先修改</p>
+              {review.priority_fixes.map((fix, i) => (
+                <p key={i} className="text-amber-600 text-xs">• {fix}</p>
+              ))}
+            </div>
+          )}
+
+          {/* 三位审稿人 */}
+          {review.reviewers.map((r) => (
+            <div key={r.reviewer_id} className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <span className="text-sm font-medium">{r.persona}</span>
+                  <span className="text-xs text-gray-400 ml-2">评分：{r.score}/10</span>
+                </div>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded ${
+                    r.overall_assessment === "accept"
+                      ? "bg-green-100 text-green-700"
+                      : r.overall_assessment === "minor_revision"
+                        ? "bg-blue-100 text-blue-700"
+                        : r.overall_assessment === "major_revision"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {r.overall_assessment === "accept" ? "接收"
+                    : r.overall_assessment === "minor_revision" ? "小修"
+                    : r.overall_assessment === "major_revision" ? "大修" : "拒稿"}
+                </span>
+              </div>
+              <p className="text-xs text-gray-600 mb-3">{r.summary}</p>
+              <div className="space-y-2">
+                {r.comments.map((c, i) => (
+                  <div key={i} className="p-2 bg-gray-50 rounded text-xs">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className={`px-1.5 py-0.5 rounded ${
+                          c.severity === "major"
+                            ? "bg-red-100 text-red-700"
+                            : c.severity === "minor"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {c.severity === "major" ? "主要" : c.severity === "minor" ? "次要" : "建议"}
+                      </span>
+                      <span className="text-gray-500">[{c.section}]</span>
+                      <span className="text-gray-400">{c.category}</span>
+                    </div>
+                    <p className="text-gray-700">{c.comment}</p>
+                    <p className="text-blue-600 mt-1">💡 {c.suggested_fix}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </main>
