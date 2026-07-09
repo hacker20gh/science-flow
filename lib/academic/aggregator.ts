@@ -4,6 +4,7 @@
 
 import { searchPubMed, type PubMedPaper } from "./pubmed";
 import { searchSemanticScholar, type S2Paper } from "./semantic-scholar";
+import { searchOpenAlex, type OpenAlexPaper } from "./openalex";
 import { findOaPdf } from "./unpaywall";
 
 export interface UnifiedPaper {
@@ -53,7 +54,8 @@ export async function aggregateSearch(
     articleTypes,
   } = options;
 
-  const [pubmedResults, s2Results] = await Promise.allSettled([
+  // 并行搜索 3 个数据库
+  const [pubmedResults, s2Results, openalexResults] = await Promise.allSettled([
     searchPubMed({ query, maxResults, minYear, maxYear, articleTypes }),
     searchSemanticScholar({
       query,
@@ -62,16 +64,20 @@ export async function aggregateSearch(
       maxYear,
       minCitationCount,
     }),
+    searchOpenAlex({ query, maxResults, minYear, maxYear }),
   ]);
 
   const pubmedPapers =
     pubmedResults.status === "fulfilled" ? pubmedResults.value : [];
   const s2Papers =
     s2Results.status === "fulfilled" ? s2Results.value : [];
+  const openalexPapers =
+    openalexResults.status === "fulfilled" ? openalexResults.value : [];
 
   const unified: UnifiedPaper[] = [
     ...pubmedPapers.map((p) => fromPubmed(p)),
     ...s2Papers.map((p) => fromS2(p)),
+    ...openalexPapers.map((p) => fromOpenAlex(p)),
   ];
 
   const deduped = deduplicate(unified);
@@ -176,6 +182,29 @@ function fromS2(p: S2Paper): UnifiedPaper {
     tldr: p.tldr,
     articleType: "journal-article",
     sources: ["semantic_scholar"],
+  };
+}
+
+function fromOpenAlex(p: OpenAlexPaper): UnifiedPaper {
+  return {
+    pmid: null,
+    doi: p.doi,
+    s2Id: null,
+    title: p.title,
+    authors: p.authors,
+    journal: p.journal,
+    year: p.year,
+    abstract: p.abstract,
+    citationCount: p.citationCount,
+    influenceScore: null,
+    impactFactor: null,
+    isOpenAccess: p.isOpenAccess,
+    oaUrl: p.oaUrl,
+    oaPdfUrl: p.oaPdfUrl,
+    oaStatus: p.openAccessStatus,
+    tldr: null,
+    articleType: "研究论文",
+    sources: ["openalex"],
   };
 }
 

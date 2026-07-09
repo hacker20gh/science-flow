@@ -60,6 +60,9 @@ export async function POST(req: NextRequest) {
         semanticScholar: enriched.filter((p) =>
           p.sources.includes("semantic_scholar")
         ).length,
+        openAlex: enriched.filter((p) =>
+          p.sources.includes("openalex")
+        ).length,
       },
     });
   } catch (error) {

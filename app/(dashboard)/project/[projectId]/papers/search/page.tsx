@@ -16,7 +16,7 @@ interface SearchResponse {
   total: number;
   papers: Paper[];
   queryInfo: QueryInfo;
-  sources: { pubmed: number; semanticScholar: number };
+  sources: { pubmed: number; semanticScholar: number; openAlex: number };
 }
 
 export default function ProjectPaperSearchPage() {
@@ -109,8 +109,9 @@ export default function ProjectPaperSearchPage() {
       {results && (
         <div className="mt-4">
           <div className="text-xs text-gray-400 mb-4">
-            PubMed: {results.sources.pubmed} 篇 · Semantic Scholar:{" "}
-            {results.sources.semanticScholar} 篇 · 合计 {results.total}{" "}
+            PubMed: {results.sources.pubmed} · Semantic Scholar:{" "}
+            {results.sources.semanticScholar} · OpenAlex:{" "}
+            {results.sources.openAlex} · 合计 {results.total}{" "}
             篇（已去重）
           </div>
           <SearchResults papers={results.papers} onSelect={handleSelect} />
