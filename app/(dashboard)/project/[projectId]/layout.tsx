@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/layout/sidebar";
+import { ProjectShell } from "@/components/layout/project-shell";
 
 export default async function ProjectLayout({
   children,
@@ -12,7 +13,7 @@ export default async function ProjectLayout({
   return (
     <div className="flex h-screen">
       <Sidebar projectId={projectId} />
-      <main className="flex-1 overflow-y-auto bg-gray-50">{children}</main>
+      <ProjectShell projectId={projectId}>{children}</ProjectShell>
     </div>
   );
 }
