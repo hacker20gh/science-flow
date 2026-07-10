@@ -54,7 +54,9 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
   const [yearOption, setYearOption] = useState<number>(5); // 默认最近5年
   const [customYear, setCustomYear] = useState<string>("5");
   const [useCustomYear, setUseCustomYear] = useState(false);
-  const [maxYear, setMaxYear] = useState<string>("");
+  const [startYear, setStartYear] = useState<string>("");
+  const [endYear, setEndYear] = useState<string>("");
+  const [useYearRange, setUseYearRange] = useState(false);
   const [citationOption, setCitationOption] = useState<number | null>(null);
   const [customCitation, setCustomCitation] = useState<string>("");
   const [useCustomCitation, setUseCustomCitation] = useState(false);
@@ -78,16 +80,27 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
     e.preventDefault();
     if (!query.trim()) return;
 
-    const years = useCustomYear ? parseInt(customYear) || 0 : yearOption;
+    let minYear: number | null = null;
+    let maxYearVal: number | null = null;
+
+    if (useYearRange && startYear) {
+      // 精确年份范围模式
+      minYear = parseInt(startYear) || null;
+      maxYearVal = parseInt(endYear) || null;
+    } else {
+      // 最近 N 年模式
+      const years = useCustomYear ? parseInt(customYear) || 0 : yearOption;
+      minYear = years > 0 ? new Date().getFullYear() - years : null;
+    }
+
     const citations = useCustomCitation
       ? parseInt(customCitation) || null
       : citationOption;
-    const minYear = years > 0 ? new Date().getFullYear() - years : null;
 
     onSearch(query, {
       maxResults,
       minYear,
-      maxYear: maxYear ? parseInt(maxYear) || null : null,
+      maxYear: maxYearVal,
       minCitationCount: citations,
       sortBy,
       articleTypes: Array.from(articleTypes),
@@ -216,8 +229,9 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
                     onChange={(e) => {
                       setCustomYear(e.target.value);
                       setUseCustomYear(true);
+                      setUseYearRange(false);
                     }}
-                    onFocus={() => setUseCustomYear(true)}
+                    onFocus={() => { setUseCustomYear(true); setUseYearRange(false); }}
                     min={1}
                     max={50}
                     className="w-16 px-2 py-1 text-xs border border-gray-300 rounded"
@@ -226,11 +240,16 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
                   <span className="text-xs text-gray-500">年内</span>
                 </div>
                 <div className="flex items-center gap-1 mt-2">
-                  <span className="text-xs text-gray-500">或指定</span>
+                  <span className="text-xs text-gray-500">或指定范围</span>
                   <input
                     type="number"
-                    value={maxYear}
-                    onChange={(e) => setMaxYear(e.target.value)}
+                    value={startYear}
+                    onChange={(e) => {
+                      setStartYear(e.target.value);
+                      setUseYearRange(true);
+                      setUseCustomYear(false);
+                    }}
+                    onFocus={() => { setUseYearRange(true); setUseCustomYear(false); }}
                     min={1900}
                     max={new Date().getFullYear()}
                     className="w-20 px-2 py-1 text-xs border border-gray-300 rounded"
@@ -239,12 +258,13 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
                   <span className="text-xs text-gray-500">—</span>
                   <input
                     type="number"
-                    value={customYear}
+                    value={endYear}
                     onChange={(e) => {
-                      setCustomYear(e.target.value);
-                      setUseCustomYear(true);
+                      setEndYear(e.target.value);
+                      setUseYearRange(true);
+                      setUseCustomYear(false);
                     }}
-                    onFocus={() => setUseCustomYear(true)}
+                    onFocus={() => { setUseYearRange(true); setUseCustomYear(false); }}
                     min={1900}
                     max={new Date().getFullYear()}
                     className="w-20 px-2 py-1 text-xs border border-gray-300 rounded"

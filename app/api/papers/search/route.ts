@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
         articleTypes,
         onlyOpenAccess,
       };
-      // 保存结果快照（轻量版：只保留前端渲染需要的字段）
+      // 保存结果快照（轻量版）
       const resultSnapshot = enriched.slice(0, 50).map((p) => ({
         pmid: p.pmid,
         doi: p.doi,
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
         authors: p.authors,
         journal: p.journal,
         year: p.year,
-        abstract: p.abstract?.slice(0, 500) || "", // 摘要截断到 500 字符
+        abstract: p.abstract?.slice(0, 500) || "",
         citationCount: p.citationCount,
         isOpenAccess: p.isOpenAccess,
         oaPdfUrl: p.oaPdfUrl,
@@ -108,13 +108,29 @@ export async function POST(req: NextRequest) {
             sources: allSources,
             maxResults,
             resultCount: enriched.length,
-            searchParams,
-            resultSnapshot,
-          },
+            ...(searchParams && { searchParams }),
+            ...(resultSnapshot && { resultSnapshot }),
+          } as any,
         })
-        .catch((err: unknown) =>
-          console.error("Failed to record search history:", err)
-        );
+        .catch((err: unknown) => {
+          // 字段不存在时静默降级（DB 未迁移）
+          if (err instanceof Error && err.message.includes("column")) {
+            console.warn("[Search] 新字段未在 DB 中，跳过快照保存");
+            // 降级：不保存新字段
+            prisma.searchHistory.create({
+              data: {
+                projectId,
+                query,
+                optimizedQuery: processed.optimizedQuery,
+                sources: allSources,
+                maxResults,
+                resultCount: enriched.length,
+              },
+            }).catch(() => {});
+          } else {
+            console.error("Failed to record search history:", err);
+          }
+        });
     }
 
     const responseData = {
