@@ -9,7 +9,7 @@ import type { TimelineEvent } from "@/lib/timeline/events";
 const DEMO_EVENTS: TimelineEvent[] = [
   {
     id: "demo-1",
-    type: "literature_search",
+    type: "literature",
     title: "搜索文献",
     description: "这是示例数据 — 真实项目中搜索文献后会自动生成事件",
     timestamp: Date.now(),

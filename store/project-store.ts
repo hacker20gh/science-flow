@@ -98,7 +98,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // 自动记录时间线事件
     get().addEvent(
-      "literature_search",
+      "literature",
       `添加了 ${newPapers.length} 篇文献`,
       `搜索并纳入 ${newPapers.length} 篇文献到项目`
     );
@@ -121,7 +121,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (status === "done") {
       const totalExps = experiments?.length || 0;
       get().addEvent(
-        "literature_extract",
+        "literature",
         "完成文献信息提取",
         `从 1 篇文献中提取出 ${totalExps} 个实验数据`
       );

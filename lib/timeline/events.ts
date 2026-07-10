@@ -8,15 +8,15 @@
 // ===== 事件类型 =====
 
 export type TimelineEventType =
-  | "literature_search"
-  | "literature_extract"
-  | "hypothesis_formed"
-  | "experiment_designed"
+  | "literature"
+  | "hypothesis"
+  | "experiment_design"
   | "experiment_completed"
   | "experiment_failed"
   | "pivot"           // 方向转变
   | "matrix_updated"
-  | "manuscript_draft";
+  | "manuscript"
+  | "data_upload";
 
 export interface TimelineEvent {
   id: string;
@@ -52,25 +52,19 @@ export const EVENT_CONFIG: Record<
   TimelineEventType,
   { icon: string; label: string; color: string; bgColor: string }
 > = {
-  literature_search: {
-    icon: "🔍",
-    label: "文献搜索",
+  literature: {
+    icon: "📖",
+    label: "文献操作",
     color: "text-blue-600",
     bgColor: "bg-blue-100",
   },
-  literature_extract: {
-    icon: "📖",
-    label: "文献提取",
-    color: "text-indigo-600",
-    bgColor: "bg-indigo-100",
-  },
-  hypothesis_formed: {
+  hypothesis: {
     icon: "💡",
     label: "假设提出",
     color: "text-amber-600",
     bgColor: "bg-amber-100",
   },
-  experiment_designed: {
+  experiment_design: {
     icon: "🧪",
     label: "实验设计",
     color: "text-green-600",
@@ -100,11 +94,17 @@ export const EVENT_CONFIG: Record<
     color: "text-blue-600",
     bgColor: "bg-blue-100",
   },
-  manuscript_draft: {
+  manuscript: {
     icon: "📝",
-    label: "草稿生成",
+    label: "论文操作",
     color: "text-gray-600",
     bgColor: "bg-gray-100",
+  },
+  data_upload: {
+    icon: "📊",
+    label: "数据上传",
+    color: "text-teal-600",
+    bgColor: "bg-teal-100",
   },
 };
 
@@ -133,13 +133,13 @@ export function getDemoEvents(): TimelineEvent[] {
 
   return [
     createEvent(
-      "literature_search",
+      "literature",
       "搜索文献",
       "搜索 PD-1 耐药机制，找到 30 篇相关文献（PubMed + Semantic Scholar + OpenAlex）",
       { total: 30, query: "PD-1 resistance hepatocellular carcinoma" }
     ),
     createEvent(
-      "literature_extract",
+      "literature",
       "提取文献信息",
       "从 4 篇文献中提取出 5 个实验数据，生成初始机制矩阵",
       { papers: 4, experiments: 5 }
@@ -151,14 +151,14 @@ export function getDemoEvents(): TimelineEvent[] {
       { pathways: 4, phenotypes: 4, conflicts: 1 }
     ),
     createEvent(
-      "hypothesis_formed",
+      "hypothesis",
       "提出假设",
       "sorafenib 通过 NF-κB 通路上调 HCC 细胞中的 PD-L1 表达",
       { hypothesis: "sorafenib 通过 NF-κB 上调 PD-L1" }
     ),
     {
       ...createEvent(
-        "experiment_designed",
+        "experiment_design",
         "设计实验 Exp#1",
         "sorafenib 5μM 处理 Huh7 细胞，检测 NF-κB 和 PD-L1",
         { experiment: "Exp#1", drug: "sorafenib", conc: "5μM", cellLine: "Huh7" }
@@ -176,7 +176,7 @@ export function getDemoEvents(): TimelineEvent[] {
     },
     {
       ...createEvent(
-        "experiment_designed",
+        "experiment_design",
         "重新设计 Exp#2",
         "降低浓度梯度至 1-5μM，增加剂量-效应曲线",
         { experiment: "Exp#2", drug: "sorafenib", conc: "1-5μM" }
@@ -194,7 +194,7 @@ export function getDemoEvents(): TimelineEvent[] {
     },
     {
       ...createEvent(
-        "hypothesis_formed",
+        "hypothesis",
         "修订假设",
         "基于 Exp#2 结果，提出新假设：NF-κB 介导 sorafenib 诱导的 PD-L1 上调",
         { hypothesis: "NF-κB mediates sorafenib-induced PD-L1 upregulation" }
@@ -203,7 +203,7 @@ export function getDemoEvents(): TimelineEvent[] {
     },
     {
       ...createEvent(
-        "experiment_designed",
+        "experiment_design",
         "设计 Exp#3",
         "NF-κB 抑制剂 + sorafenib 联合处理，验证 NF-κB 的作用",
         { experiment: "Exp#3" }
