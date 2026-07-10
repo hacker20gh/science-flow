@@ -1,10 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import { prisma } from "@/lib/db";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: prisma ? PrismaAdapter(prisma) : undefined,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
@@ -34,13 +31,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return null;
         }
 
-        // 有数据库时，查 User 表
+        // 有数据库时，动态导入 Prisma 查 User 表
         try {
+          const { getPrisma } = await import("@/lib/db");
+          const prisma = getPrisma();
+          if (!prisma) return null;
+
           const user = await prisma.user.findUnique({
             where: { email: credentials.email as string },
           });
 
-          // 简单密码验证（生产环境应使用 bcrypt）
           if (user) {
             return {
               id: user.id,
