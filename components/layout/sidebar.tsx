@@ -9,6 +9,8 @@ interface SidebarProps {
 
 const globalNav = [
   { label: "我的项目", href: "/", icon: "📁" },
+  { label: "知识库", href: "/knowledge", icon: "📚" },
+  { label: "实战课", href: "/courses", icon: "🎓" },
   { label: "设置", href: "/settings", icon: "⚙️" },
 ];
 
