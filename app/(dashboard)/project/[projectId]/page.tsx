@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { BookOpen, FlaskConical, Lightbulb, FileText, Search, Brain, TestTube } from "lucide-react";
 
 interface ProjectData {
   id: string;
@@ -96,21 +97,41 @@ export default function ProjectPage({
 
       {/* Quick stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-xl border border-gray-200">
-          <div className="text-2xl font-bold text-blue-600">{project.papers.length}</div>
-          <div className="text-sm text-gray-500">篇文献</div>
+        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+            <BookOpen size={20} className="text-blue-600" />
+          </div>
+          <div>
+            <div className="text-xl font-bold text-blue-600">{project.papers.length}</div>
+            <div className="text-xs text-gray-500">篇文献</div>
+          </div>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200">
-          <div className="text-2xl font-bold text-green-600">{project.experiments.length}</div>
-          <div className="text-sm text-gray-500">个实验</div>
+        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center">
+            <FlaskConical size={20} className="text-green-600" />
+          </div>
+          <div>
+            <div className="text-xl font-bold text-green-600">{project.experiments.length}</div>
+            <div className="text-xs text-gray-500">个实验</div>
+          </div>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200">
-          <div className="text-2xl font-bold text-amber-600">{project.hypotheses.length}</div>
-          <div className="text-sm text-gray-500">个假设</div>
+        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
+            <Lightbulb size={20} className="text-amber-600" />
+          </div>
+          <div>
+            <div className="text-xl font-bold text-amber-600">{project.hypotheses.length}</div>
+            <div className="text-xs text-gray-500">个假设</div>
+          </div>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200">
-          <div className="text-2xl font-bold text-purple-600">{project.manuscripts.length}</div>
-          <div className="text-sm text-gray-500">篇草稿</div>
+        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
+            <FileText size={20} className="text-purple-600" />
+          </div>
+          <div>
+            <div className="text-xl font-bold text-purple-600">{project.manuscripts.length}</div>
+            <div className="text-xs text-gray-500">篇草稿</div>
+          </div>
         </div>
       </div>
 
@@ -118,27 +139,33 @@ export default function ProjectPage({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Link
           href={`/project/${projectId}/papers`}
-          className="block p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all"
+          className="group block p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all"
         >
-          <div className="text-2xl mb-2">📖</div>
+          <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
+            <Search size={20} className="text-blue-600" />
+          </div>
           <h3 className="font-semibold">文献管理</h3>
           <p className="text-sm text-gray-500 mt-1">搜索、添加和提取文献信息</p>
         </Link>
 
         <Link
           href={`/project/${projectId}/brain`}
-          className="block p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all"
+          className="group block p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all"
         >
-          <div className="text-2xl mb-2">🧠</div>
+          <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center mb-3 group-hover:bg-purple-100 transition-colors">
+            <Brain size={20} className="text-purple-600" />
+          </div>
           <h3 className="font-semibold">知识面板</h3>
           <p className="text-sm text-gray-500 mt-1">查看机制矩阵、假设状态、待办清单</p>
         </Link>
 
         <Link
           href={`/project/${projectId}/experiments`}
-          className="block p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all"
+          className="group block p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all"
         >
-          <div className="text-2xl mb-2">🧪</div>
+          <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center mb-3 group-hover:bg-green-100 transition-colors">
+            <TestTube size={20} className="text-green-600" />
+          </div>
           <h3 className="font-semibold">设计实验</h3>
           <p className="text-sm text-gray-500 mt-1">基于文献发现设计验证实验</p>
         </Link>
