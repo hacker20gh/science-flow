@@ -3,6 +3,7 @@
  */
 
 import type { MatrixData } from "@/lib/matrix/generator";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle } from "docx";
 
 // ===== CSV 导出 =====
 
@@ -80,4 +81,112 @@ export function exportManuscriptToLatex(sections: Record<string, string | undefi
 
   latex += `\\end{document}\n`;
   return latex;
+}
+
+// ===== 机制矩阵 LaTeX 导出 =====
+
+export function exportMatrixToLatex(matrix: MatrixData): string {
+  const colCount = matrix.columns.length + 2; // +2 for 文献 and 年份
+  const colSpec = "l l " + matrix.columns.map(() => "c").join(" ");
+
+  let latex = `\\documentclass[10pt]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage{booktabs}
+\\usepackage{multirow}
+\\usepackage[margin=0.5in]{geometry}
+\\usepackage{longtable}
+
+\\begin{document}
+
+\\begin{longtable}{${colSpec}}
+\\toprule
+\\textbf{文献} & \\textbf{年份} & ${matrix.columns.map((c) => `\\textbf{${c.label.replace(/&/g, "\\&")}}`).join(" & ")} \\\\
+\\midrule
+\\endhead
+`;
+
+  for (const row of matrix.rows) {
+    const cells = [
+      row.paperTitle.replace(/&/g, "\\&").replace(/_/g, "\\_").slice(0, 40),
+      row.year?.toString() || "",
+      ...matrix.columns.map((col) => {
+        const cell = row.cells[col.id];
+        if (!cell) return "—";
+        const dir = cell.direction === "up" ? "↑" : cell.direction === "down" ? "↓" : "—";
+        return dir;
+      }),
+    ];
+    latex += cells.join(" & ") + " \\\\\n";
+  }
+
+  latex += `\\bottomrule
+\\end{longtable}
+
+\\end{document}\n`;
+
+  return latex;
+}
+
+// ===== Word 导出 =====
+
+export async function exportManuscriptToWord(sections: Record<string, string | undefined>): Promise<Blob> {
+  const sectionOrder = ["abstract", "introduction", "methods", "results", "discussion"];
+  const sectionTitles: Record<string, string> = {
+    abstract: "Abstract",
+    introduction: "Introduction",
+    methods: "Methods",
+    results: "Results",
+    discussion: "Discussion",
+  };
+
+  const children: Paragraph[] = [];
+
+  // Title
+  children.push(
+    new Paragraph({
+      text: "Research Article",
+      heading: HeadingLevel.TITLE,
+      alignment: "center",
+    })
+  );
+
+  // Author placeholder
+  children.push(
+    new Paragraph({
+      text: "Author Name",
+      alignment: "center",
+      spacing: { after: 400 },
+    })
+  );
+
+  // Sections
+  for (const section of sectionOrder) {
+    const content = sections[section];
+    if (content) {
+      children.push(
+        new Paragraph({
+          text: sectionTitles[section],
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 300, after: 150 },
+        })
+      );
+
+      // Split content into paragraphs
+      const paragraphs = content.split("\n\n").filter((p) => p.trim());
+      for (const para of paragraphs) {
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: para.trim(), size: 24 })], // 12pt = 24 half-points
+            spacing: { after: 120 },
+          })
+        );
+      }
+    }
+  }
+
+  const doc = new Document({
+    sections: [{ children }],
+  });
+
+  return Packer.toBlob(doc);
 }

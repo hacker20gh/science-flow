@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useProjectStore } from "@/store/project-store";
-import { exportManuscriptToLatex, downloadFile } from "@/lib/export";
+import { exportManuscriptToLatex, exportManuscriptToWord, downloadFile } from "@/lib/export";
 import type { ManuscriptDraft } from "@/lib/llm/manuscript";
 import type { ReviewSimulation } from "@/lib/llm/reviewer";
 
@@ -117,7 +117,23 @@ export default function ManuscriptPage() {
               >
                 下载 LaTeX
               </button>
-              <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 opacity-50 cursor-not-allowed">
+              <button
+                onClick={async () => {
+                  const sections: Record<string, string | undefined> = {};
+                  for (const s of SECTIONS) {
+                    const data = draft[s.id as keyof ManuscriptDraft];
+                    sections[s.id] = data?.content;
+                  }
+                  const blob = await exportManuscriptToWord(sections);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "manuscript.docx";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+              >
                 下载 Word
               </button>
               <button

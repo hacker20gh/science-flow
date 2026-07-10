@@ -8,7 +8,7 @@ import { generateMatrix } from "@/lib/matrix/generator";
 import { useProjectStore } from "@/store/project-store";
 import { DEMO_EXTRATIONS } from "@/lib/matrix/demo-data";
 import { useParams } from "next/navigation";
-import { exportMatrixToCsv, downloadFile } from "@/lib/export";
+import { exportMatrixToCsv, exportMatrixToLatex, downloadFile } from "@/lib/export";
 
 export default function BrainPage() {
   const params = useParams();
@@ -103,7 +103,13 @@ export default function BrainPage() {
             >
               导出 CSV
             </button>
-            <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 opacity-50 cursor-not-allowed">
+            <button
+              onClick={() => {
+                const latex = exportMatrixToLatex(matrixData);
+                downloadFile(latex, "mechanism-matrix.tex", "application/x-latex");
+              }}
+              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+            >
               导出 LaTeX
             </button>
           </div>

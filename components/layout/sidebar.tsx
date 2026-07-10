@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import {
@@ -14,9 +15,10 @@ import {
   FlaskConical,
   BarChart3,
   FileText,
-  Plus,
   User,
   LogOut,
+  Menu,
+  X,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -30,7 +32,7 @@ const globalNav = [
   { label: "设置", href: "/settings", icon: Settings },
 ];
 
-function ProjectNav({ projectId }: { projectId: string }) {
+function ProjectNav({ projectId, onNavigate }: { projectId: string; onNavigate?: () => void }) {
   const pathname = usePathname();
   const base = `/project/${projectId}`;
 
@@ -56,6 +58,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
           <Link
             key={item.href}
             href={item.href}
+            onClick={onNavigate}
             className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all ${
               isActive
                 ? "bg-blue-50 text-blue-700 font-medium"
@@ -74,12 +77,13 @@ function ProjectNav({ projectId }: { projectId: string }) {
 export function Sidebar({ projectId }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  return (
-    <aside className="w-60 bg-white border-r border-gray-200 h-full flex flex-col shrink-0">
+  const sidebarContent = (
+    <>
       {/* Logo */}
       <div className="p-4 border-b border-gray-200">
-        <Link href="/" className="flex items-center gap-2 text-lg font-bold text-primary">
+        <Link href="/" className="flex items-center gap-2 text-lg font-bold text-primary" onClick={() => setMobileOpen(false)}>
           <FlaskConical size={22} strokeWidth={2} />
           SciFlow AI
         </Link>
@@ -88,7 +92,6 @@ export function Sidebar({ projectId }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-        {/* Global nav */}
         {globalNav.map((item) => {
           const isActive =
             item.href === "/"
@@ -99,6 +102,7 @@ export function Sidebar({ projectId }: SidebarProps) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => setMobileOpen(false)}
               className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all ${
                 isActive
                   ? "bg-blue-50 text-blue-700 font-medium"
@@ -111,14 +115,13 @@ export function Sidebar({ projectId }: SidebarProps) {
           );
         })}
 
-        {/* Divider when in project */}
         {projectId && (
           <>
             <div className="my-2 border-t border-gray-100" />
             <div className="px-3 py-1 text-xs text-gray-400 font-medium uppercase tracking-wider">
               当前项目
             </div>
-            <ProjectNav projectId={projectId} />
+            <ProjectNav projectId={projectId} onNavigate={() => setMobileOpen(false)} />
           </>
         )}
       </nav>
@@ -143,6 +146,46 @@ export function Sidebar({ projectId }: SidebarProps) {
           </button>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile hamburger */}
+      <button
+        onClick={() => setMobileOpen(true)}
+        className="fixed top-3 left-3 z-50 p-2 bg-white border border-gray-200 rounded-lg shadow-sm md:hidden"
+      >
+        <Menu size={20} />
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-40 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      {/* Mobile sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-60 bg-white border-r border-gray-200 flex flex-col transform transition-transform md:hidden ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="absolute top-3 right-3 p-1 text-gray-400 hover:text-gray-600"
+        >
+          <X size={18} />
+        </button>
+        {sidebarContent}
+      </aside>
+
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex w-60 bg-white border-r border-gray-200 h-full flex-col shrink-0">
+        {sidebarContent}
+      </aside>
+    </>
   );
 }
