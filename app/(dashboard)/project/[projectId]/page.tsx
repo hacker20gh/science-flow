@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { BookOpen, FlaskConical, Lightbulb, FileText, Search, Brain, TestTube, Pencil } from "lucide-react";
 import { ProjectHealthCheck } from "@/components/project/health-check";
 import { WorkflowProgress } from "@/components/project/workflow-progress";
+import { toast } from "sonner";
 
 interface ProjectData {
   id: string;
@@ -74,10 +75,10 @@ export default function ProjectPage({
         setProject((prev) => (prev ? { ...prev, name: data.project.name, description: data.project.description } : prev));
         setShowEdit(false);
       } else {
-        alert(data.error || "保存失败");
+        toast.error("保存失败", { description: data.error || "无法保存项目信息" });
       }
     } catch {
-      alert("保存失败");
+      toast.error("保存失败", { description: "网络错误，请检查连接后重试" });
     } finally {
       setSaving(false);
     }
