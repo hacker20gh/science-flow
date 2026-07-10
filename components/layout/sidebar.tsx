@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import {
   FolderOpen,
   BookOpen,
@@ -15,6 +16,7 @@ import {
   FileText,
   Plus,
   User,
+  LogOut,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -71,6 +73,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
 
 export function Sidebar({ projectId }: SidebarProps) {
   const pathname = usePathname();
+  const { data: session } = useSession();
 
   return (
     <aside className="w-60 bg-white border-r border-gray-200 h-full flex flex-col shrink-0">
@@ -122,11 +125,22 @@ export function Sidebar({ projectId }: SidebarProps) {
 
       {/* User */}
       <div className="p-4 border-t border-gray-200">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            <User size={16} className="text-primary" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+              <User size={16} className="text-primary" />
+            </div>
+            <div className="text-sm truncate text-gray-700">
+              {session?.user?.name || session?.user?.email?.split("@")[0] || "用户"}
+            </div>
           </div>
-          <div className="text-sm truncate text-gray-700">用户</div>
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors"
+            title="退出登录"
+          >
+            <LogOut size={14} />
+          </button>
         </div>
       </div>
     </aside>

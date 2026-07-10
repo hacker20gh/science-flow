@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { signIn } from "next-auth/react";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -15,21 +15,15 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    // 数据库未配置时直接跳转
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      window.location.href = "/";
-      return;
-    }
-
     try {
-      const supabase = createClient();
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      const result = await signIn("credentials", {
         email,
         password,
+        redirect: false,
       });
 
-      if (authError) {
-        setError(authError.message);
+      if (result?.error) {
+        setError("邮箱或密码错误");
       } else {
         window.location.href = "/";
       }
@@ -94,6 +88,13 @@ export default function LoginPage() {
               {loading ? "登录中..." : "登录"}
             </button>
           </form>
+
+          {/* Demo login hint */}
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700">
+            <p className="font-medium mb-1">演示账号（无需数据库）：</p>
+            <p>邮箱：demo@sciflow.ai</p>
+            <p>密码：demo123</p>
+          </div>
 
           <div className="mt-4 text-center text-sm text-gray-500">
             还没有账号？{" "}
