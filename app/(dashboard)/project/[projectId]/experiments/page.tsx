@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { useParams } from "next/navigation";
 import { ExperimentDesignCard } from "@/components/experiment/design-card";
 import { ProcessAssistant } from "@/components/assistant/process-assistant";
@@ -210,7 +211,7 @@ export default function ExperimentsPage() {
                   variables: design.variables,
                 }),
               }).catch(() => {});
-              alert("实验方案已保存！");
+              toast.success("实验方案已保存", { description: "可在实验列表中查看" });
             }}
           />
         </div>
