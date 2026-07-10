@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { toast } from "sonner";
 import { useParams, useRouter } from "next/navigation";
 import { SearchForm, type SearchOptions } from "@/components/papers/search-form";
 import { SearchResults, type Paper } from "@/components/papers/search-results";
@@ -296,7 +297,9 @@ export default function ProjectPaperSearchPage() {
   }
 
   function handleExtractionConfirm() {
-    alert("提取结果已保存！前往知识面板查看机制矩阵");
+    toast.success("提取结果已保存", {
+      description: "前往知识面板查看机制矩阵",
+    });
   }
 
   const totalExperiments = extractionDetails.reduce((sum, d) => sum + d.experiments, 0);
