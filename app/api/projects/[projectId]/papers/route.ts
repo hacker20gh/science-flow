@@ -78,3 +78,41 @@ export async function POST(
     return Response.json({ error: "添加文献失败" }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+
+  const { projectId } = await params;
+  const paperId = req.nextUrl.searchParams.get("id");
+
+  if (!paperId) {
+    return Response.json({ error: "id 必填" }, { status: 400 });
+  }
+
+  try {
+    // 确认论文属于该项目
+    const paper = await prisma.paper.findFirst({
+      where: { id: paperId, projectId },
+    });
+
+    if (!paper) {
+      return Response.json({ error: "论文不存在" }, { status: 404 });
+    }
+
+    // 删除论文及其关联数据
+    await prisma.$transaction(async (tx: any) => {
+      await tx.extraction.deleteMany({ where: { paperId } });
+      await tx.paper.delete({ where: { id: paperId } });
+    });
+
+    return Response.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to delete paper:", error);
+    return Response.json({ error: "删除失败" }, { status: 500 });
+  }
+}
