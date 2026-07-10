@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { TroubleshootForm, DiagnosisResult } from "@/components/experiment/troubleshoot";
+import { consumeSSEStream } from "@/lib/llm/streaming";
 import type { TroubleshootResult } from "@/lib/llm/troubleshoot";
 
 export default function TroubleshootPage() {
   const [view, setView] = useState<"form" | "diagnosing" | "result">("form");
   const [result, setResult] = useState<TroubleshootResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progressMessage, setProgressMessage] = useState("");
 
   async function handleSubmit(data: {
     experiment: {
@@ -24,22 +26,40 @@ export default function TroubleshootPage() {
     setView("diagnosing");
     setError(null);
 
+    setProgressMessage("");
+
+    let res: Response;
     try {
-      const res = await fetch("/api/experiments/troubleshoot", {
+      res = await fetch("/api/experiments/troubleshoot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
 
-      if (!res.ok) throw new Error((await res.json()).error || "诊断失败");
-
-      const data_ = await res.json();
-      setResult(data_);
-      setView("result");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "诊断失败");
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "诊断失败");
       setView("form");
+      return;
     }
+
+    consumeSSEStream(res, {
+      onProgress: (step) => {
+        setProgressMessage(step || "正在分析...");
+      },
+      onResult: (data_) => {
+        setResult(data_ as TroubleshootResult);
+        setView("result");
+      },
+      onError: (message) => {
+        setError(message);
+        setView("form");
+      },
+      onDone: () => {},
+    });
   }
 
   return (
@@ -62,7 +82,7 @@ export default function TroubleshootPage() {
       {view === "diagnosing" && (
         <div className="text-center py-12 space-y-3">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-600" />
-          <p className="text-sm text-gray-500">正在分析失败原因...</p>
+          <p className="text-sm text-gray-500">{progressMessage || "正在分析失败原因..."}</p>
           <p className="text-xs text-gray-400">
             AI 正在结合你的实验条件和文献数据进行诊断
           </p>
