@@ -1,0 +1,205 @@
+- generic [ref=f13e1]:
+  - generic [ref=f13e3]:
+    - generic [ref=f13e80]:
+      - link "Skip to content" [ref=f13e81] [cursor=pointer]:
+        - /url: "#main"
+      - generic [ref=f13e85]:
+        - generic [ref=f13e90]:
+          - paragraph [ref=f13e91]: We are investigating a technical issue
+          - generic [ref=f13e92]:
+            - generic [ref=f13e93]: ·
+            - generic [ref=f13e94]:
+              - text: Follow the
+              - link "status page" [ref=f13e95] [cursor=pointer]:
+                - /url: https://status.supabase.com
+              - text: for updates
+        - button "Dismiss banner" [ref=f13e96] [cursor=pointer]
+      - banner [ref=f13e102]:
+        - generic [ref=f13e103]:
+          - generic [ref=f13e104]:
+            - link "Supabase Back to organization home" [ref=f13e105] [cursor=pointer]:
+              - /url: /dashboard/org/ktlzbatrvdfghnerynwd
+              - img "Supabase" [ref=f13e106]
+              - generic [ref=f13e107]: Back to organization home
+            - generic [ref=f13e108]:
+              - generic [ref=f13e112]:
+                - link "hacker20gh's Org Free" [ref=f13e113] [cursor=pointer]:
+                  - /url: /dashboard/org/ktlzbatrvdfghnerynwd
+                  - generic [ref=f13e124]: hacker20gh's Org
+                  - generic [ref=f13e125]: Free
+                - button "Show organizations" [ref=f13e126] [cursor=pointer]
+              - generic [ref=f13e131]:
+                - generic [ref=f13e135]:
+                  - link "SciFlow_AI" [ref=f13e136] [cursor=pointer]:
+                    - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh
+                  - button "Show organization projects" [ref=f13e141] [cursor=pointer]
+                - generic [ref=f13e149]:
+                  - link "main Production" [ref=f13e150] [cursor=pointer]:
+                    - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh
+                    - generic "main" [ref=f13e151]
+                    - generic [ref=f13e152]: Production
+                  - button "Show project branches" [ref=f13e153] [cursor=pointer]
+            - button "Connect" [ref=f13e159] [cursor=pointer]
+          - generic [ref=f13e164]:
+            - button "Feedback" [ref=f13e165] [cursor=pointer]
+            - generic [ref=f13e167]:
+              - button [ref=f13e168]:
+                - paragraph [ref=f13e173]: Search...
+                - generic [ref=f13e174]: Ctrl K
+              - button "Help" [ref=f13e176] [cursor=pointer]
+              - button "Advisor Center" [ref=f13e183] [cursor=pointer]
+              - button "SQL Editor" [ref=f13e188] [cursor=pointer]
+              - button "AI Assistant" [ref=f13e193] [cursor=pointer]
+            - button [ref=f13e201] [cursor=pointer]:
+              - img "hacker20gh" [ref=f13e203]
+      - generic [ref=f13e204]:
+        - generic [ref=f13e208]:
+          - list [ref=f13e211]:
+            - generic [ref=f13e212]:
+              - listitem [ref=f13e213]:
+                - link "Project Overview" [ref=f13e214] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh
+              - listitem [ref=f13e217]:
+                - link "Table Editor" [ref=f13e218] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/editor
+              - listitem [ref=f13e221]:
+                - link "SQL Editor" [ref=f13e222] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/sql
+            - generic [ref=f13e225]:
+              - listitem [ref=f13e226]:
+                - link "Database" [ref=f13e227] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/schemas
+              - listitem [ref=f13e232]:
+                - link "Authentication" [ref=f13e233] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/auth/users
+              - listitem [ref=f13e236]:
+                - link "Storage" [ref=f13e237] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/storage/files
+              - listitem [ref=f13e240]:
+                - link "Edge Functions" [ref=f13e241] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/functions
+              - listitem [ref=f13e247]:
+                - link "Realtime" [ref=f13e248] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/realtime/inspector
+            - generic [ref=f13e251]:
+              - listitem [ref=f13e253]:
+                - link "Advisors" [ref=f13e254] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/advisors/security
+              - listitem [ref=f13e257]:
+                - link "Observability" [ref=f13e258] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/observability
+              - listitem [ref=f13e267]:
+                - link "Logs" [ref=f13e268] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/logs
+              - listitem [ref=f13e270]:
+                - link "Integrations" [ref=f13e271] [cursor=pointer]:
+                  - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/integrations
+            - listitem [ref=f13e276]:
+              - link "Project Settings" [ref=f13e277] [cursor=pointer]:
+                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/settings/general
+          - button "Sidebar control" [ref=f13e283] [cursor=pointer]
+        - main [ref=f13e290]:
+          - generic [ref=f13e292]:
+            - generic [ref=f13e296]:
+              - heading "SQL Editor" [level=4] [ref=f13e298]
+              - generic [ref=f13e300]:
+                - generic [ref=f13e301]:
+                  - generic [ref=f13e302]:
+                    - generic [ref=f13e304]:
+                      - generic [ref=f13e305]: Search queries
+                      - textbox "Search queries..." [ref=f13e306]
+                      - button [ref=f13e307]
+                    - button "Create a new query" [ref=f13e314] [cursor=pointer]
+                  - button "Shared" [ref=f13e319]
+                  - button "Favorites" [ref=f13e325]
+                  - generic [ref=f13e330]:
+                    - button "PRIVATE (1)" [expanded] [ref=f13e591]
+                    - tree "private-snippets" [ref=f13e515]:
+                      - generic "Untitled query" [ref=f13e516] [cursor=pointer]
+                  - generic [ref=f13e341]:
+                    - button "Reference" [expanded] [ref=f13e342]
+                    - generic [ref=f13e346]:
+                      - link "templates" [ref=f13e347] [cursor=pointer]:
+                        - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/sql/templates
+                      - link "examples" [ref=f13e350] [cursor=pointer]:
+                        - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/sql/examples
+                - button "View running queries" [ref=f13e355] [cursor=pointer]
+            - separator [ref=f13e357]
+            - main [ref=f13e368]:
+              - generic [ref=f13e369]:
+                - generic [ref=f13e370]:
+                  - generic [ref=f13e371]:
+                    - button "Collapse sidebar" [ref=f13e372]
+                    - tablist [ref=f13e377]:
+                      - button [ref=f13e527]:
+                        - tab "Untitled query Close tab" [selected] [ref=f13e528]:
+                          - generic [ref=f13e535]: Untitled query
+                          - button "Close tab" [ref=f13e539] [cursor=pointer]
+                        - separator [ref=f13e544]
+                      - button [ref=f13e545]
+                  - status [ref=f13e388]
+                - generic [ref=f13e391]:
+                  - code [ref=f13e398]:
+                    - generic [ref=f13e399]:
+                      - generic [ref=f13e400]: "103"
+                      - generic [ref=f13e405]: );
+                      - textbox "Editor content" [active] [ref=f13e413]: create table "User" ( id text primary key default gen_random_uuid()::text, email text unique not null, name text, avatar text, "createdAt" timestamp with time zone default now() ); create table "Project" ( id text primary key default gen_random_uuid()::text,
+                  - separator [ref=f13e414]
+                  - generic [ref=f13e425]:
+                    - tablist [ref=f13e426]:
+                      - generic [ref=f13e427]:
+                        - tab "Results" [selected] [ref=f13e428]
+                        - tab "Chart" [ref=f13e430]
+                        - button "Export" [disabled]
+                      - generic [ref=f13e432]:
+                        - generic [ref=f13e433]: Autosave enabled
+                        - generic [ref=f13e435]:
+                          - button "Enable Intellisense" [ref=f13e436] [cursor=pointer]
+                          - button "Add to favorites" [ref=f13e440] [cursor=pointer]
+                          - button "Prettify SQL" [ref=f13e444] [cursor=pointer]
+                        - generic [ref=f13e447]:
+                          - generic [ref=f13e448]:
+                            - generic [ref=f13e449] [cursor=pointer]:
+                              - generic [ref=f13e450]: Source
+                              - button "Primary database" [ref=f13e451]
+                            - button "Role postgres" [ref=f13e456] [cursor=pointer]:
+                              - generic [ref=f13e458]:
+                                - generic [ref=f13e459]: Role
+                                - generic [ref=f13e460]: postgres
+                          - button "Run" [ref=f13e464] [cursor=pointer]:
+                            - generic [ref=f13e466]: Ctrl ↵
+                    - paragraph [ref=f13e749]: Success. No rows returned
+                  - generic "Table grid footer" [ref=f13e750]:
+                    - button "0 row" [ref=f13e751]:
+                      - paragraph [ref=f13e752]:
+                        - generic [ref=f13e753]: 0 row
+    - generic [ref=f13e475]:
+      - generic:
+        - img "Background pattern"
+      - generic [ref=f13e476]:
+        - button "Close banner" [ref=f13e478] [cursor=pointer]
+        - generic [ref=f13e483]:
+          - generic [ref=f13e484]:
+            - generic [ref=f13e485]: Beta
+            - generic [ref=f13e487]:
+              - generic [ref=f13e755]:
+                - generic [ref=f13e757]: 10 Jul 26 13:59:37
+                - generic [ref=f13e758]: "200"
+              - generic [ref=f13e760]:
+                - generic [ref=f13e762]: 10 Jul 26 13:59:34
+                - generic [ref=f13e763]: "400"
+              - generic [ref=f13e765]:
+                - generic [ref=f13e767]: 10 Jul 26 13:59:31
+                - generic [ref=f13e768]: "304"
+              - generic [ref=f13e770]:
+                - generic [ref=f13e772]: 10 Jul 26 13:59:28
+                - generic [ref=f13e773]: "200"
+          - generic [ref=f13e508]:
+            - paragraph [ref=f13e509]: Unified Logs is here
+            - paragraph [ref=f13e510]: Search and correlate logs across all of your services from a single place.
+          - link "Explore Unified Logs" [ref=f13e512] [cursor=pointer]:
+            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/logs
+  - alert [ref=f13e79]: SQL Editor | SciFlow_AI | hacker20gh's Org | Supabase
+  - generic [ref=f13e514]:
+    - alert
+    - alert

@@ -1,0 +1,137 @@
+- generic [active] [ref=f10e1]:
+  - generic [ref=f10e4]:
+    - link "Skip to content" [ref=f10e5] [cursor=pointer]:
+      - /url: "#main"
+    - banner [ref=f10e7]:
+      - generic [ref=f10e8]:
+        - link "Supabase Back to organization home" [ref=f10e10] [cursor=pointer]:
+          - /url: /dashboard/organizations
+          - img "Supabase" [ref=f10e11]
+          - generic [ref=f10e12]: Back to organization home
+        - generic [ref=f10e13]:
+          - button "Feedback" [ref=f10e14] [cursor=pointer]
+          - generic [ref=f10e16]:
+            - button [ref=f10e17]:
+              - paragraph [ref=f10e22]: Search...
+              - generic [ref=f10e23]: Ctrl K
+            - button "Help" [ref=f10e25] [cursor=pointer]
+            - button "Advisor Center" [ref=f10e32] [cursor=pointer]
+          - button [ref=f10e37] [cursor=pointer]
+    - generic [ref=f10e42]:
+      - button "Sidebar control" [ref=f10e50] [cursor=pointer]
+      - main [ref=f10e57]:
+        - generic [ref=f10e59]:
+          - generic [ref=f10e63]:
+            - heading "Database" [level=4] [ref=f10e65]
+            - menu "Sidebar" [disabled] [ref=f10e68]:
+              - list [ref=f10e69]:
+                - generic [ref=f10e72]:
+                  - generic [ref=f10e73]: Database Management
+                  - generic [ref=f10e77]:
+                    - link [disabled] [ref=f10e78] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/schemas
+                      - menuitem "Schema Visualizer" [disabled] [ref=f10e79]
+                    - link [disabled] [ref=f10e84] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/tables
+                      - menuitem "Tables" [disabled] [ref=f10e85]
+                    - link [disabled] [ref=f10e90] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/functions
+                      - menuitem "Functions" [disabled] [ref=f10e91]
+                    - link [disabled] [ref=f10e96] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/triggers/data
+                      - menuitem "Triggers" [disabled] [ref=f10e97]
+                    - link [disabled] [ref=f10e102] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/types
+                      - menuitem "Enumerated Types" [disabled] [ref=f10e103]
+                    - link [disabled] [ref=f10e108] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/extensions
+                      - menuitem "Extensions" [disabled] [ref=f10e109]
+                    - link [disabled] [ref=f10e114] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/indexes
+                      - menuitem "Indexes" [disabled] [ref=f10e115]
+                    - link [disabled] [ref=f10e120] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/publications
+                      - menuitem "Publications" [disabled] [ref=f10e121]
+                - generic [ref=f10e129]:
+                  - generic [ref=f10e130]: Access Control
+                  - generic [ref=f10e134]:
+                    - link [disabled] [ref=f10e135] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/policies
+                      - menuitem "Policies" [disabled] [ref=f10e136]
+                    - link [disabled] [ref=f10e141] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/roles
+                      - menuitem "Roles" [disabled] [ref=f10e142]
+                - generic [ref=f10e150]:
+                  - generic [ref=f10e151]: Configuration
+                  - link [disabled] [ref=f10e156] [cursor=pointer]:
+                    - /url: /dashboard/project/undefined/database/settings
+                    - menuitem "Settings" [disabled] [ref=f10e157]
+                - generic [ref=f10e165]:
+                  - generic [ref=f10e166]: Platform
+                  - generic [ref=f10e170]:
+                    - link [disabled] [ref=f10e171] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/replication
+                      - menuitem "Replication" [disabled] [ref=f10e172]
+                    - link [disabled] [ref=f10e177] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/backups/scheduled
+                      - menuitem "Backups" [disabled] [ref=f10e178]
+                    - link [disabled] [ref=f10e183] [cursor=pointer]:
+                      - /url: /dashboard/project/undefined/database/migrations
+                      - menuitem "Migrations" [disabled] [ref=f10e184]
+          - separator [disabled] [ref=f10e189]
+          - main [ref=f10e200]:
+            - generic [ref=f10e204]:
+              - heading "Database Settings" [level=1] [ref=f10e205]
+              - generic [ref=f10e206]: Connections, security, and network configuration
+            - generic [ref=f10e207]:
+              - generic [ref=f10e208]:
+                - generic [ref=f10e211]:
+                  - heading "Database password" [level=2] [ref=f10e212]
+                  - generic [ref=f10e213]: Used for direct Postgres connections
+                - generic [ref=f10e216]:
+                  - generic [ref=f10e217]:
+                    - heading "Reset database password" [level=3] [ref=f10e218]
+                    - paragraph [ref=f10e219]: The database password isn’t viewable after creation. Resetting it will break any existing connections.
+                  - button "Reset password" [disabled] [ref=f10e220]
+              - generic [ref=f10e222]:
+                - generic [ref=f10e224]:
+                  - heading "Connection pooling" [level=2] [ref=f10e226]
+                  - link "Docs" [ref=f10e228] [cursor=pointer]:
+                    - /url: https://supabase.com/docs/guides/database/connecting-to-postgres#connection-pooler
+                - generic [ref=f10e255]:
+                  - generic [ref=f10e256]: You need additional permissions to update connection pooling settings
+                  - generic [ref=f10e257]:
+                    - button "Cancel" [disabled]
+                    - button "Save" [disabled]
+              - generic [ref=f10e258]:
+                - generic [ref=f10e260]:
+                  - heading "SSL configuration" [level=2] [ref=f10e262]
+                  - link "Docs" [ref=f10e263] [cursor=pointer]:
+                    - /url: https://supabase.com/docs/guides/platform/ssl-enforcement
+                - generic [ref=f10e270]:
+                  - generic [ref=f10e277]:
+                    - generic [ref=f10e278]: Enforce SSL on incoming connections
+                    - generic [ref=f10e280]: Reject non-SSL connections to your database
+                  - generic [ref=f10e282]:
+                    - button "Download certificate" [disabled] [ref=f10e285]
+                    - generic [ref=f10e291]:
+                      - generic [ref=f10e292]: SSL Certificate
+                      - generic [ref=f10e294]: Use this certificate when connecting to your database to prevent snooping and man-in-the-middle attacks.
+              - generic [ref=f10e295]:
+                - generic [ref=f10e297]:
+                  - heading "Disk Management" [level=2] [ref=f10e299]
+                  - link "Docs" [ref=f10e300] [cursor=pointer]:
+                    - /url: https://supabase.com/docs/guides/platform/database-size#disk-management
+                - alert [ref=f10e307]:
+                  - heading "Disk size configuration is not available for projects on the Free Plan" [level=5] [ref=f10e310]
+                  - generic [ref=f10e311]:
+                    - paragraph [ref=f10e312]: If you are intending to use more than 500MB of disk space, then you will need to upgrade to at least the Pro Plan.
+                    - link "Upgrade subscription" [ref=f10e313] [cursor=pointer]:
+                      - /url: /dashboard/org/undefined/billing?panel=subscriptionPlan
+              - generic [ref=f10e317]:
+                - generic [ref=f10e318]:
+                  - heading "Network bans" [level=2] [ref=f10e319]
+                  - generic [ref=f10e320]: IP addresses temporarily blocked due to suspicious traffic
+                - link "Docs" [ref=f10e321] [cursor=pointer]:
+                  - /url: https://supabase.com/docs/reference/cli/supabase-network-bans
+  - alert [ref=f10e332]

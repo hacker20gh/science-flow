@@ -2,30 +2,39 @@
  * Prisma 数据库客户端
  *
  * Prisma 7 + PrismaPg adapter 连接 Supabase PostgreSQL
- * DATABASE_URL 未配置时 prisma 为 null，API 路由返回 503
+ * 完全懒加载，避免浏览器端导入 node:path 报错
  */
 
-import { PrismaClient } from "@/app/generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _prisma: any = null;
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
-
-function createPrismaClient(): PrismaClient | null {
-  const url = process.env.DATABASE_URL;
-  if (!url) return null;
+export function getPrisma() {
+  if (_prisma) return _prisma;
+  if (!process.env.DATABASE_URL) return null;
 
   try {
-    const adapter = new PrismaPg({ connectionString: url });
-    return new PrismaClient({ adapter });
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaClient } = require("@prisma/client");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaPg } = require("@prisma/adapter-pg");
+
+    const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+    _prisma = new PrismaClient({ adapter });
+    return _prisma;
   } catch (error) {
     console.error("Failed to create Prisma client:", error);
     return null;
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const prisma: any = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+// 为了兼容所有 API 路由中直接使用 prisma.xxx 的写法
+export const prisma = {
+  get user() { return getPrisma()?.user; },
+  get project() { return getPrisma()?.project; },
+  get paper() { return getPrisma()?.paper; },
+  get extraction() { return getPrisma()?.extraction; },
+  get hypothesis() { return getPrisma()?.hypothesis; },
+  get experiment() { return getPrisma()?.experiment; },
+  get timelineEvent() { return getPrisma()?.timelineEvent; },
+  get manuscript() { return getPrisma()?.manuscript; },
+};

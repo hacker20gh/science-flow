@@ -1,0 +1,535 @@
+- generic:
+  - generic:
+    - generic:
+      - generic:
+        - link:
+          - /url: "#main"
+          - text: Skip to content
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - paragraph: We are investigating a technical issue
+                    - generic:
+                      - generic: ·
+                      - generic:
+                        - text: Follow the
+                        - link:
+                          - /url: https://status.supabase.com
+                          - text: status page
+                        - text: for updates
+                - button
+        - generic:
+          - banner:
+            - generic:
+              - generic:
+                - link:
+                  - /url: /dashboard/org/ktlzbatrvdfghnerynwd
+                  - generic: Back to organization home
+                - generic:
+                  - generic:
+                    - link:
+                      - /url: /dashboard/org/ktlzbatrvdfghnerynwd
+                      - generic: hacker20gh's Org
+                      - generic: Free
+                    - button
+                  - generic:
+                    - generic:
+                      - link:
+                        - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh
+                        - generic: SciFlow_AI
+                      - button
+                    - generic:
+                      - link:
+                        - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh
+                        - generic: main
+                        - generic: Production
+                      - button
+                - generic:
+                  - button:
+                    - generic: Connect
+              - generic:
+                - button:
+                  - generic: Feedback
+                - generic:
+                  - button:
+                    - generic:
+                      - paragraph: Search...
+                    - generic: Ctrl K
+                  - button [ref=f10e942] [cursor=pointer]:
+                    - generic [ref=f10e430]: Help
+                  - button [ref=f10e943] [cursor=pointer]:
+                    - generic [ref=f10e437]: Advisor Center
+                  - button [ref=f10e944] [cursor=pointer]:
+                    - generic [ref=f10e442]: SQL Editor
+                  - button [ref=f10e945] [cursor=pointer]:
+                    - generic [ref=f10e447]: AI Assistant
+                - button [ref=f10e946] [cursor=pointer]
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - list:
+                      - generic:
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/editor
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/sql
+                      - generic:
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/schemas
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/auth/users
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/storage/files
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/functions
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/realtime/inspector
+                      - generic:
+                        - generic:
+                          - listitem:
+                            - link:
+                              - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/advisors/security
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/observability
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/logs
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/integrations
+                      - generic:
+                        - listitem:
+                          - link:
+                            - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/settings/general
+                - generic:
+                  - generic:
+                    - button
+          - generic:
+            - generic:
+              - generic:
+                - main:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - heading [level=4]: Database
+                              - generic:
+                                - generic:
+                                  - menu [disabled]:
+                                    - list:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Database Management
+                                            - generic:
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/schemas
+                                                - menuitem [disabled]:
+                                                  - generic: Schema Visualizer
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/tables
+                                                - menuitem [disabled]:
+                                                  - generic: Tables
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/functions
+                                                - menuitem [disabled]:
+                                                  - generic: Functions
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/triggers/data
+                                                - menuitem [disabled]:
+                                                  - generic: Triggers
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/types
+                                                - menuitem [disabled]:
+                                                  - generic: Enumerated Types
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/extensions
+                                                - menuitem [disabled]:
+                                                  - generic: Extensions
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/indexes
+                                                - menuitem [disabled]:
+                                                  - generic: Indexes
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/publications
+                                                - menuitem [disabled]:
+                                                  - generic: Publications
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Access Control
+                                            - generic:
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/policies
+                                                - menuitem [disabled]:
+                                                  - generic: Policies
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/roles
+                                                - menuitem [disabled]:
+                                                  - generic: Roles
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Configuration
+                                            - generic:
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/settings
+                                                - menuitem [disabled]:
+                                                  - generic: Settings
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Platform
+                                            - generic:
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/replication
+                                                - menuitem [disabled]:
+                                                  - generic: Replication
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/backups/scheduled
+                                                - menuitem [disabled]:
+                                                  - generic: Backups
+                                              - link [disabled]:
+                                                - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/database/migrations
+                                                - menuitem [disabled]:
+                                                  - generic: Migrations
+                      - separator [disabled]
+                      - generic:
+                        - generic:
+                          - main:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - heading [level=1]: Database Settings
+                                    - generic: Connections, security, and network configuration
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Database password
+                                      - generic: Used for direct Postgres connections
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - heading [level=3]: Reset database password
+                                        - paragraph: The database password isn’t viewable after creation. Resetting it will break any existing connections.
+                                      - button [ref=f10e948] [cursor=pointer]:
+                                        - generic [ref=f10e707]: Reset password
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Connection pooling
+                                    - generic:
+                                      - link:
+                                        - /url: https://supabase.com/docs/guides/database/connecting-to-postgres#connection-pooler
+                                        - generic: Docs
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic:
+                                              - heading [level=5]: Connection poolers
+                                              - paragraph: Configuration is shared across all connection poolers.
+                                            - generic: Shared
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - group:
+                                                    - spinbutton: "15"
+                                                    - group:
+                                                      - generic: connections
+                                                - generic:
+                                                  - generic: Connection pool size
+                                                  - generic:
+                                                    - paragraph: The maximum number of connections made to the underlying Postgres cluster, per user+db combination. Pool size has a default of 15 based on your compute size of Nano.
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - group:
+                                                    - spinbutton [disabled]
+                                                    - group:
+                                                      - generic: clients
+                                                - generic:
+                                                  - generic: Max client connections
+                                                  - generic:
+                                                    - paragraph:
+                                                      - text: The maximum number of concurrent client connections allowed. This value is fixed at 200 based on your compute size of Nano and cannot be changed.
+                                                      - link:
+                                                        - /url: https://supabase.com/docs/guides/database/connection-management#configuring-supavisors-pool-size
+                                                        - text: Learn more
+                                        - generic:
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - button [disabled]:
+                                                  - generic: Cancel
+                                                - button [disabled]:
+                                                  - generic: Save
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: SSL configuration
+                                    - link:
+                                      - /url: https://supabase.com/docs/guides/platform/ssl-enforcement
+                                      - generic: Docs
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic:
+                                              - switch
+                                        - generic:
+                                          - generic: Enforce SSL on incoming connections
+                                          - generic: Reject non-SSL connections to your database
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - button:
+                                              - generic:
+                                                - link:
+                                                  - /url: https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt
+                                                  - text: Download certificate
+                                        - generic:
+                                          - generic: SSL Certificate
+                                          - generic: Use this certificate when connecting to your database to prevent snooping and man-in-the-middle attacks.
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Disk management
+                                    - link:
+                                      - /url: https://supabase.com/docs/guides/platform/database-size#disk-management
+                                      - generic: Docs
+                                - generic:
+                                  - alert:
+                                    - generic:
+                                      - generic:
+                                        - heading [level=5]: Disk Management has moved
+                                        - generic:
+                                          - paragraph: Disk configuration is now managed alongside Project Compute on the new Compute and Disk page.
+                                      - generic:
+                                        - link:
+                                          - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/settings/compute-and-disk
+                                          - generic: Go to Compute and Disk
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Network restrictions
+                                    - generic:
+                                      - link:
+                                        - /url: https://supabase.com/docs/guides/platform/network-restrictions
+                                        - generic: Docs
+                                      - button:
+                                        - generic: Add restriction
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - paragraph: Your database can be accessed by all IP addresses
+                                          - paragraph: You may start limiting access to your database by adding a network restriction.
+                                      - button [ref=f10e949] [cursor=pointer]:
+                                        - generic [ref=f10e848]: Restrict all access
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Connection logging
+                                    - generic:
+                                      - link:
+                                        - /url: https://supabase.com/docs/guides/platform/postgres-connection-logging
+                                        - generic: Docs
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic:
+                                              - switch
+                                              - checkbox
+                                            - generic:
+                                              - generic: Log connections
+                                              - generic: Enables logging for each successful connection to the database
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic:
+                                              - switch
+                                              - checkbox
+                                            - generic:
+                                              - generic: Log disconnections
+                                              - generic: Enables logging for the end of each session, including its duration
+                                      - generic:
+                                        - button [disabled]:
+                                          - generic: Cancel
+                                        - button [disabled] [ref=f10e950]:
+                                          - generic [ref=f10e884]: Save
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Network bans
+                                      - generic: IP addresses temporarily blocked due to suspicious traffic
+                                    - link:
+                                      - /url: https://supabase.com/docs/reference/cli/supabase-network-bans
+                                      - generic: Docs
+                                - generic: There are no banned IP addresses for your project
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - button
+                - generic:
+                  - generic:
+                    - generic: Beta
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic: 10 Jul 26 13:53:40
+                            - generic: "500"
+                        - generic:
+                          - generic:
+                            - generic: 10 Jul 26 13:53:37
+                            - generic: "200"
+                        - generic:
+                          - generic:
+                            - generic: 10 Jul 26 13:53:34
+                            - generic: "400"
+                        - generic:
+                          - generic:
+                            - generic: 10 Jul 26 13:53:31
+                            - generic: "304"
+                  - generic:
+                    - paragraph: Unified Logs is here
+                    - paragraph: Search and correlate logs across all of your services from a single place.
+                  - generic:
+                    - link:
+                      - /url: /dashboard/project/zdjzbwmldbjrtnqikpeh/logs
+                      - generic: Explore Unified Logs
+  - generic:
+    - alert: Settings | Database | SciFlow_AI | hacker20gh's Org | Supabase
+  - dialog [ref=f10e952]:
+    - generic [ref=f10e953]:
+      - heading "Connect to your project" [level=2] [ref=f10e954]
+      - paragraph [ref=f10e955]: Choose how you want to use Supabase
+    - generic [ref=f10e956]:
+      - generic [ref=f10e958]:
+        - button [active] [ref=f10e959]:
+          - generic [ref=f10e964]:
+            - paragraph [ref=f10e965]: Framework
+            - paragraph [ref=f10e966]: Use a client library
+        - button [ref=f10e967]:
+          - generic [ref=f10e972]:
+            - paragraph [ref=f10e973]: Server
+            - paragraph [ref=f10e974]: Build APIs
+        - button [ref=f10e975]:
+          - generic [ref=f10e981]:
+            - paragraph [ref=f10e982]: Direct
+            - paragraph [ref=f10e983]: Connection string
+        - button [ref=f10e984]:
+          - generic [ref=f10e992]:
+            - paragraph [ref=f10e993]: ORM
+            - paragraph [ref=f10e994]: Third-party library
+        - button [ref=f10e995]:
+          - generic [ref=f10e999]:
+            - paragraph [ref=f10e1000]: MCP
+            - paragraph [ref=f10e1001]: Connect your agent
+      - generic [ref=f10e1003]:
+        - generic [ref=f10e1005]:
+          - generic [ref=f10e1006]: Framework
+          - combobox [ref=f10e1011]:
+            - generic:
+              - img "nextjs logo"
+              - text: Next.js
+        - generic [ref=f10e1015]:
+          - generic [ref=f10e1016]: Variant
+          - combobox [ref=f10e1021]:
+            - generic: App Router
+        - generic [ref=f10e1025]:
+          - generic [ref=f10e1026]: Shadcn
+          - generic [ref=f10e1029]:
+            - switch [ref=f10e1031] [cursor=pointer]
+            - generic [ref=f10e1032]: Install components via the Supabase shadcn registry.
+      - generic [ref=f10e1034]:
+        - heading "Connect your app" [level=3] [ref=f10e1035]
+        - alert [ref=f10e1036]:
+          - generic [ref=f10e1037]:
+            - generic [ref=f10e1039]:
+              - img "Supabase Grafana" [ref=f10e1041]
+              - paragraph [ref=f10e1045]: Give your agent everything it needs
+            - button "Copy prompt" [ref=f10e1047] [cursor=pointer]
+        - generic [ref=f10e1053]:
+          - generic [ref=f10e1055]:
+            - generic [ref=f10e1056]: "1"
+            - generic [ref=f10e1060]:
+              - generic [ref=f10e1061]:
+                - paragraph [ref=f10e1062]: Install packages
+                - paragraph [ref=f10e1063]: Run this command to install the required dependencies.
+              - generic [ref=f10e1065]:
+                - code [ref=f10e1067]: npm install @supabase/supabase-js @supabase/ssr
+                - button "Copy" [ref=f10e1069] [cursor=pointer]
+          - generic [ref=f10e1076]:
+            - generic [ref=f10e1077]: "2"
+            - generic [ref=f10e1081]:
+              - generic [ref=f10e1082]:
+                - paragraph [ref=f10e1083]: Add files
+                - paragraph [ref=f10e1084]: Add env variables, create Supabase client helpers, and set up middleware to keep sessions refreshed.
+              - generic [ref=f10e1086]:
+                - tablist [ref=f10e1087]:
+                  - tab ".env.local" [selected] [ref=f10e1088]
+                  - tab "page.tsx" [ref=f10e1089]
+                  - tab "utils/supabase/server.ts" [ref=f10e1090]
+                  - tab "utils/supabase/client.ts" [ref=f10e1091]
+                  - tab "utils/supabase/middleware.ts" [ref=f10e1092]
+                - tabpanel ".env.local" [ref=f10e1093]:
+                  - generic [ref=f10e1094]:
+                    - code [ref=f10e1096]:
+                      - generic [ref=f10e1097]: NEXT_PUBLIC_SUPABASE_URL=https://zdjzbwmldbjrtnqikpeh.supabase.co
+                      - text: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_VxFQ4YUT2kf7c40Oevhg2g_YMbHvNCg
+                    - button [ref=f10e1099] [cursor=pointer]
+          - generic [ref=f10e1105]:
+            - generic [ref=f10e1106]: "3"
+            - generic [ref=f10e1110]:
+              - generic [ref=f10e1111]:
+                - paragraph [ref=f10e1112]: Install Agent Skills (Optional)
+                - paragraph [ref=f10e1113]: Agent Skills give AI coding tools ready-made instructions, scripts, and resources for working with Supabase more accurately and efficiently.
+              - generic [ref=f10e1115]:
+                - code [ref=f10e1117]: npx skills add supabase/agent-skills
+                - button "Copy" [ref=f10e1119] [cursor=pointer]
+    - button "Close" [ref=f10e1125]
