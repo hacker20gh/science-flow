@@ -7,6 +7,7 @@ import {
   Search, Upload, BookOpen, FileText, Check, ChevronDown, ChevronUp,
   ExternalLink, Trash2, RefreshCw, Loader2, Download, Filter, ArrowUpDown,
 } from "lucide-react";
+import { PapersSkeleton } from "@/components/skeletons";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -380,7 +381,7 @@ export default function PapersPage() {
 
       {/* 加载 / 空状态 */}
       {loading && (
-        <div className="text-center py-12 text-gray-400">加载中...</div>
+        <div className="p-8"><PapersSkeleton /></div>
       )}
 
       {!loading && papers.length === 0 && (

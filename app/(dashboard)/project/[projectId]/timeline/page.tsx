@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Timeline } from "@/components/timeline/timeline";
+import { TimelineSkeleton } from "@/components/skeletons";
 import type { TimelineEvent } from "@/lib/timeline/events";
 
 // 本地 demo 数据 — 仅当 DB 为空时显示，不影响其他项目
@@ -63,7 +64,7 @@ export default function TimelinePage() {
       )}
 
       {loading && (
-        <div className="text-gray-400 text-sm py-8 text-center">加载中...</div>
+        <div className="p-8"><TimelineSkeleton /></div>
       )}
 
       {!loading && <Timeline events={events} />}

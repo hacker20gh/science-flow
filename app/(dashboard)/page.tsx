@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Plus, BookOpen, FlaskConical, Calendar, Microscope, Pencil, Trash2 } from "lucide-react";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
+import { DashboardSkeleton } from "@/components/skeletons";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -172,7 +173,7 @@ export default function HomePage() {
 
           {/* 加载状态 */}
           {loading && (
-            <div className="text-center py-12 text-gray-400">加载中...</div>
+            <div className="p-8"><DashboardSkeleton /></div>
           )}
 
           {/* 项目列表 */}
