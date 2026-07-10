@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { BookOpen, FlaskConical, Lightbulb, FileText, Search, Brain, TestTube } from "lucide-react";
+import { ProjectHealthCheck } from "@/components/project/health-check";
 
 interface ProjectData {
   id: string;
@@ -170,6 +171,12 @@ export default function ProjectPage({
           <p className="text-sm text-gray-500 mt-1">基于文献发现设计验证实验</p>
         </Link>
       </div>
+
+      {/* 健康度检查 */}
+      <section className="mt-8">
+        <h2 className="text-lg font-semibold mb-4">项目健康度</h2>
+        <ProjectHealthCheck />
+      </section>
     </main>
   );
 }

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Plus, BookOpen, FlaskConical, Calendar, Microscope } from "lucide-react";
+import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
+import { useRouter } from "next/navigation";
 
 interface Project {
   id: string;
@@ -14,9 +16,11 @@ interface Project {
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
@@ -142,7 +146,7 @@ export default function HomePage() {
           )}
 
           {/* 项目列表 */}
-          {!loading && projects.length === 0 && (
+          {!loading && projects.length === 0 && !showOnboarding && (
             <div className="text-center py-16">
               <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
                 <Microscope size={32} className="text-primary" />
@@ -150,13 +154,18 @@ export default function HomePage() {
               <h3 className="text-lg font-medium text-gray-600 mb-2">还没有项目</h3>
               <p className="text-sm text-gray-400 mb-6">创建你的第一个科研项目，开始探索</p>
               <button
-                onClick={() => setShowCreate(true)}
+                onClick={() => setShowOnboarding(true)}
                 className="px-6 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/90 transition-all flex items-center gap-2 mx-auto"
               >
                 <Plus size={16} />
                 新建项目
               </button>
             </div>
+          )}
+
+          {/* Onboarding 向导 */}
+          {!loading && showOnboarding && (
+            <OnboardingWizard onComplete={(id) => router.push(`/project/${id}`)} />
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

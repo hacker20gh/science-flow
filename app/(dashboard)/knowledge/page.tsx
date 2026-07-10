@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { PValueSimulator } from "@/components/knowledge/p-value-simulator";
 import { Sidebar } from "@/components/layout/sidebar";
 
 const KNOWLEDGE_CATEGORIES = [
@@ -302,6 +303,14 @@ export default function KnowledgePage() {
                   </ul>
                 </div>
               </div>
+
+              {/* P 值交互模拟器 */}
+              {selectedArticle === "p-value" && (
+                <div className="mt-6 bg-white border border-gray-200 rounded-xl p-6">
+                  <h3 className="text-base font-semibold mb-4">🎮 交互式模拟器</h3>
+                  <PValueSimulator />
+                </div>
+              )}
             </div>
           ) : (
             /* 分类列表 */

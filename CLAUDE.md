@@ -180,14 +180,14 @@ lib/
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| Phase 0 | Next.js 项目初始化 + Supabase + Auth + 基础布局 | ⬜ 待开始 |
-| Phase 1a | 文献搜索（PubMed + Semantic Scholar） | ⬜ |
-| Phase 1b | 信息提取（LLM + Structured Output） | ⬜ |
-| Phase 1c | 机制矩阵（TanStack Table + 冲突检测 + Gap Finder） | ⬜ |
-| Phase 2a | 实验设计向导 + Protocol 生成 | ⬜ |
-| Phase 2b | 排障诊断 | ⬜ |
-| Phase 3a | 数据上传 + 统计分析 + 图表 | ⬜ |
-| Phase 3b | 论文组装 + LaTeX 导出 + 审稿人模拟 | ⬜ |
-| Phase 4 | AI 助手对话面板（SSE 流式） | ⬜ |
-| Phase 5a | 科研知识库 | ⬜ |
-| Phase 5b | 科研设计实战课 + 健康度检查 | ⬜ |
+| Phase 0 | Next.js 项目初始化 + Supabase + Auth + 基础布局 | ✅ |
+| Phase 1a | 文献搜索（PubMed + Semantic Scholar） | ✅ |
+| Phase 1b | 信息提取（LLM + Structured Output） | ✅ |
+| Phase 1c | 机制矩阵（冲突检测 + Gap Finder） | ✅ |
+| Phase 2a | 实验设计向导 + Protocol 生成 | ✅ |
+| Phase 2b | 排障诊断 | ✅ |
+| Phase 3a | 数据上传 + 统计分析 + 图表 | ✅ |
+| Phase 3b | 论文组装 + LaTeX/Word 导出 + 审稿人模拟 | ✅ |
+| Phase 4 | AI 助手对话面板（SSE 流式） | ✅ |
+| Phase 5a | 科研知识库 + P 值交互模拟器 | ✅ |
+| Phase 5b | 科研设计实战课 + 项目健康度检查 | ✅ |
