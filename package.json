@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.110.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.2",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-table": "^8.21.3",
