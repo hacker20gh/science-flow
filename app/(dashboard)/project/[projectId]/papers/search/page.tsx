@@ -237,7 +237,7 @@ export default function ProjectPaperSearchPage() {
             {results.sources.semanticScholar} · OpenAlex:{" "}
             {results.sources.openAlex} · 合计 {results.total} 篇（已去重）
           </div>
-          <SearchResults papers={results.papers} onSelect={handleSelect} />
+          <SearchResults papers={results.papers} onSelect={handleSelect} projectId={projectId} />
         </div>
       )}
 

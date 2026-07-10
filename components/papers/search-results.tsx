@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Download, Loader2, Check } from "lucide-react";
 
 export interface Paper {
   pmid: string | null;
@@ -21,10 +22,13 @@ export interface Paper {
 interface SearchResultsProps {
   papers: Paper[];
   onSelect: (papers: Paper[]) => void;
+  projectId?: string;
 }
 
-export function SearchResults({ papers, onSelect }: SearchResultsProps) {
+export function SearchResults({ papers, onSelect, projectId }: SearchResultsProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState<Set<string>>(new Set());
+  const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
 
   function toggle(paper: Paper) {
     const key = paperKey(paper);
@@ -42,6 +46,38 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
 
   function handleConfirm() {
     onSelect(papers.filter((p) => selected.has(paperKey(p))));
+  }
+
+  async function handleDownloadPdf(paper: Paper, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!projectId || !paper.oaPdfUrl) return;
+
+    const key = paperKey(paper);
+    setDownloading((prev) => new Set(prev).add(key));
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/download-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          pdfUrl: paper.oaPdfUrl,
+          title: paper.title,
+        }),
+      });
+
+      if (res.ok) {
+        setDownloaded((prev) => new Set(prev).add(key));
+      }
+    } catch {
+      // 下载失败静默处理
+    } finally {
+      setDownloading((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
   }
 
   if (papers.length === 0) return null;
@@ -147,12 +183,30 @@ export function SearchResults({ papers, onSelect }: SearchResultsProps) {
                       </span>
                     )}
 
-                    {/* OA 状态 */}
+                    {/* OA 状态 + 下载按钮 */}
                     {paper.isOpenAccess && paper.oaPdfUrl ? (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-                        OA 全文
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                          OA 全文
+                        </span>
+                        {projectId && (
+                          <button
+                            onClick={(e) => handleDownloadPdf(paper, e)}
+                            disabled={downloading.has(paperKey(paper)) || downloaded.has(paperKey(paper))}
+                            className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1 transition-colors"
+                          >
+                            {downloading.has(paperKey(paper)) ? (
+                              <Loader2 size={10} className="animate-spin" />
+                            ) : downloaded.has(paperKey(paper)) ? (
+                              <Check size={10} />
+                            ) : (
+                              <Download size={10} />
+                            )}
+                            {downloaded.has(paperKey(paper)) ? "已下载" : "下载 PDF"}
+                          </button>
+                        )}
+                      </div>
                     ) : paper.isOpenAccess ? (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-600 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
