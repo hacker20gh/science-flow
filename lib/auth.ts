@@ -16,42 +16,33 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        // 数据库未配置时，使用 demo 账号
-        if (!process.env.DATABASE_URL) {
-          if (
-            credentials.email === "demo@sciflow.ai" &&
-            credentials.password === "demo123"
-          ) {
-            return {
-              id: "demo-user",
-              email: "demo@sciflow.ai",
-              name: "演示用户",
-            };
+        // 有数据库时，尝试查 User 表
+        if (process.env.DATABASE_URL) {
+          try {
+            const { getPrisma } = await import("@/lib/db");
+            const prisma = getPrisma();
+            if (prisma) {
+              const user = await prisma.user.findUnique({
+                where: { email: credentials.email as string },
+              });
+              if (user) {
+                return { id: user.id, email: user.email, name: user.name };
+              }
+            }
+          } catch {
+            // 数据库连接失败，fallback 到 demo 账号
           }
-          return null;
         }
 
-        // 有数据库时，动态导入 Prisma 查 User 表
-        try {
-          const { getPrisma } = await import("@/lib/db");
-          const prisma = getPrisma();
-          if (!prisma) return null;
-
-          const user = await prisma.user.findUnique({
-            where: { email: credentials.email as string },
-          });
-
-          if (user) {
-            return {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-            };
-          }
-          return null;
-        } catch {
-          return null;
+        // Demo 账号（无需数据库）
+        if (
+          credentials.email === "demo@sciflow.ai" &&
+          credentials.password === "demo123"
+        ) {
+          return { id: "demo-user", email: "demo@sciflow.ai", name: "演示用户" };
         }
+
+        return null;
       },
     }),
   ],
