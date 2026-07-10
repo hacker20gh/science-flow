@@ -19,6 +19,7 @@ export interface S2Paper {
   influenceScore: number | null;
   isOpenAccess: boolean;
   oaUrl: string | null;
+  oaPdfUrl: string | null;
   tldr: string | null;
 }
 
@@ -151,7 +152,8 @@ function mapS2Paper(raw: any): S2Paper {
     citationCount: raw.citationCount || 0,
     influenceScore: raw.influentialCitationCount ?? null,
     isOpenAccess: raw.isOpenAccess || false,
-    oaUrl: raw.openAccessPdf?.url || null,
+    oaUrl: null, // S2 openAccessPdf.url 是 PDF 链接，不是 landing page
+    oaPdfUrl: raw.openAccessPdf?.url || null,
     tldr: raw.tldr?.text || null,
   };
 }

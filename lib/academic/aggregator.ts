@@ -31,6 +31,9 @@ export interface UnifiedPaper {
 
 interface SearchOptions {
   query: string;
+  pubmedQuery?: string;
+  s2Query?: string;
+  openAlexQuery?: string;
   maxResults?: number;
   minYear?: number;
   maxYear?: number;
@@ -47,6 +50,9 @@ export async function aggregateSearch(
 ): Promise<UnifiedPaper[]> {
   const {
     query,
+    pubmedQuery,
+    s2Query,
+    openAlexQuery,
     maxResults = 20,
     minYear,
     maxYear,
@@ -55,17 +61,17 @@ export async function aggregateSearch(
     articleTypes,
   } = options;
 
-  // 并行搜索 3 个数据库
+  // 并行搜索 3 个数据库，每个用最适合的查询
   const [pubmedResults, s2Results, openalexResults] = await Promise.allSettled([
-    searchPubMed({ query, maxResults, minYear, maxYear, articleTypes }),
+    searchPubMed({ query: pubmedQuery || query, maxResults, minYear, maxYear, articleTypes }),
     searchSemanticScholar({
-      query,
+      query: s2Query || query,
       maxResults,
       minYear,
       maxYear,
       minCitationCount,
     }),
-    searchOpenAlex({ query, maxResults, minYear, maxYear }),
+    searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear }),
   ]);
 
   const pubmedPapers =
@@ -90,14 +96,33 @@ export async function aggregateSearch(
 }
 
 /**
- * 为论文补充 OA 信息
+ * 并发控制辅助函数
+ */
+async function parallelLimit<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  const executing: Promise<void>[] = [];
+  for (const item of items) {
+    const p = fn(item).then(() => {
+      executing.splice(executing.indexOf(p), 1);
+    });
+    executing.push(p);
+    if (executing.length >= limit) await Promise.race(executing);
+  }
+  await Promise.all(executing);
+}
+
+/**
+ * 为论文补充 OA 信息（并发 5 路）
  */
 export async function enrichWithOa(
   papers: UnifiedPaper[]
 ): Promise<UnifiedPaper[]> {
   const needOa = papers.filter((p) => p.doi && !p.oaPdfUrl);
 
-  for (const paper of needOa.slice(0, 10)) {
+  await parallelLimit(needOa.slice(0, 20), 5, async (paper) => {
     try {
       const oa = await findOaPdf(paper.doi!);
       paper.isOpenAccess = oa.isOpenAccess;
@@ -107,7 +132,7 @@ export async function enrichWithOa(
     } catch {
       // ignore
     }
-  }
+  });
 
   return papers;
 }
@@ -226,7 +251,7 @@ function fromS2(p: S2Paper): UnifiedPaper {
     impactFactor: null,
     isOpenAccess: p.isOpenAccess,
     oaUrl: p.oaUrl,
-    oaPdfUrl: null,
+    oaPdfUrl: p.oaPdfUrl || null,
     oaStatus: p.isOpenAccess ? "gold" : "closed",
     tldr: p.tldr,
     articleType: "journal-article",

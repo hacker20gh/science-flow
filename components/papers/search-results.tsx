@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Download, Loader2, Check, Upload } from "lucide-react";
+import { Download, Loader2, Check, Upload, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
+
+const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
+  pubmed: { label: "PubMed", color: "bg-green-50 text-green-600" },
+  semantic_scholar: { label: "S2", color: "bg-purple-50 text-purple-600" },
+  openalex: { label: "OpenAlex", color: "bg-orange-50 text-orange-600" },
+  biorxiv: { label: "bioRxiv", color: "bg-cyan-50 text-cyan-600" },
+};
 
 export interface Paper {
   pmid: string | null;
@@ -31,6 +38,7 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState<Set<string>>(new Set());
   const [uploaded, setUploaded] = useState<Set<string>>(new Set());
+  const [expandedAbstract, setExpandedAbstract] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingUploadPaper, setPendingUploadPaper] = useState<Paper | null>(null);
 
@@ -201,9 +209,28 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
                   )}
 
                   {paper.abstract && (
-                    <p className="text-xs text-gray-400 mt-1 line-clamp-2">
-                      {paper.abstract}
-                    </p>
+                    <div className="mt-1">
+                      <p className={`text-xs text-gray-400 ${expandedAbstract.has(key) ? "" : "line-clamp-2"}`}>
+                        {paper.abstract}
+                      </p>
+                      {paper.abstract.length > 200 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedAbstract((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(key)) next.delete(key);
+                              else next.add(key);
+                              return next;
+                            });
+                          }}
+                          className="text-xs text-blue-500 hover:text-blue-700 mt-0.5 flex items-center gap-0.5"
+                        >
+                          {expandedAbstract.has(key) ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          {expandedAbstract.has(key) ? "收起" : "展开"}
+                        </button>
+                      )}
+                    </div>
                   )}
 
                   {/* 标签栏 */}
@@ -291,11 +318,29 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
                       </div>
                     )}
 
-                    {/* 来源 */}
-                    {paper.pmid && (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-50 text-gray-400">
-                        PubMed
-                      </span>
+                    {/* 来源标签（多源） */}
+                    {paper.sources?.map((src) => {
+                      const info = SOURCE_LABELS[src];
+                      if (!info) return null;
+                      return (
+                        <span key={src} className={`text-xs px-1.5 py-0.5 rounded ${info.color}`}>
+                          {info.label}
+                        </span>
+                      );
+                    })}
+
+                    {/* DOI 链接 */}
+                    {paper.doi && (
+                      <a
+                        href={`https://doi.org/${paper.doi}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs px-1.5 py-0.5 rounded bg-gray-50 text-gray-500 hover:text-blue-600 hover:bg-blue-50 flex items-center gap-0.5 transition-colors"
+                      >
+                        <ExternalLink size={10} />
+                        DOI
+                      </a>
                     )}
                   </div>
                 </div>
