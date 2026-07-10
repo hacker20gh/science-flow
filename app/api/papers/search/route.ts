@@ -70,9 +70,35 @@ export async function POST(req: NextRequest) {
       enriched.push(...withOa, ...withoutOa);
     }
 
-    // 5. 记录搜索历史（fire-and-forget，不阻断搜索结果返回）
+    // 5. 记录搜索历史（fire-and-forget，保存完整参数和结果快照）
     if (projectId && typeof projectId === "string" && prisma) {
       const allSources = [...new Set(enriched.flatMap((p) => p.sources || []))];
+      const searchParams = {
+        maxResults,
+        minYear: minYear ? Number(minYear) : null,
+        maxYear: maxYear ? Number(maxYear) : null,
+        minCitationCount: minCitationCount ? Number(minCitationCount) : null,
+        sortBy,
+        articleTypes,
+        onlyOpenAccess,
+      };
+      // 保存结果快照（轻量版：只保留前端渲染需要的字段）
+      const resultSnapshot = enriched.slice(0, 50).map((p) => ({
+        pmid: p.pmid,
+        doi: p.doi,
+        title: p.title,
+        authors: p.authors,
+        journal: p.journal,
+        year: p.year,
+        abstract: p.abstract?.slice(0, 500) || "", // 摘要截断到 500 字符
+        citationCount: p.citationCount,
+        isOpenAccess: p.isOpenAccess,
+        oaPdfUrl: p.oaPdfUrl,
+        tldr: p.tldr,
+        articleType: p.articleType,
+        sources: p.sources,
+      }));
+
       prisma.searchHistory
         .create({
           data: {
@@ -82,6 +108,8 @@ export async function POST(req: NextRequest) {
             sources: allSources,
             maxResults,
             resultCount: enriched.length,
+            searchParams,
+            resultSnapshot,
           },
         })
         .catch((err: unknown) =>

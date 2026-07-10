@@ -240,6 +240,8 @@ model SearchHistory {
   sources        String[] // 使用的学术源
   maxResults     Int      // 请求的最大结果数
   resultCount    Int      // 实际返回的结果数
+  searchParams   Json?    // 完整搜索参数（用于精确重放）
+  resultSnapshot Json?    // 搜索结果快照（用于秒级回放）
   createdAt      DateTime @default(now())
 
   @@index([projectId, createdAt])
