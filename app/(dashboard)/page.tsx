@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Plus, BookOpen, FlaskConical, Calendar, Microscope, Pencil, Trash2 } from "lucide-react";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 interface Project {
   id: string;
@@ -62,7 +63,7 @@ export default function HomePage() {
         setNewDesc("");
       }
     } catch {
-      alert("创建失败");
+      toast.error("创建失败", { description: "无法创建项目，请稍后重试" });
     } finally {
       setCreating(false);
     }
@@ -90,10 +91,10 @@ export default function HomePage() {
         );
         setEditProject(null);
       } else {
-        alert(data.error || "保存失败");
+        toast.error("保存失败", { description: data.error || "无法保存项目信息" });
       }
     } catch {
-      alert("保存失败");
+      toast.error("保存失败", { description: "网络错误，请检查连接后重试" });
     } finally {
       setSaving(false);
     }
@@ -108,10 +109,10 @@ export default function HomePage() {
         setProjects((prev) => prev.filter((p) => p.id !== deleteProject.id));
         setDeleteProject(null);
       } else {
-        alert(data.error || "删除失败");
+        toast.error("删除失败", { description: data.error || "无法删除项目" });
       }
     } catch {
-      alert("删除失败");
+      toast.error("删除失败", { description: "网络错误，请检查连接后重试" });
     }
   }
 
