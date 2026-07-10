@@ -42,6 +42,8 @@ export async function POST(
             method: ext.statistical_test || null,
             conclusion: ext.conclusion || null,
             rawText: ext.evidence_quote || null,
+            pathwayEffects: ext.pathway_effects || undefined,
+            phenotypeEffects: ext.phenotype_effects || undefined,
           },
         });
       }

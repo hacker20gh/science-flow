@@ -20,7 +20,7 @@ export async function GET() {
     });
 
     const projects = await prisma.project.findMany({
-      where: { userId },
+      where: { userId, deletedAt: null },
       orderBy: { updatedAt: "desc" },
       include: {
         _count: { select: { papers: true, experiments: true, timeline: true } },
@@ -59,6 +59,9 @@ export async function POST(req: NextRequest) {
         name: body.name.trim(),
         description: body.description || null,
         userId,
+      },
+      include: {
+        _count: { select: { papers: true, experiments: true, timeline: true } },
       },
     });
 

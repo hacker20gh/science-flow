@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { BookOpen, FlaskConical, Lightbulb, FileText, Search, Brain, TestTube } from "lucide-react";
+import { BookOpen, FlaskConical, Lightbulb, FileText, Search, Brain, TestTube, Pencil } from "lucide-react";
 import { ProjectHealthCheck } from "@/components/project/health-check";
+import { WorkflowProgress } from "@/components/project/workflow-progress";
 
 interface ProjectData {
   id: string;
@@ -24,6 +25,10 @@ export default function ProjectPage({
   const [projectId, setProjectId] = useState<string>("");
   const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     params.then((p) => {
@@ -39,31 +44,42 @@ export default function ProjectPage({
       if (data.project) {
         setProject(data.project);
       } else {
-        // 数据库未配置，使用 demo 数据
-        setProject({
-          id,
-          name: "PD-1 耐药机制在肝癌中的研究",
-          description: "探索 sorafenib 联合 PD-1 抗体在肝癌中的耐药机制",
-          papers: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}` })),
-          experiments: Array.from({ length: 3 }, (_, i) => ({ id: `e${i}` })),
-          hypotheses: Array.from({ length: 2 }, (_, i) => ({ id: `h${i}` })),
-          manuscripts: [{ id: "m1" }],
-          timeline: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
-        });
+        setProject(null);
       }
     } catch {
-      setProject({
-        id,
-        name: "PD-1 耐药机制在肝癌中的研究",
-        description: "探索 sorafenib 联合 PD-1 抗体在肝癌中的耐药机制",
-        papers: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}` })),
-        experiments: Array.from({ length: 3 }, (_, i) => ({ id: `e${i}` })),
-        hypotheses: Array.from({ length: 2 }, (_, i) => ({ id: `h${i}` })),
-        manuscripts: [{ id: "m1" }],
-        timeline: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
-      });
+      setProject(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  function openEdit() {
+    if (!project) return;
+    setEditName(project.name);
+    setEditDesc(project.description ?? "");
+    setShowEdit(true);
+  }
+
+  async function handleSaveEdit() {
+    if (!project || !editName.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim(), description: editDesc.trim() || null }),
+      });
+      const data = await res.json();
+      if (data.project) {
+        setProject((prev) => (prev ? { ...prev, name: data.project.name, description: data.project.description } : prev));
+        setShowEdit(false);
+      } else {
+        alert(data.error || "保存失败");
+      }
+    } catch {
+      alert("保存失败");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -87,13 +103,39 @@ export default function ProjectPage({
     );
   }
 
+  const extractionCount = project.papers.reduce(
+    (sum, p) => sum + ((p as { _count?: { extractions: number } })._count?.extractions || 0),
+    0
+  );
+
   return (
     <main className="p-8 max-w-6xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">{project.name}</h1>
+        <div className="flex items-start gap-3">
+          <h1 className="text-2xl font-bold">{project.name}</h1>
+          <button
+            onClick={openEdit}
+            className="mt-1 p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            title="编辑项目"
+          >
+            <Pencil size={16} />
+          </button>
+        </div>
         {project.description && (
           <p className="text-gray-500 mt-1">{project.description}</p>
         )}
+      </div>
+
+      {/* 工作流进度条 */}
+      <div className="mb-8">
+        <WorkflowProgress
+          paperCount={project.papers.length}
+          extractionCount={extractionCount}
+          hasHypothesis={project.hypotheses.length > 0}
+          experimentCount={project.experiments.length}
+          manuscriptCount={project.manuscripts.length}
+          projectId={projectId}
+        />
       </div>
 
       {/* Quick stats */}
@@ -177,6 +219,46 @@ export default function ProjectPage({
         <h2 className="text-lg font-semibold mb-4">项目健康度</h2>
         <ProjectHealthCheck />
       </section>
+
+      {/* 编辑项目弹窗 */}
+      {showEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowEdit(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+            <h3 className="text-lg font-semibold mb-4">编辑项目</h3>
+            <label className="block text-sm font-medium text-gray-700 mb-1">项目名称</label>
+            <input
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm mb-3"
+              autoFocus
+            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">研究方向</label>
+            <textarea
+              value={editDesc}
+              onChange={(e) => setEditDesc(e.target.value)}
+              rows={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm mb-4 resize-none"
+              placeholder="简要描述（可选）"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowEdit(false)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={!editName.trim() || saving}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -1,17 +1,24 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
 
+/**
+ * 获取项目成员列表
+ *
+ * 始终返回有效响应（members + owner），不会返回错误状态码。
+ * 这样前端可以安全调用，失败时静默降级为空列表。
+ */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  // 数据库未配置时返回空列表，不报错
   if (!prisma) {
-    return Response.json({ error: "数据库未配置", members: [], owner: null });
+    return Response.json({ members: [], owner: null });
   }
 
-  const { projectId } = await params;
-
   try {
+    const { projectId } = await params;
+
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {
@@ -20,16 +27,17 @@ export async function GET(
     });
 
     if (!project) {
-      return Response.json({ error: "项目不存在" }, { status: 404 });
+      // 项目不存在时也返回空列表，不报错
+      return Response.json({ members: [], owner: null });
     }
 
     return Response.json({
       owner: project.user,
       members: [project.user],
     });
-  } catch (error) {
-    console.error("Failed to get members:", error);
-    return Response.json({ error: "获取成员失败" }, { status: 500 });
+  } catch {
+    // 查询失败时静默降级，不返回错误状态码
+    return Response.json({ members: [], owner: null });
   }
 }
 

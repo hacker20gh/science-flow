@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { designExperiment } from "@/lib/llm/experiment-design";
+import { createSSEStream } from "@/lib/llm/streaming";
 
 export async function POST(req: NextRequest) {
   try {
@@ -7,24 +8,26 @@ export async function POST(req: NextRequest) {
     const { hypothesis, matrixSummary, existingExperiments, gapOrConflict } = body;
 
     if (!hypothesis) {
-      return NextResponse.json(
-        { error: "hypothesis is required" },
-        { status: 400 }
-      );
+      return new Response(JSON.stringify({ error: "hypothesis is required" }), { status: 400 });
     }
 
-    const design = await designExperiment({
-      hypothesis,
-      matrixSummary: matrixSummary || "暂无矩阵数据",
-      existingExperiments: existingExperiments || [],
-      gapOrConflict,
-    });
+    return createSSEStream(async (emit) => {
+      emit({ type: "progress", step: "正在分析研究背景...", current: 0, total: 1 });
 
-    return NextResponse.json(design);
+      const design = await designExperiment({
+        hypothesis,
+        matrixSummary: matrixSummary || "暂无矩阵数据",
+        existingExperiments: existingExperiments || [],
+        gapOrConflict,
+      });
+
+      emit({ type: "progress", step: "实验设计完成", current: 1, total: 1 });
+      emit({ type: "result", data: design });
+    });
   } catch (error) {
     console.error("Experiment design error:", error);
-    return NextResponse.json(
-      { error: "Failed to generate experiment design" },
+    return new Response(
+      JSON.stringify({ error: "Failed to generate experiment design" }),
       { status: 500 }
     );
   }

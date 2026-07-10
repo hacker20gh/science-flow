@@ -6,6 +6,7 @@ import { searchPubMed, type PubMedPaper } from "./pubmed";
 import { searchSemanticScholar, type S2Paper } from "./semantic-scholar";
 import { searchOpenAlex, type OpenAlexPaper } from "./openalex";
 import { findOaPdf } from "./unpaywall";
+import { checkBioRxiv } from "./biorxiv";
 
 export interface UnifiedPaper {
   pmid: string | null;
@@ -105,6 +106,54 @@ export async function enrichWithOa(
       paper.oaStatus = oa.oaStatus;
     } catch {
       // ignore
+    }
+  }
+
+  return papers;
+}
+
+/**
+ * 用 bioRxiv 补充预印本的 PDF 下载链接
+ *
+ * 对于没有 OA PDF 的论文，检查其 DOI 是否在 bioRxiv 上有预印本版本，
+ * 如果有则补充 PDF URL。bioRxiv API 免费无需 key。
+ */
+export async function enrichWithBioRxiv(
+  papers: UnifiedPaper[]
+): Promise<UnifiedPaper[]> {
+  // 只处理有 DOI 但没有 PDF 链接的论文
+  const candidates = papers.filter((p) => p.doi && !p.oaPdfUrl);
+
+  // 批量检查（限制数量避免请求过多）
+  const doisToCheck = candidates.slice(0, 15).map((p) => p.doi!);
+  if (doisToCheck.length === 0) return papers;
+
+  let biorxivMap: Map<string, { pdfUrl: string; category: string }>;
+  try {
+    const fullMap = await checkBioRxiv(doisToCheck);
+    biorxivMap = new Map();
+    for (const [doi, paper] of fullMap) {
+      biorxivMap.set(doi, { pdfUrl: paper.pdfUrl, category: paper.category });
+    }
+  } catch {
+    // bioRxiv 查询失败不影响主流程
+    return papers;
+  }
+
+  // 补充 bioRxiv PDF 链接
+  for (const paper of candidates.slice(0, 15)) {
+    const info = biorxivMap.get(paper.doi!);
+    if (info) {
+      paper.oaPdfUrl = info.pdfUrl;
+      paper.isOpenAccess = true;
+      paper.oaStatus = "green";
+      if (!paper.sources.includes("biorxiv")) {
+        paper.sources.push("biorxiv");
+      }
+      // 如果期刊字段为空，填入分类信息
+      if (!paper.journal) {
+        paper.journal = `bioRxiv (${info.category})`;
+      }
     }
   }
 

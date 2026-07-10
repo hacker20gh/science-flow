@@ -3,16 +3,25 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Timeline } from "@/components/timeline/timeline";
-import { useProjectStore } from "@/store/project-store";
 import type { TimelineEvent } from "@/lib/timeline/events";
+
+// 本地 demo 数据 — 仅当 DB 为空时显示，不影响其他项目
+const DEMO_EVENTS: TimelineEvent[] = [
+  {
+    id: "demo-1",
+    type: "literature_search",
+    title: "搜索文献",
+    description: "这是示例数据 — 真实项目中搜索文献后会自动生成事件",
+    timestamp: Date.now(),
+  },
+];
 
 export default function TimelinePage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const { timeline, loadDemoTimeline } = useProjectStore();
-  const [dbEvents, setDbEvents] = useState<TimelineEvent[] | null>(null);
+  const [dbEvents, setDbEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showDemo, setShowDemo] = useState(false);
 
-  // 优先从数据库加载，失败则用 demo 数据
   useEffect(() => {
     fetch(`/api/projects/${projectId}/timeline`)
       .then((r) => r.json())
@@ -23,20 +32,20 @@ export default function TimelinePage() {
               id: e.id as string,
               type: e.type as TimelineEvent["type"],
               title: e.title as string,
-              description: (e.content as Record<string, unknown>)?.description as string || "",
+              description: ((e.content as Record<string, unknown>)?.description as string) || "",
               timestamp: new Date(e.createdAt as string),
               metadata: e.metadata as Record<string, unknown> | undefined,
             }))
           );
         } else {
-          loadDemoTimeline();
+          setShowDemo(true);
         }
       })
-      .catch(() => loadDemoTimeline())
+      .catch(() => setShowDemo(true))
       .finally(() => setLoading(false));
-  }, [projectId, loadDemoTimeline]);
+  }, [projectId]);
 
-  const events = dbEvents || timeline;
+  const events = dbEvents.length > 0 ? dbEvents : (showDemo ? DEMO_EVENTS : []);
 
   return (
     <main className="p-8 max-w-3xl mx-auto">
@@ -46,6 +55,12 @@ export default function TimelinePage() {
           项目的所有事件——搜索、提取、实验、转向，包括失败
         </p>
       </div>
+
+      {showDemo && dbEvents.length === 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-700">
+          📋 当前显示的是示例数据。项目中的真实事件会替换这里。
+        </div>
+      )}
 
       {loading && (
         <div className="text-gray-400 text-sm py-8 text-center">加载中...</div>

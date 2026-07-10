@@ -14,29 +14,46 @@ model User {
   name      String?
   avatar    String?
   password  String?  // bcrypt 哈希后的密码
+  llmConfig Json?    // { baseUrl, models: { extraction, chat, analysis } }
   projects  Project[]
+  chatMessages ChatMessage[]
+  createdAt DateTime @default(now())
+}
+
+// ===== 用户设置（通用 KV 存储） =====
+
+model UserSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 }
 
 // ===== 项目 =====
 
 model Project {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   description String?
   userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+  deletedAt   DateTime? // 软删除：null=正常，非null=在回收站
 
   papers       Paper[]
   experiments  Experiment[]
   hypotheses   Hypothesis[]
   timeline     TimelineEvent[]
   manuscripts  Manuscript[]
+  chatMessages ChatMessage[]
+  searchHistory SearchHistory[]
+  matrix       MechanismMatrix?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+  @@index([userId, deletedAt])
 }
 
 // ===== 文献 =====
@@ -44,7 +61,7 @@ model Project {
 model Paper {
   id           String   @id @default(cuid())
   projectId    String
-  project      Project  @relation(fields: [projectId], references: [id])
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   doi          String?  @unique
   pmid         String?
@@ -77,13 +94,17 @@ model Extraction {
   drugName     String?  // 药物/干预名称
   drugConc     String?  // 药物浓度
   cellLine     String?  // 细胞系
-  pathway      String?  // 信号通路
+  pathway      String?  // 信号通路（第一个，向后兼容）
   pathwayDir   String?  // up, down, no_change
-  phenotype    String?  // 表型
+  phenotype    String?  // 表型（第一个，向后兼容）
   phenotypeDir String?  // up, down, no_change
   method       String?  // 实验方法
   conclusion   String?  // 关键结论
   rawText      String?  // 原文片段（用于溯源）
+
+  // 完整的通路/表型效应（多值）
+  pathwayEffects  Json?   // [{ pathway, direction, significance, method }]
+  phenotypeEffects Json?  // [{ phenotype, direction, fold_change }]
 
   confidence Float?    // LLM 提取置信度 0-1
   verified   Boolean   @default(false)
@@ -96,7 +117,7 @@ model Extraction {
 model Hypothesis {
   id        String  @id @default(cuid())
   projectId String
-  project   Project @relation(fields: [projectId], references: [id])
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   statement  String   // 假设陈述
   status     String   // pending, testing, supported, refused, revised
@@ -114,7 +135,7 @@ model Hypothesis {
 model Experiment {
   id           String    @id @default(cuid())
   projectId    String
-  project      Project   @relation(fields: [projectId], references: [id])
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   hypothesisId String?
   hypothesis   Hypothesis? @relation(fields: [hypothesisId], references: [id])
 
@@ -152,7 +173,7 @@ model ExperimentData {
 model TimelineEvent {
   id        String  @id @default(cuid())
   projectId String
-  project   Project @relation(fields: [projectId], references: [id])
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   type       String // literature, hypothesis, experiment_design,
                     // experiment_fail, experiment_success,
@@ -172,7 +193,7 @@ model TimelineEvent {
 model Manuscript {
   id        String  @id @default(cuid())
   projectId String
-  project   Project @relation(fields: [projectId], references: [id])
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   journal  String?
   language String @default("en")
@@ -188,4 +209,52 @@ model Manuscript {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ===== AI 对话消息 =====
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  role      String   // "user" | "assistant" | "system"
+  content   String
+  metadata  Json?    // token usage, model used, tool calls, etc.
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([userId])
+}
+
+// ===== 搜索历史 =====
+
+model SearchHistory {
+  id             String   @id @default(cuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  query          String   // 用户输入的原始搜索词
+  optimizedQuery String?  // LLM 优化后的搜索词
+  sources        String[] // 使用的学术源
+  maxResults     Int      // 请求的最大结果数
+  resultCount    Int      // 实际返回的结果数
+  createdAt      DateTime @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+// ===== 机制矩阵（持久化） =====
+
+model MechanismMatrix {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  data      Json     // MatrixData 的 JSON 序列化（rows, columns, conflicts, gaps）
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId])
+  @@index([projectId])
 }

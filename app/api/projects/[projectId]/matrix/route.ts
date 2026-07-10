@@ -1,0 +1,84 @@
+import { NextRequest } from "next/server";
+import { prisma } from "@/lib/db-server";
+
+/**
+ * GET: 返回当前项目的机制矩阵（从 DB 读取），如无则返回 null
+ * POST: 保存/更新机制矩阵到 DB（upsert，每个项目只保留一份）
+ * DELETE: 清空当前项目的机制矩阵
+ */
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+
+  const { projectId } = await params;
+
+  try {
+    const matrix = await prisma.mechanismMatrix.findUnique({
+      where: { projectId },
+      select: { data: true, updatedAt: true },
+    });
+
+    return Response.json({ matrix: matrix ?? null });
+  } catch (error) {
+    console.error("Failed to read matrix:", error);
+    return Response.json({ error: "获取矩阵失败" }, { status: 500 });
+  }
+}
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+
+  const { projectId } = await params;
+
+  try {
+    const body = await req.json();
+    const { data } = body;
+
+    if (!data || typeof data !== "object") {
+      return Response.json({ error: "矩阵数据无效" }, { status: 400 });
+    }
+
+    const record = await prisma.mechanismMatrix.upsert({
+      where: { projectId },
+      update: { data },
+      create: { projectId, data },
+      select: { id: true, updatedAt: true },
+    });
+
+    return Response.json({ matrix: record });
+  } catch (error) {
+    console.error("Failed to save matrix:", error);
+    return Response.json({ error: "保存矩阵失败" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+
+  const { projectId } = await params;
+
+  try {
+    await prisma.mechanismMatrix.deleteMany({
+      where: { projectId },
+    });
+    return Response.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to delete matrix:", error);
+    return Response.json({ error: "清空矩阵失败" }, { status: 500 });
+  }
+}

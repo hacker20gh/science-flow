@@ -49,6 +49,7 @@ export function ProjectShell({ projectId, children }: ProjectShellProps) {
       <ChatPanel
         isOpen={chatOpen}
         onToggle={() => setChatOpen(!chatOpen)}
+        projectId={projectId}
         projectContext={projectContext}
       />
     </>

@@ -2,7 +2,10 @@
  * 实验设计 LLM 引擎
  */
 
-import { getLLMClient, MODELS } from "./client";
+import { z } from "zod";
+import { getLLMClient, MODELS, withLLMRetry } from "./client";
+import { calculateSampleSize } from "@/lib/power-analysis";
+import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
 
 export interface ExperimentDesign {
   name: string;
@@ -29,6 +32,55 @@ export interface ExperimentDesign {
   expected_outcomes: Array<{ scenario: string; interpretation: string; nextStep: string }>;
   references: string[];
 }
+
+const ExperimentDesignSchema = z.object({
+  name: z.string(),
+  hypothesis: z.string(),
+  rationale: z.string(),
+  variables: z.object({
+    independent: z.array(z.string()),
+    dependent: z.array(z.string()),
+    controlled: z.array(z.string()),
+  }),
+  groups: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    purpose: z.string(),
+  })),
+  protocol: z.object({
+    cellLine: z.string(),
+    passage: z.string().nullable(),
+    reagents: z.array(z.object({
+      name: z.string(),
+      concentration: z.string(),
+      source: z.string().nullable(),
+    })),
+    steps: z.array(z.object({
+      day: z.string(),
+      action: z.string(),
+      details: z.string(),
+    })),
+    readouts: z.array(z.string()),
+    duration: z.string(),
+  }),
+  controls_check: z.object({
+    has_vehicle: z.boolean(),
+    has_positive: z.boolean(),
+    has_negative: z.boolean(),
+    missing: z.array(z.string()),
+    suggestions: z.array(z.string()),
+  }),
+  sample_size: z.object({
+    recommended: z.number(),
+    rationale: z.string(),
+  }),
+  expected_outcomes: z.array(z.object({
+    scenario: z.string(),
+    interpretation: z.string(),
+    nextStep: z.string(),
+  })),
+  references: z.array(z.string()),
+});
 
 const DESIGN_TOOL = {
   name: "design_experiment",
@@ -137,22 +189,46 @@ export async function designExperiment(params: {
   existingExperiments: string[];
   gapOrConflict?: string;
 }): Promise<ExperimentDesign> {
-  const client = getLLMClient();
-  const context = `假设: ${params.hypothesis}\n\n机制矩阵摘要: ${params.matrixSummary}\n\n已完成实验: ${params.existingExperiments.join("; ")}${params.gapOrConflict ? `\n\n触发原因: ${params.gapOrConflict}` : ""}`;
+  return withLLMRetry(async () => {
+    const client = getLLMClient();
+    const context = `假设: ${params.hypothesis}\n\n机制矩阵摘要: ${params.matrixSummary}\n\n已完成实验: ${params.existingExperiments.join("; ")}${params.gapOrConflict ? `\n\n触发原因: ${params.gapOrConflict}` : ""}`;
 
-  const response = await client.messages.create({
-    model: MODELS.analysis,
-    max_tokens: 8192,
-    system: "You are an expert biomedical researcher designing experiments. Design a rigorous experiment with proper controls, adequate sample size, and clear expected outcomes. Be specific about reagents, cell lines, concentrations, and timing. Cite specific papers as rationale.",
-    tools: [DESIGN_TOOL as any],
-    tool_choice: { type: "tool", name: "design_experiment" },
-    messages: [{ role: "user", content: `Design an experiment based on this context:\n\n${context}` }],
-  });
+    const userMessage = `Design an experiment based on this context:\n\n${context}`;
 
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "design_experiment") {
-      return block.input as ExperimentDesign;
+    const systemPrompt = "You are an expert biomedical researcher designing experiments. Design a rigorous experiment with proper controls, adequate sample size, and clear expected outcomes. Be specific about reagents, cell lines, concentrations, and timing. Cite specific papers as rationale.\n\nCRITICAL: You MUST return ONLY a JSON object with this exact structure:\n{\"name\":\"string\",\"hypothesis\":\"string\",\"rationale\":\"string\",\"variables\":{\"independent\":[\"string\"],\"dependent\":[\"string\"],\"controlled\":[\"string\"]},\"groups\":[{\"name\":\"string\",\"description\":\"string\",\"purpose\":\"string\"}],\"protocol\":{\"cellLine\":\"string\",\"passage\":\"string or null\",\"reagents\":[{\"name\":\"string\",\"concentration\":\"string\",\"source\":\"string or null\"}],\"steps\":[{\"day\":\"string\",\"action\":\"string\",\"details\":\"string\"}],\"readouts\":[\"string\"],\"duration\":\"string\"},\"controls_check\":{\"has_vehicle\":true,\"has_positive\":true,\"has_negative\":true,\"missing\":[\"string\"],\"suggestions\":[\"string\"]},\"sample_size\":{\"recommended\":20,\"rationale\":\"string\"},\"expected_outcomes\":[{\"scenario\":\"string\",\"interpretation\":\"string\",\"nextStep\":\"string\"}],\"references\":[\"string\"]}\nDo NOT wrap in markdown code blocks.";
+
+    const response = await client.messages.create({
+      model: MODELS.analysis,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    const design = await extractStructuredOutput(response, ExperimentDesignSchema, {
+      label: "experiment-design",
+      retryFn: createRetryFunction(client, {
+        model: MODELS.analysis,
+        maxTokens: 8192,
+        system: "You are an expert biomedical researcher designing experiments. Design a rigorous experiment with proper controls, adequate sample size, and clear expected outcomes. Be specific about reagents, cell lines, concentrations, and timing. Cite specific papers as rationale.",
+        userMessage,
+        originalContent: userMessage,
+      }),
+    });
+
+    // 基于 power analysis 增强样本量推荐
+    try {
+      const powerResult = calculateSampleSize({
+        effectSize: 0.5, // 中等效应量（Cohen's d），生物医学实验常用默认值
+        alpha: 0.05,
+        power: 0.80,
+      });
+      design.sample_size.recommended = powerResult.totalSampleSize;
+      design.sample_size.rationale =
+        `${design.sample_size.rationale}\n\n${powerResult.rationale}`;
+    } catch {
+      // power analysis 失败时不覆盖 LLM 原始推荐
     }
-  }
-  throw new Error("Failed to generate experiment design");
+
+    return design;
+  }, { label: "experiment-design" });
 }

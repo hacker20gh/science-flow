@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { GitBranch, Activity, AlertTriangle } from "lucide-react";
 import type {
   MatrixData,
   MatrixRow,
@@ -67,8 +68,9 @@ export function MechanismMatrix({ data, onCellClick }: MechanismMatrixProps) {
           {data.totalPapers} 篇文献 · {data.totalExperiments} 个实验 ·{" "}
           {visibleColumns.length} 个维度
           {data.conflicts.length > 0 && (
-            <span className="ml-2 text-amber-600">
-              ⚠️ {data.conflicts.length} 个冲突
+            <span className="ml-2 text-amber-600 inline-flex items-center gap-1">
+              <AlertTriangle size={12} />
+              {data.conflicts.length} 个冲突
             </span>
           )}
         </div>
@@ -77,8 +79,9 @@ export function MechanismMatrix({ data, onCellClick }: MechanismMatrixProps) {
       {/* 冲突摘要 */}
       {data.conflicts.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <p className="text-xs text-amber-800 font-medium mb-1">
-            ⚠️ 发现 {data.conflicts.length} 个冲突
+          <p className="text-xs text-amber-800 font-medium mb-1 inline-flex items-center gap-1">
+            <AlertTriangle size={12} />
+            发现 {data.conflicts.length} 个冲突
           </p>
           {data.conflicts.map((c) => (
             <p key={c.columnId} className="text-xs text-amber-700">
@@ -102,7 +105,14 @@ export function MechanismMatrix({ data, onCellClick }: MechanismMatrixProps) {
                   key={col.id}
                   className="px-3 py-2 text-center font-medium text-gray-600 min-w-[100px]"
                 >
-                  <div>{col.label}</div>
+                  <div className="flex items-center justify-center gap-1">
+                    {col.type === "pathway" ? (
+                      <GitBranch size={14} className="text-purple-500 shrink-0" />
+                    ) : (
+                      <Activity size={14} className="text-teal-500 shrink-0" />
+                    )}
+                    <span>{col.label}</span>
+                  </div>
                   <div className="text-[10px] text-gray-400 font-normal">
                     {col.type === "pathway" ? "通路" : "表型"} · {col.count} 篇
                   </div>

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { readFile } from "fs/promises";
 import path from "path";
-import { extractFromText } from "@/lib/llm/extraction";
+import { extractFromText, smartTruncate } from "@/lib/llm/extraction";
 import { prisma } from "@/lib/db-server";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
     }
 
     const title = safeFileName.replace(/\.pdf$/i, "").replace(/_/g, " ");
-    const extraction = await extractFromText(fullText.slice(0, 15000), title);
+    const truncatedText = smartTruncate(fullText);
+    const extraction = await extractFromText(truncatedText, title);
 
     if (prisma && paperId && !paperId.startsWith("local-")) {
       try {
@@ -57,6 +58,8 @@ export async function POST(req: NextRequest) {
                   method: exp.statistical_test || null,
                   conclusion: exp.conclusion || null,
                   rawText: exp.evidence_quote || null,
+                  pathwayEffects: exp.pathway_effects || undefined,
+                  phenotypeEffects: exp.phenotype_effects || undefined,
                 },
               });
             }

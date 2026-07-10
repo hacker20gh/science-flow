@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { generateManuscript } from "@/lib/llm/manuscript";
+import { createSSEStream } from "@/lib/llm/streaming";
 
 export async function POST(req: NextRequest) {
   try {
@@ -7,26 +8,52 @@ export async function POST(req: NextRequest) {
     const { projectName, hypothesis, matrixSummary, papers, experiments, section } = body;
 
     if (!projectName || !hypothesis) {
-      return NextResponse.json(
-        { error: "projectName and hypothesis are required" },
+      return new Response(
+        JSON.stringify({ error: "projectName and hypothesis are required" }),
         { status: 400 }
       );
     }
 
-    const manuscript = await generateManuscript({
-      projectName,
-      hypothesis,
-      matrixSummary: matrixSummary || "",
-      papers: papers || [],
-      experiments: experiments || [],
-      section: section || "all",
-    });
+    return createSSEStream(async (emit) => {
+      emit({
+        type: "progress",
+        step: "正在分析项目数据...",
+        current: 0,
+        total: 5,
+      });
 
-    return NextResponse.json(manuscript);
+      // 单次 LLM 调用生成全部章节
+      // tool_use 强制输出结构化 JSON，无法逐章节流式
+      // 但通过 progress 事件让用户知道正在处理
+      const manuscript = await generateManuscript({
+        projectName,
+        hypothesis,
+        matrixSummary: matrixSummary || "",
+        papers: papers || [],
+        experiments: experiments || [],
+        section: section || "all",
+      });
+
+      // 逐章节 emit 进度 + 结果
+      const sectionNames = ["abstract", "introduction", "methods", "results", "discussion"] as const;
+      for (let i = 0; i < sectionNames.length; i++) {
+        const name = sectionNames[i];
+        if (manuscript[name]) {
+          emit({
+            type: "progress",
+            step: `✓ ${name.charAt(0).toUpperCase() + name.slice(1)} 完成`,
+            current: i + 1,
+            total: 5,
+          });
+        }
+      }
+
+      emit({ type: "result", data: manuscript });
+    });
   } catch (error) {
     console.error("Manuscript generation error:", error);
-    return NextResponse.json(
-      { error: "Failed to generate manuscript" },
+    return new Response(
+      JSON.stringify({ error: "Failed to generate manuscript" }),
       { status: 500 }
     );
   }

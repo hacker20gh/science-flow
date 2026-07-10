@@ -15,7 +15,10 @@ export async function GET(
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {
-        papers: { orderBy: { createdAt: "desc" } },
+        papers: {
+          orderBy: { createdAt: "desc" },
+          include: { _count: { select: { extractions: true } } },
+        },
         experiments: { orderBy: { createdAt: "desc" } },
         hypotheses: { orderBy: { createdAt: "desc" } },
         timeline: { orderBy: { sortOrder: "asc" } },
@@ -81,7 +84,10 @@ export async function DELETE(
   const { projectId } = await params;
 
   try {
-    await prisma.project.delete({ where: { id: projectId } });
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { deletedAt: new Date() },
+    });
     return Response.json({ ok: true });
   } catch (error) {
     console.error("Failed to delete project:", error);

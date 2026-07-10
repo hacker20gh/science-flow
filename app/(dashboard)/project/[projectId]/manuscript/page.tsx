@@ -15,6 +15,15 @@ const SECTIONS = [
   { id: "discussion", label: "Discussion", desc: "解读结果，联系文献" },
 ] as const;
 
+/** 转义 HTML 特殊字符，防止 XSS */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export default function ManuscriptPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const { papers, matrix } = useProjectStore();
@@ -135,6 +144,55 @@ export default function ManuscriptPage() {
                 className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
               >
                 下载 Word
+              </button>
+              <button
+                onClick={() => {
+                  const sectionOrder = ["abstract", "introduction", "methods", "results", "discussion"] as const;
+                  const sectionTitles: Record<string, string> = {
+                    abstract: "Abstract",
+                    introduction: "Introduction",
+                    methods: "Methods",
+                    results: "Results",
+                    discussion: "Discussion",
+                  };
+
+                  const contentHtml = sectionOrder
+                    .filter((s) => draft[s]?.content)
+                    .map(
+                      (s) =>
+                        `<h2>${sectionTitles[s]}</h2>` +
+                        `<div style="white-space:pre-wrap;font-size:12pt;line-height:1.6;margin-bottom:1.5em">${escapeHtml(draft[s]!.content)}</div>`
+                    )
+                    .join("\n");
+
+                  const printWindow = window.open("", "_blank");
+                  if (printWindow) {
+                    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Manuscript - PDF Export</title>
+  <style>
+    body { font-family: 'Times New Roman', serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #000; }
+    h2 { font-size: 16pt; margin-top: 1.5em; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+    @media print { body { margin: 1in; } }
+  </style>
+</head>
+<body>
+  <h1 style="text-align:center;font-size:20pt">Research Article</h1>
+  <div style="text-align:center;margin-bottom:2em;font-size:12pt;color:#555">Author Name</div>
+  ${contentHtml}
+</body>
+</html>`);
+                    printWindow.document.close();
+                    printWindow.focus();
+                    // 给浏览器一点时间渲染，再弹出打印对话框
+                    setTimeout(() => printWindow.print(), 300);
+                  }
+                }}
+                className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+              >
+                下载 PDF
               </button>
               <button
                 onClick={async () => {

@@ -36,6 +36,9 @@ export interface StoredPaper {
 }
 
 interface ProjectState {
+  // 当前项目 ID（由页面挂载时设置，用于 API 调用）
+  projectId: string | null;
+
   // 文献
   papers: StoredPaper[];
 
@@ -44,6 +47,9 @@ interface ProjectState {
 
   // 时间线
   timeline: TimelineEvent[];
+
+  // Actions — 项目
+  loadProject: (projectId: string) => void;
 
   // Actions — 文献
   addPapers: (papers: StoredPaper[]) => void;
@@ -70,9 +76,16 @@ interface ProjectState {
 // ===== Store =====
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
+  projectId: null,
   papers: [],
   matrix: null,
   timeline: [],
+
+  // ===== 项目操作 =====
+
+  loadProject: (projectId) => {
+    set({ projectId });
+  },
 
   // ===== 文献操作 =====
 
@@ -131,13 +144,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   refreshMatrix: () => {
-    const { papers } = get();
+    const { papers, projectId } = get();
     const extracted = papers.filter(
       (p) => p.extractionStatus === "done" && p.experiments.length > 0
     );
 
     if (extracted.length === 0) {
       set({ matrix: null });
+      // 有 projectId 时清空 DB 中的矩阵
+      if (projectId) {
+        fetch(`/api/projects/${projectId}/matrix`, { method: "DELETE" }).catch(
+          () => {}
+        );
+      }
       return;
     }
 
@@ -151,6 +170,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     );
 
     set({ matrix });
+
+    // fire-and-forget: 持久化到 DB
+    if (projectId) {
+      fetch(`/api/projects/${projectId}/matrix`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: matrix }),
+      }).catch(() => {});
+    }
   },
 
   getExtractedPapers: () => {

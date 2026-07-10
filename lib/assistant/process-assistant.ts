@@ -8,6 +8,10 @@
 
 import type { StoredPaper } from "@/store/project-store";
 import type { MatrixData } from "@/lib/matrix/generator";
+// 注意：不要静态导入 getLLMClient/MODELS/withLLMRetry
+// 因为它们会拉入 @anthropic-ai/sdk → @prisma/adapter-pg → pg（Node.js 模块）
+// 在客户端浏览器中这些模块不可用，会导致 500 错误
+// 在 enrichWithLLM 函数中使用动态 import() 代替
 
 export type AssistantPriority = "high" | "medium" | "low";
 
@@ -21,6 +25,7 @@ export interface AssistantCard {
   actionHref?: string;
   learnMoreSlug?: string;
   dismissible: boolean;
+  enriched?: boolean; // 标记是否已经 LLM 增强
 }
 
 // ===== 触发规则 =====
@@ -179,3 +184,5 @@ export function calculateHypothesisStrength(params: {
   if (score >= 40) return { score, label: "证据矛盾", color: "text-amber-600" };
   return { score, label: "证据不足", color: "text-red-600" };
 }
+// enrichWithLLM 已移至 app/api/assistant/enrich/route.ts（服务端专属）
+// 避免将 @anthropic-ai/sdk → pg 拉入客户端 bundle

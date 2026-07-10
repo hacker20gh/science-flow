@@ -2,48 +2,94 @@
 
 import { useState, useEffect } from "react";
 
-const STORAGE_KEY = "sciflow-llm-config";
+const DEFAULT_BASE_URL = "http://127.0.0.1:15721";
 
-interface LLMConfig {
-  baseUrl: string;
-}
-
-const DEFAULT_CONFIG: LLMConfig = {
-  baseUrl: "http://127.0.0.1:15721/v1",
+const DEFAULT_MODELS = {
+  extraction: "claude-haiku-4-5",
+  chat: "claude-sonnet-5",
+  analysis: "claude-opus-4-8",
 };
 
 // CCS 角色选项 —— 只有这三个，CCS 自动映射到当前供应商
 const ROLE_OPTIONS = [
-  { label: "快速 (Haiku)", value: "extraction", model: "claude-haiku-4-5", desc: "批量处理，速度快" },
-  { label: "平衡 (Sonnet)", value: "chat", model: "claude-sonnet-5", desc: "日常对话，质量速度均衡" },
-  { label: "最强 (Opus)", value: "analysis", model: "claude-opus-4-8", desc: "深度推理，实验设计/排障/论文" },
+  { label: "快速 (Haiku)", value: "extraction" as const, desc: "批量处理，速度快" },
+  { label: "平衡 (Sonnet)", value: "chat" as const, desc: "日常对话，质量速度均衡" },
+  { label: "最强 (Opus)", value: "analysis" as const, desc: "深度推理，实验设计/排障/论文" },
 ];
 
-function loadConfig(): LLMConfig {
-  if (typeof window === "undefined") return DEFAULT_CONFIG;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
-  } catch {}
-  return DEFAULT_CONFIG;
-}
-
-function saveConfig(config: LLMConfig) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-}
-
 export default function SettingsPage() {
-  const [config, setConfig] = useState<LLMConfig>(DEFAULT_CONFIG);
-  const [saved, setSaved] = useState(false);
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
+  const [models, setModels] = useState(DEFAULT_MODELS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  // Load saved settings on mount
   useEffect(() => {
-    setConfig(loadConfig());
+    async function load() {
+      try {
+        const res = await fetch("/api/settings");
+        const data = await res.json();
+        if (data.config?.baseUrl) {
+          setBaseUrl(data.config.baseUrl);
+        }
+        if (data.config?.models && typeof data.config.models === "object") {
+          setModels((prev) => ({
+            extraction: data.config.models.extraction || prev.extraction,
+            chat: data.config.models.chat || prev.chat,
+            analysis: data.config.models.analysis || prev.analysis,
+          }));
+        }
+      } catch {
+        // Keep default
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, []);
 
-  function handleSave() {
-    saveConfig(config);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  function showToast(type: "success" | "error", message: string) {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 2500);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl, models }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast("success", "设置已保存到数据库");
+      } else {
+        showToast("error", data.error || "保存失败");
+      }
+    } catch {
+      showToast("error", "网络错误，请重试");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleReset() {
+    setBaseUrl(DEFAULT_BASE_URL);
+    setModels(DEFAULT_MODELS);
+    showToast("success", "已重置为默认值，点击「保存设置」生效");
+  }
+
+  if (loading) {
+    return (
+      <main className="p-8 max-w-2xl mx-auto">
+        <div className="flex items-center justify-center py-20">
+          <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-blue-600" />
+          <span className="ml-3 text-sm text-gray-500">加载设置中...</span>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -51,12 +97,25 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold mb-1">⚙️ 设置</h1>
       <p className="text-gray-500 text-sm mb-8">配置 CCS 网关和模型角色</p>
 
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`fixed top-6 right-6 z-50 px-4 py-2 rounded-lg text-sm font-medium shadow-lg transition-all ${
+            toast.type === "success"
+              ? "bg-green-600 text-white"
+              : "bg-red-600 text-white"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
+
       {/* CCS 地址 */}
       <section className="mb-8">
         <h2 className="text-sm font-medium text-gray-700 mb-3">CCS 网关地址</h2>
         <input
-          value={config.baseUrl}
-          onChange={(e) => setConfig((prev) => ({ ...prev, baseUrl: e.target.value }))}
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm font-mono"
           placeholder="http://127.0.0.1:15721/v1"
         />
@@ -75,11 +134,18 @@ export default function SettingsPage() {
         <div className="space-y-3">
           {ROLE_OPTIONS.map((role) => (
             <div key={role.value} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-              <div>
+              <div className="shrink-0">
                 <div className="text-sm font-medium">{role.label}</div>
                 <div className="text-xs text-gray-400 mt-0.5">{role.desc}</div>
               </div>
-              <code className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded">{role.model}</code>
+              <input
+                value={models[role.value]}
+                onChange={(e) =>
+                  setModels((prev) => ({ ...prev, [role.value]: e.target.value }))
+                }
+                className="ml-4 flex-1 max-w-xs px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder={DEFAULT_MODELS[role.value]}
+              />
             </div>
           ))}
         </div>
@@ -89,13 +155,17 @@ export default function SettingsPage() {
       <div className="flex items-center gap-3">
         <button
           onClick={handleSave}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          disabled={saving}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {saved ? "✅ 已保存" : "保存设置"}
+          {saving ? "保存中..." : "保存设置"}
         </button>
-        {saved && (
-          <span className="text-xs text-green-600">设置已保存</span>
-        )}
+        <button
+          onClick={handleReset}
+          className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50"
+        >
+          重置为默认
+        </button>
       </div>
 
       {/* 说明 */}

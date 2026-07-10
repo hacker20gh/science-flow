@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aggregateSearch, enrichWithOa } from "@/lib/academic/aggregator";
 import { preprocessQuery } from "@/lib/llm/query-preprocessor";
+import { prisma } from "@/lib/db-server";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
       query,
+      projectId,
       maxResults = 20,
       minYear,
       maxYear,
@@ -43,6 +45,25 @@ export async function POST(req: NextRequest) {
     // 4. OA 偏好排序
     if (onlyOpenAccess) {
       enriched.sort((a, b) => (b.oaPdfUrl ? 1 : 0) - (a.oaPdfUrl ? 1 : 0));
+    }
+
+    // 5. 记录搜索历史（fire-and-forget，不阻断搜索结果返回）
+    if (projectId && typeof projectId === "string" && prisma) {
+      const allSources = [...new Set(enriched.flatMap((p) => p.sources || []))];
+      prisma.searchHistory
+        .create({
+          data: {
+            projectId,
+            query,
+            optimizedQuery: processed.optimizedQuery,
+            sources: allSources,
+            maxResults,
+            resultCount: enriched.length,
+          },
+        })
+        .catch((err: unknown) =>
+          console.error("Failed to record search history:", err)
+        );
     }
 
     return NextResponse.json({

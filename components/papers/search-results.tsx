@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Download, Loader2, Check } from "lucide-react";
+import { useState, useRef } from "react";
+import { Download, Loader2, Check, Upload } from "lucide-react";
 
 export interface Paper {
   pmid: string | null;
@@ -29,6 +29,10 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
+  const [uploading, setUploading] = useState<Set<string>>(new Set());
+  const [uploaded, setUploaded] = useState<Set<string>>(new Set());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingUploadPaper, setPendingUploadPaper] = useState<Paper | null>(null);
 
   function toggle(paper: Paper) {
     const key = paperKey(paper);
@@ -80,10 +84,60 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
     }
   }
 
+  function handleUploadClick(paper: Paper, e: React.MouseEvent) {
+    e.stopPropagation();
+    setPendingUploadPaper(paper);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !pendingUploadPaper || !projectId) return;
+
+    const key = paperKey(pendingUploadPaper);
+    setUploading((prev) => new Set(prev).add(key));
+
+    try {
+      const formData = new FormData();
+      formData.append("paperId", key);
+      if (pendingUploadPaper.doi) formData.append("doi", pendingUploadPaper.doi);
+      if (pendingUploadPaper.pmid) formData.append("pmid", pendingUploadPaper.pmid);
+      formData.append("file", file);
+
+      const res = await fetch(`/api/papers/upload-pdf`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        setUploaded((prev) => new Set(prev).add(key));
+      }
+    } catch {
+      // 上传失败静默处理
+    } finally {
+      setUploading((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      setPendingUploadPaper(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
   if (papers.length === 0) return null;
 
   return (
     <div className="space-y-4">
+      {/* 隐藏的文件选择器 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-500">
           找到 {papers.length} 篇文献，已选 {selected.size} 篇
@@ -213,10 +267,28 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
                         OA（待获取）
                       </span>
                     ) : (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
-                        仅摘要
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
+                          仅摘要
+                        </span>
+                        {projectId && (
+                          <button
+                            onClick={(e) => handleUploadClick(paper, e)}
+                            disabled={uploading.has(paperKey(paper)) || uploaded.has(paperKey(paper))}
+                            className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1 transition-colors"
+                          >
+                            {uploading.has(paperKey(paper)) ? (
+                              <Loader2 size={10} className="animate-spin" />
+                            ) : uploaded.has(paperKey(paper)) ? (
+                              <Check size={10} />
+                            ) : (
+                              <Upload size={10} />
+                            )}
+                            {uploaded.has(paperKey(paper)) ? "已上传" : "上传 PDF"}
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     {/* 来源 */}

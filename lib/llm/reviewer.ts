@@ -2,7 +2,9 @@
  * 审稿人模拟器
  */
 
-import { getLLMClient, MODELS } from "./client";
+import { z } from "zod";
+import { getLLMClient, MODELS, withLLMRetry } from "./client";
+import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
 
 export interface ReviewerComment {
   section: string;
@@ -27,72 +29,64 @@ export interface ReviewSimulation {
   priority_fixes: string[];
 }
 
-const REVIEW_TOOL = {
-  name: "review_manuscript",
-  description: "Simulate 3 peer reviewers reviewing a biomedical manuscript",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      reviewers: {
-        type: "array" as const,
-        items: {
-          type: "object" as const,
-          properties: {
-            reviewer_id: { type: "string" as const },
-            persona: { type: "string" as const },
-            overall_assessment: { type: "string" as const, enum: ["accept", "minor_revision", "major_revision", "reject"] },
-            summary: { type: "string" as const },
-            comments: {
-              type: "array" as const,
-              items: {
-                type: "object" as const,
-                properties: {
-                  section: { type: "string" as const },
-                  severity: { type: "string" as const, enum: ["major", "minor", "suggestion"] },
-                  category: { type: "string" as const },
-                  comment: { type: "string" as const },
-                  suggested_fix: { type: "string" as const },
-                },
-                required: ["section", "severity", "category", "comment", "suggested_fix"],
-              },
-            },
-            score: { type: "number" as const },
-          },
-          required: ["reviewer_id", "persona", "overall_assessment", "summary", "comments", "score"],
-        },
-      },
-      overall_verdict: { type: "string" as const },
-      priority_fixes: { type: "array" as const, items: { type: "string" as const } },
-    },
-    required: ["reviewers", "overall_verdict", "priority_fixes"],
-  },
-};
+const ReviewerCommentSchema = z.object({
+  section: z.string(),
+  severity: z.enum(["major", "minor", "suggestion"]),
+  category: z.string(),
+  comment: z.string(),
+  suggested_fix: z.string(),
+});
+
+const ReviewerSchema = z.object({
+  reviewer_id: z.string(),
+  persona: z.string(),
+  overall_assessment: z.enum(["accept", "minor_revision", "major_revision", "reject"]),
+  summary: z.string(),
+  comments: z.array(ReviewerCommentSchema),
+  score: z.number(),
+});
+
+const ReviewSimulationSchema = z.object({
+  reviewers: z.array(ReviewerSchema),
+  overall_verdict: z.string(),
+  priority_fixes: z.array(z.string()),
+});
+
+const REVIEW_SYSTEM_SUFFIX = `\n\nCRITICAL: You MUST return ONLY a valid JSON object. No thinking, no explanation, no markdown code blocks. The JSON MUST have this exact structure:\n{"reviewers":[{"reviewer_id":"1","persona":"methods expert","overall_assessment":"string","summary":"string","comments":[{"section":"string","severity":"critical|major|minor|suggestion","category":"string","comment":"string","suggested_fix":"string"}],"score":7}],"overall_verdict":"accept|minor_revision|major_revision|reject","priority_fixes":["string"]}`;
 
 export async function simulateReview(params: {
   manuscript: { abstract?: string; introduction?: string; methods?: string; results?: string; discussion?: string };
   journal?: string;
 }): Promise<ReviewSimulation> {
-  const client = getLLMClient();
-  const sections = Object.entries(params.manuscript)
-    .filter(([, v]) => v)
-    .map(([k, v]) => `## ${k}\n${v}`)
-    .join("\n\n");
+  return withLLMRetry(async () => {
+    const client = getLLMClient();
+    const sections = Object.entries(params.manuscript)
+      .filter(([, v]) => v)
+      .map(([k, v]) => `## ${k}\n${v}`)
+      .join("\n\n");
 
-  const context = `目标期刊: ${params.journal || "一般性生物医学期刊"}\n\n${sections}`;
+    const context = `目标期刊: ${params.journal || "一般性生物医学期刊"}\n\n${sections}`;
 
-  const response = await client.messages.create({
-    model: MODELS.analysis,
-    max_tokens: 8192,
-    system: "Simulate 3 peer reviewers for a biomedical paper: Reviewer 1 (methods expert), Reviewer 2 (domain expert), Reviewer 3 (writing expert). Be critical but fair. Focus on real issues that would affect acceptance.",
-    tools: [REVIEW_TOOL as any],
-    tool_choice: { type: "tool", name: "review_manuscript" },
-    messages: [{ role: "user", content: `Review this manuscript:\n\n${context}` }],
-  });
+    const userMessage = `Review this manuscript:\n\n${context}`;
+    const systemPrompt = `Simulate 3 peer reviewers for a biomedical paper: Reviewer 1 (methods expert), Reviewer 2 (domain expert), Reviewer 3 (writing expert). Be critical but fair. Focus on real issues that would affect acceptance.${REVIEW_SYSTEM_SUFFIX}`;
 
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "review_manuscript") {
-      return block.input as ReviewSimulation;
-    }
-  }
-  throw new Error("Failed to simulate review");
+    const response = await client.messages.create({
+      model: MODELS.analysis,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    return await extractStructuredOutput(response, ReviewSimulationSchema, {
+      label: "reviewer",
+      retryFn: createRetryFunction(client, {
+        model: MODELS.analysis,
+        maxTokens: 8192,
+        system: systemPrompt,
+        userMessage,
+        originalContent: userMessage,
+        schema: ReviewSimulationSchema,
+      }),
+    });
+  }, { label: "reviewer" });
 }

@@ -19,6 +19,7 @@ import {
   LogOut,
   Menu,
   X,
+  Trash2,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -29,6 +30,7 @@ const globalNav = [
   { label: "我的项目", href: "/", icon: FolderOpen },
   { label: "知识库", href: "/knowledge", icon: BookOpen },
   { label: "实战课", href: "/courses", icon: GraduationCap },
+  { label: "回收站", href: "/recycle-bin", icon: Trash2 },
   { label: "设置", href: "/settings", icon: Settings },
 ];
 

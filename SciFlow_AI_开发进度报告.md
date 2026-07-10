@@ -1,7 +1,7 @@
 # SciFlow AI — 项目开发进度报告
 
 > **日期**：2026-07-10
-> **状态**：✅ 全部开发阶段完成，已通过安全审查
+> **状态**：✅ 全部开发阶段完成 + MIMO 兼容 + E2E 工作流验证通过
 
 ---
 
@@ -23,6 +23,7 @@
 | 认证 | NextAuth.js (Credentials + bcrypt) |
 | LLM | 通过 CCS 代理网关（Anthropic Messages API） |
 | 图表 | Recharts |
+| PDF 解析 | pdf-parse-new（纯 JS，零原生依赖） |
 | 部署 | Vercel + Supabase |
 
 ---
@@ -41,23 +42,29 @@
 - LLM 查询预处理（自然语言→优化搜索词 + MeSH）
 - 自动去重（DOI→PMID→标题模糊匹配）
 - 高级筛选：文献类型、时间范围、引用量、排序、OA 偏好
+- 搜索历史持久化（DB 存储，支持快速重搜）
 
 ### Phase 1b: 信息提取 ✅
-- LLM 结构化提取（Anthropic tool_use + Zod Schema）
+- **MIMO 兼容**：移除 `response_format`，靠 system prompt 强制 JSON 输出
+- **3 层 fallback 提取**：tool_use → 括号匹配 JSON → thinking 块 → schema-aware retry
+- **PDF 全文提取**：pdf-parse-new + smartTruncate 智能截断（优先 Methods/Results）
+- **自动下载 OA PDF**：提取前自动获取全文，从摘要→全文质量大幅提升
 - 单篇/批量提取（并发 3，速率控制）
 - 每个实验单元：药物/细胞系/通路/表型/对照/结论/原文引用
 - 提取结果审核 UI（确认/跳过/展开详情）
+- DOI 409 冲突自动处理（已有文献自动查找 DB ID）
 
 ### Phase 1c: 机制矩阵 ✅
-- 从提取结果自动生成对比表格
+- 从提取结果自动生成对比表格（DB 读取，不依赖前端 store）
 - 冲突检测（同一通路变化方向不一致）
 - Gap Finder（未研究的维度组合）
 - 导出：CSV / LaTeX
+- DB 持久化（MechanismMatrix 表）
 
 ### Phase 2a: 实验设计 ✅
 - AI 基于机制矩阵 + 假设自动生成 Protocol
 - 输出：分组、试剂列表、分步操作、对照组检查、预期结果
-- 推荐样本量
+- 推荐样本量（power analysis）
 
 ### Phase 2b: 排障诊断 ✅
 - 用户描述失败现象→AI 分析原因→排查步骤
@@ -76,8 +83,10 @@
 
 ### Phase 4: AI 助手 ✅
 - 项目右侧可收起的对话面板（SSE 流式输出）
-- 自动注入项目上下文（项目名、文献、假设）
-- 过程助手：基于规则的 6 种触发场景（零延迟）
+- 自动注入项目上下文（项目名、文献、假设、矩阵、实验）
+- 过程助手：基于规则的 6 种触发场景 + LLM 个性化建议
+- Tool Use：AI 可调用搜索/查看文献/查看矩阵等工具
+- Token 预算管理（滑动窗口 + 摘要压缩）
 
 ### Phase 5a: 科研知识库 ✅
 - 4 个分类 14 篇知识文章
@@ -102,13 +111,19 @@
 ### 数据持久化
 - Supabase PostgreSQL（Transaction Pooler，端口 6543）
 - Prisma 7 ORM（prisma-client-js 生成器）
-- 9 张表 + 外键 + 索引（Project.userId / Paper.projectId / Paper.pmid）
+- 11 张表 + 外键 + 索引
 - 所有 CRUD API 使用 $transaction 保证数据一致性
 
-### PDF 存储
-- 本地存储（`uploads/项目ID/`）
-- 支持上传 + OA 全文下载
-- SSRF 防护（URL 白名单）+ 路径穿越防护（projectId 过滤）
+### PDF 全文提取
+- **pdf-parse-new**：纯 JS，零原生依赖，Vercel 兼容
+- **smartTruncate**：智能截断到 15000 字符，优先 Abstract > Methods > Results
+- **自动下载**：提取 API 自动从 OA URL 下载 PDF 并提取全文
+- **手动上传**：非 OA 论文支持手动上传 PDF
+
+### 项目管理
+- 编辑项目（名称/描述）
+- 软删除 + 回收站
+- 项目健康度检查
 
 ### 导出功能
 - **Word (.docx)**：论文组装页下载
@@ -147,11 +162,28 @@
 | 审稿模拟 | `lib/llm/reviewer.ts` | Opus | 3 位审稿人模拟 |
 | AI 对话 | `app/api/chat/route.ts` | Sonnet | SSE 流式对话 |
 
-所有 LLM 模块使用 Anthropic Messages API + tool_use 实现结构化输出，通过 CCS 网关代理。
+**MIMO 兼容策略**：
+- 移除所有 `response_format: {type: "json_object"}`（MIMO 不支持）
+- System prompt 内嵌完整 JSON 示例结构
+- 3 层 fallback：text block JSON → thinking block JSON → schema-aware retry with example
+- 所有模块 retryFn 传入 Zod schema 校验
 
 ---
 
-## 五、API 路由总览（18 个端点）
+## 五、E2E 工作流验证
+
+```
+✅ 搜索文献 → 选论文 → LLM 提取（4 个实验）
+✅ 提取审核 → 确认 → 矩阵自动生成（4 维度，1 冲突）
+✅ 冲突检测 → ferroptosis ↑ vs ↓
+✅ 待办清单 → 4 项待处理
+✅ 时间线 → 49 事件折叠为 5 组
+✅ 知识面板 → 真实数据（非 demo）
+```
+
+---
+
+## 六、API 路由总览（19 个端点）
 
 | 端点 | 方法 | 功能 |
 |------|------|------|
@@ -159,26 +191,32 @@
 | `/api/projects/[id]` | GET/PATCH/DELETE | 项目详情/更新/删除 |
 | `/api/projects/[id]/papers` | GET/POST | 文献列表/添加 |
 | `/api/projects/[id]/extractions` | POST | 保存提取结果 |
+| `/api/projects/[id]/extractions/batch` | POST | 批量保存提取 |
 | `/api/projects/[id]/experiments` | GET/POST | 实验列表/创建 |
 | `/api/projects/[id]/timeline` | GET/POST | 时间线事件 |
 | `/api/projects/[id]/hypotheses` | GET/POST | 假设管理 |
 | `/api/projects/[id]/manuscripts` | GET/POST | 论文草稿 |
 | `/api/projects/[id]/upload` | POST | PDF 上传 |
 | `/api/projects/[id]/upload/extract` | POST | 本地 PDF 提取 |
-| `/api/projects/[id]/download-pdf` | POST | OA 全文下载 |
-| `/api/projects/[id]/members` | GET/POST | 成员管理 |
+| `/api/projects/[id]/download-pdf` | POST | OA 全文下载（自动提取文本） |
+| `/api/projects/[id]/matrix` | GET/POST/DELETE | 机制矩阵 CRUD |
+| `/api/projects/[id]/search-history` | GET/POST/DELETE | 搜索历史 |
+| `/api/projects/[id]/permanent-delete` | POST | 永久删除 |
+| `/api/projects/[id]/restore` | POST | 恢复项目 |
 | `/api/papers/search` | POST | 文献搜索 |
-| `/api/papers/extract` | POST | 信息提取 |
+| `/api/papers/extract` | POST | 信息提取（含自动下载） |
+| `/api/papers/upload-pdf` | POST | 手动上传 PDF |
 | `/api/experiments/design` | POST | 实验设计 |
 | `/api/experiments/troubleshoot` | POST | 排障诊断 |
 | `/api/analysis` | POST | 数据分析 |
 | `/api/chat` | POST | AI 对话（SSE） |
+| `/api/settings` | GET/POST | LLM 配置 |
 | `/api/auth/[...nextauth]` | GET/POST | NextAuth 认证 |
 | `/api/auth/register` | POST | 用户注册 |
 
 ---
 
-## 六、项目结构
+## 七、项目结构
 
 ```
 app/
@@ -186,61 +224,86 @@ app/
 ├── (auth)/login/page.tsx                   # 登录页
 ├── (auth)/signup/page.tsx                  # 注册页
 ├── (dashboard)/
-│   ├── page.tsx                            # 首页（项目列表 + Onboarding 向导）
+│   ├── page.tsx                            # 首页（项目列表 + 编辑/删除）
+│   ├── recycle-bin/page.tsx                # 回收站
 │   ├── settings/page.tsx                   # LLM 设置页
 │   ├── knowledge/page.tsx                  # 科研知识库 + P 值模拟器
 │   ├── courses/page.tsx                    # 科研设计实战课
 │   └── project/[projectId]/
 │       ├── layout.tsx                      # 项目布局（侧边栏 + AI + 快捷栏）
-│       ├── page.tsx                        # 项目概览 + 健康度检查
-│       ├── timeline/page.tsx               # 时间线
-│       ├── brain/page.tsx                  # 知识面板
+│       ├── page.tsx                        # 项目概览 + 健康度检查 + 编辑
+│       ├── timeline/page.tsx               # 时间线（按类型折叠）
+│       ├── brain/page.tsx                  # 知识面板（DB 读取真实数据）
 │       ├── papers/page.tsx                 # 文献管理（列表 + 上传 PDF）
-│       ├── papers/search/page.tsx          # 文献搜索 + 提取
+│       ├── papers/search/page.tsx          # 文献搜索 + 提取 + 搜索历史
 │       ├── experiments/page.tsx            # 实验设计
 │       ├── experiments/troubleshoot/page.tsx  # 排障诊断
 │       ├── data/page.tsx                   # 数据分析 + 图表
 │       └── manuscript/page.tsx             # 论文组装 + 审稿人
 ├── api/
 │   ├── auth/                               # 认证 API
-│   ├── projects/                           # 项目 CRUD
-│   ├── papers/                             # 搜索 + 提取
+│   ├── projects/                           # 项目 CRUD + 子资源
+│   ├── papers/                             # 搜索 + 提取 + 上传 PDF
 │   ├── experiments/                        # 设计 + 排障
 │   ├── analysis/route.ts                   # 数据分析
 │   ├── manuscript/                         # 论文 + 审稿
-│   └── chat/route.ts                       # AI 对话
+│   ├── chat/route.ts                       # AI 对话
+│   └── settings/route.ts                   # LLM 配置
 components/
 ├── layout/                                 # sidebar + project-shell + providers + quick-action-bar
 ├── onboarding/                             # 3 步项目创建向导
 ├── papers/                                 # search-form + search-results + extraction-review + pdf-uploader
 ├── matrix/                                 # mechanism-matrix
-├── timeline/                               # timeline
+├── timeline/                               # timeline（按类型折叠 + 批量合并）
 ├── experiment/                             # design-card + troubleshoot
-├── chat/                                   # chat-panel
+├── chat/                                   # chat-panel（Markdown + 流式 + Tool Use）
 ├── assistant/                              # process-assistant
 ├── charts/                                 # chart-renderer (Recharts)
 ├── knowledge/                              # p-value-simulator
-└── project/                                # health-check
+└── project/                                # health-check + workflow-progress
 lib/
-├── academic/                               # 4 源搜索 + 聚合器
-├── llm/                                    # 8 个 LLM 模块（Anthropic tool_use）
+├── academic/                               # 4 源搜索 + 聚合器 + bioRxiv
+├── llm/                                    # 9 个 LLM 模块（MIMO 兼容）
+│   ├── client.ts                           # 客户端 + 重试 + DB 配置缓存
+│   ├── json-extractor.ts                   # 通用 JSON 提取（3 层 fallback）
+│   ├── extraction.ts                       # 文献提取 + 智能截断
+│   ├── experiment-design.ts                # 实验设计
+│   ├── troubleshoot.ts                     # 排障诊断
+│   ├── analysis.ts                         # 数据分析
+│   ├── manuscript.ts                       # 论文组装
+│   ├── reviewer.ts                         # 审稿模拟
+│   ├── context-builder.ts                  # 对话上下文增强
+│   ├── streaming.ts                        # SSE 流式工具
+│   └── chat-tools.ts                       # 对话 Tool Use（6 个工具）
 ├── matrix/                                 # 矩阵生成器 + demo 数据
 ├── timeline/                               # 事件系统
 ├── assistant/                              # 过程助手
-├── supabase/                               # 客户端 + 服务端
+├── llm.ts                                  # LLM 客户端（兼容导出）
 ├── auth.ts                                 # NextAuth 配置
 ├── db.ts                                   # Edge-safe 数据库访问
 ├── db-server.ts                            # Node.js Prisma 客户端
+├── power-analysis.ts                       # 样本量计算
+├── dilution-calculator.ts                  # 稀释计算器
 └── export.ts                               # Word/LaTeX/CSV 导出
 store/
 └── project-store.ts                        # Zustand 状态管理
 prisma/
-└── schema.prisma                           # 9 张表 + 索引
+└── schema.prisma                           # 11 张表 + 索引
 ```
 
 ---
 
-## 七、设计文档
+## 八、数据库配置
+
+已完成 Supabase PostgreSQL 配置：
+- 项目 ID：`zdjzbwmldbjrtnqikpeh`
+- 连接方式：Transaction Pooler（端口 6543，IPv4 兼容）
+- 11 张表已建 + 索引已加
+- Demo 用户已创建（密码已 bcrypt 哈希）
+
+---
+
+## 九、设计文档
 
 | 文档 | 内容 |
 |------|------|
@@ -252,45 +315,37 @@ prisma/
 
 ---
 
-## 八、开发进度汇总
+## 十、开发进度汇总
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | Phase 0: 脚手架 | ✅ | Next.js + Supabase + Auth + 布局 |
-| Phase 1a: 文献搜索 | ✅ | 4 源聚合 + LLM 查询优化 |
-| Phase 1b: 信息提取 | ✅ | LLM tool_use + 批量 + 审核 |
-| Phase 1c: 机制矩阵 | ✅ | 冲突检测 + Gap Finder |
-| Phase 2a: 实验设计 | ✅ | AI Protocol 生成 |
+| Phase 1a: 文献搜索 | ✅ | 4 源聚合 + LLM 查询优化 + 搜索历史 |
+| Phase 1b: 信息提取 | ✅ | MIMO 兼容 + PDF 全文 + 自动下载 + 批量 |
+| Phase 1c: 机制矩阵 | ✅ | 冲突检测 + Gap Finder + DB 持久化 |
+| Phase 2a: 实验设计 | ✅ | AI Protocol 生成 + 样本量 |
 | Phase 2b: 排障诊断 | ✅ | 诊断 + 分支排查 |
 | Phase 3a: 数据分析 | ✅ | CSV + LLM + Recharts |
 | Phase 3b: 论文组装 | ✅ | 5 章节 + Word/LaTeX + 审稿人 |
-| Phase 4: AI 助手 | ✅ | SSE 流式 + 过程助手 |
+| Phase 4: AI 助手 | ✅ | SSE + Tool Use + 上下文增强 + Token 预算 |
 | Phase 5a: 知识库 | ✅ | P 值模拟器 + 14 篇文章 |
 | Phase 5b: 实战课 | ✅ | 4 门课程 + 健康度检查 |
 | 安全加固 | ✅ | 15 项安全 bug 全部修复 |
-| Onboarding | ✅ | 3 步项目创建向导 |
-| 导出功能 | ✅ | Word + LaTeX + CSV |
-| 移动端适配 | ✅ | 响应式 + 底部快捷栏 |
+| MIMO 兼容 | ✅ | 7 个 LLM 模块全部适配 |
+| PDF 全文提取 | ✅ | pdf-parse-new + 自动下载 + 智能截断 |
+| 项目管理 | ✅ | 编辑/删除/回收站 |
+| 时间线优化 | ✅ | 按类型折叠 + 批量合并 |
+| E2E 验证 | ✅ | 搜索→提取→矩阵→冲突→待办 全链路通过 |
 
 ---
 
-## 九、数据库配置
-
-已完成 Supabase PostgreSQL 配置：
-- 项目 ID：`zdjzbwmldbjrtnqikpeh`
-- 连接方式：Transaction Pooler（端口 6543，IPv4 兼容）
-- 9 张表已建 + 3 个索引已加
-- Demo 用户已创建（密码已 bcrypt 哈希）
-
----
-
-## 十、Git 提交记录（近期）
+## 十一、Git 提交记录（近期）
 
 ```
+f95e320 docs: 更新开发进度报告（全部阶段完成）
 9cf9511 feat: 补全设计文档要求的 4 个功能
 d694fb6 fix: 安全审查 15 个 bug 全部修复
 47e4826 fix: 彻底解决 Edge Runtime + Prisma 冲突
-ffc5f43 fix: Prisma 连接 Supabase 成功
 4419d28 chore: gitignore .prisma generated files
 090b5d8 feat: 替换 Supabase Auth 为 NextAuth.js
 545a9fb feat: 修复未完成模块 — Prisma连接/导出/图表/动态化

@@ -6,7 +6,8 @@
  */
 
 import { z } from "zod";
-import { getLLMClient, MODELS } from "./client";
+import { getLLMClient, MODELS, withLLMRetry } from "./client";
+import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
 
 // ===== Zod Schema =====
 
@@ -130,6 +131,89 @@ IMPORTANT RULES:
 4. For each finding, include the EXACT quote from the text as evidence.
 5. Be precise about quantitative values.`;
 
+// ===== 智能截断 =====
+
+const MAX_CHARS = 15000;
+
+/**
+ * 智能截断论文文本
+ *
+ * 优先保留关键章节：Abstract + Methods + Results
+ * 如果无法识别结构，回退到前 15000 字符
+ */
+export function smartTruncate(text: string): string {
+  if (text.length <= MAX_CHARS) return text;
+
+  const sections = extractSections(text);
+
+  if (sections.length === 0) {
+    return text.slice(0, MAX_CHARS);
+  }
+
+  // 按优先级组装：Abstract 全保留 > Methods > Results > Introduction/Discussion
+  const priority = ["abstract", "introduction", "methods", "results", "discussion"];
+  let result = "";
+  let remaining = MAX_CHARS;
+
+  for (const sectionName of priority) {
+    const section = sections.find((s) => s.name === sectionName);
+    if (!section) continue;
+
+    const allocation =
+      sectionName === "abstract"
+        ? Math.min(section.text.length, remaining)
+        : sectionName === "methods" || sectionName === "results"
+          ? Math.min(section.text.length, Math.floor(remaining * 0.4))
+          : Math.min(section.text.length, Math.floor(remaining * 0.2));
+
+    if (allocation <= 0) break;
+
+    result += `\n\n=== ${section.label} ===\n${section.text.slice(0, allocation)}`;
+    remaining -= allocation;
+  }
+
+  return result.trim() || text.slice(0, MAX_CHARS);
+}
+
+interface SectionInfo {
+  name: string;
+  label: string;
+  text: string;
+}
+
+function extractSections(text: string): SectionInfo[] {
+  const sections: SectionInfo[] = [];
+
+  const patterns: Array<{ name: string; label: string; regex: RegExp }> = [
+    { name: "abstract", label: "Abstract", regex: /(?:^|\n)\s*(?:ABSTRACT|Abstract)\s*[\n:]/ },
+    { name: "introduction", label: "Introduction", regex: /(?:^|\n)\s*(?:INTRODUCTION|Introduction|1\.?\s+Introduction)\s*[\n:]/ },
+    { name: "methods", label: "Methods", regex: /(?:^|\n)\s*(?:METHODS?|MATERIALS?\s+AND\s+METHODS?|METHODOLOGY|EXPERIMENTAL(?:\s+SECTION)?|2\.?\s+Methods?)\s*[\n:]/i },
+    { name: "results", label: "Results", regex: /(?:^|\n)\s*(?:RESULTS?|3\.?\s+Results?)\s*[\n:]/ },
+    { name: "discussion", label: "Discussion", regex: /(?:^|\n)\s*(?:DISCUSSION|4\.?\s+Discussion)\s*[\n:]/ },
+  ];
+
+  const found: Array<{ name: string; label: string; start: number }> = [];
+
+  for (const p of patterns) {
+    const match = text.match(p.regex);
+    if (match && match.index !== undefined) {
+      found.push({ name: p.name, label: p.label, start: match.index + match[0].length });
+    }
+  }
+
+  found.sort((a, b) => a.start - b.start);
+
+  for (let i = 0; i < found.length; i++) {
+    const end = i + 1 < found.length ? found[i + 1].start : text.length;
+    const sectionText = text.slice(found[i].start, end).trim();
+    if (sectionText.length > 50) {
+      sections.push({ name: found[i].name, label: found[i].label, text: sectionText });
+    }
+  }
+
+  return sections;
+}
+
 // ===== 提取函数 =====
 
 export async function extractFromText(
@@ -137,32 +221,39 @@ export async function extractFromText(
   title: string,
   options?: { maxTokens?: number }
 ): Promise<ExtractionResult> {
-  const client = getLLMClient();
-  const maxTokens = options?.maxTokens || 8192;
+  return withLLMRetry(async () => {
+    const client = getLLMClient();
+    const maxTokens = options?.maxTokens || 8192;
 
-  const response = await client.messages.create({
-    model: MODELS.extraction,
-    max_tokens: maxTokens,
-    system: CORE_PROMPT,
-    tools: [EXTRACTION_TOOL as any],
-    tool_choice: { type: "tool", name: "extract_experiments" },
-    messages: [
-      {
-        role: "user",
-        content: `Extract all experimental findings from this paper:\n\nTitle: ${title}\n\nContent:\n${text}`,
-      },
-    ],
-  });
+    const userMessage = `Extract all experimental findings from this paper:\n\nTitle: ${title}\n\nContent:\n${text}`;
 
-  // 从 tool_use 块中提取结果
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "extract_experiments") {
-      const data = ExtractionResultSchema.parse(block.input);
-      return data;
-    }
-  }
+    // MIMO 不支持 response_format，靠 system prompt 强制 JSON 输出
+    const systemPrompt = CORE_PROMPT + "\n\nCRITICAL: You MUST return ONLY a JSON object. No thinking, no explanation, no markdown. The JSON MUST have this exact structure:\n" + JSON.stringify({"experiments":[{"drug_intervention":{"name":"string","concentration":"string or null","duration":"string or null","co_treatment":"string or null"},"model":{"cell_line":"string or null","species":"string or null","passage":"string or null"},"pathway_effects":[{"pathway":"string","direction":"up|down|no_change","significance":"string or null","method":"string or null"}],"phenotype_effects":[{"phenotype":"string","direction":"up|down|no_change","fold_change":"string or null"}],"controls":["string"],"statistical_test":"string or null","sample_size":0,"conclusion":"string","evidence_quote":"string"}]}, null, 2) + "\n\nIf no experiments are found, return {\"experiments\":[]}. Do NOT wrap in markdown code blocks.";
 
-  throw new Error("No extraction result found in response");
+    const response = await client.messages.create({
+      model: MODELS.extraction,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [
+        {
+          role: "user",
+          content: userMessage,
+        },
+      ],
+    });
+
+    return await extractStructuredOutput(response, ExtractionResultSchema, {
+      label: "extraction",
+      retryFn: createRetryFunction(client, {
+        model: MODELS.extraction,
+        maxTokens,
+        system: CORE_PROMPT,
+        userMessage,
+        originalContent: userMessage,
+        schema: ExtractionResultSchema,
+      }),
+    });
+  }, { label: "extraction" });
 }
 
 // ===== 批量提取 =====
