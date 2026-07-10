@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useProjectStore } from "@/store/project-store";
 import { exportManuscriptToLatex, exportManuscriptToWord, downloadFile } from "@/lib/export";
+import { consumeSSEStream } from "@/lib/llm/streaming";
 import type { ManuscriptDraft } from "@/lib/llm/manuscript";
 import type { ReviewSimulation } from "@/lib/llm/reviewer";
 
@@ -48,6 +49,8 @@ export default function ManuscriptPage() {
   const [error, setError] = useState<string | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
   const [review, setReview] = useState<ReviewSimulation | null>(null);
+  const [progressMessage, setProgressMessage] = useState("");
+  const [reviewProgress, setReviewProgress] = useState("");
 
   const extractedPapers = papers.filter(
     (p) => p.extractionStatus === "done" && p.experiments.length > 0
@@ -57,8 +60,11 @@ export default function ManuscriptPage() {
     setIsGenerating(true);
     setError(null);
 
+    setProgressMessage("");
+
+    let res: Response;
     try {
-      const res = await fetch("/api/manuscript", {
+      res = await fetch("/api/manuscript", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -84,16 +90,33 @@ export default function ManuscriptPage() {
         }),
       });
 
-      if (!res.ok) throw new Error((await res.json()).error || "生成失败");
-
-      const data = await res.json();
-      setDraft(data);
-      setActiveSection(section === "all" ? "abstract" : section);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "生成失败");
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "生成失败");
-    } finally {
       setIsGenerating(false);
+      return;
     }
+
+    consumeSSEStream(res, {
+      onProgress: (step) => {
+        setProgressMessage(step || "正在组装论文...");
+      },
+      onResult: (data) => {
+        setDraft(data as ManuscriptDraft);
+        setActiveSection(section === "all" ? "abstract" : section);
+        setIsGenerating(false);
+      },
+      onError: (message) => {
+        setError(message);
+        setIsGenerating(false);
+      },
+      onDone: () => {
+        setIsGenerating(false);
+      },
+    });
   }
 
   const currentSection = draft
@@ -197,6 +220,7 @@ export default function ManuscriptPage() {
               <button
                 onClick={async () => {
                   setIsReviewing(true);
+                  setReviewProgress("");
                   try {
                     const res = await fetch("/api/manuscript/review", {
                       method: "POST",
@@ -207,11 +231,28 @@ export default function ManuscriptPage() {
                         ),
                       }),
                     });
-                    if (!res.ok) throw new Error("审稿失败");
-                    setReview(await res.json());
-                  } catch {
-                    setError("审稿人模拟失败");
-                  } finally {
+                    if (!res.ok) {
+                      const errorData = await res.json().catch(() => ({}));
+                      throw new Error(errorData.error || "审稿失败");
+                    }
+                    consumeSSEStream(res, {
+                      onProgress: (step) => {
+                        setReviewProgress(step || "正在模拟审稿...");
+                      },
+                      onResult: (data) => {
+                        setReview(data as ReviewSimulation);
+                        setIsReviewing(false);
+                      },
+                      onError: (message) => {
+                        setError(message);
+                        setIsReviewing(false);
+                      },
+                      onDone: () => {
+                        setIsReviewing(false);
+                      },
+                    });
+                  } catch (err: unknown) {
+                    setError(err instanceof Error ? err.message : "审稿人模拟失败");
                     setIsReviewing(false);
                   }
                 }}
@@ -267,7 +308,9 @@ export default function ManuscriptPage() {
       {isGenerating && (
         <div className="text-center py-12 space-y-3">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-600" />
-          <p className="text-sm text-gray-500">正在组装论文草稿...</p>
+          <p className="text-sm text-gray-500">
+            {progressMessage || "正在组装论文草稿..."}
+          </p>
           <p className="text-xs text-gray-400">这可能需要 1-2 分钟</p>
         </div>
       )}
