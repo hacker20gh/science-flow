@@ -7,6 +7,17 @@ import {
   Search, Upload, BookOpen, FileText, Check, ChevronDown, ChevronUp,
   ExternalLink, Trash2, RefreshCw, Loader2, Download, Filter, ArrowUpDown,
 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Extraction {
   id: string;
@@ -55,6 +66,7 @@ export default function PapersPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single' | 'batch'; id?: string } | null>(null);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/papers`)
@@ -189,18 +201,16 @@ export default function PapersPage() {
           setPapers(d.papers || []);
         }
         clearSelection();
-        alert(`提取完成：${data.summary?.success || 0} 篇成功`);
+        toast.success("批量提取完成", { description: `成功提取 ${data.summary?.success || 0} 篇文献的实验数据` });
       }
     } catch {
-      alert("批量提取失败");
+      toast.error("批量提取失败", { description: "请稍后重试" });
     } finally {
       setBatchLoading(false);
     }
   }
 
-  async function batchDelete() {
-    if (!confirm(`确定删除 ${selected.size} 篇文献？此操作不可撤销。`)) return;
-
+  async function performBatchDelete() {
     setBatchLoading(true);
     try {
       await Promise.all(
@@ -211,20 +221,27 @@ export default function PapersPage() {
       setPapers((prev) => prev.filter((p) => !selected.has(p.id)));
       clearSelection();
     } catch {
-      alert("批量删除失败");
+      toast.error("批量删除失败", { description: "请稍后重试" });
     } finally {
       setBatchLoading(false);
     }
   }
 
-  async function handleDelete(paperId: string) {
-    if (!confirm("确定删除这篇文献？")) return;
+  function batchDelete() {
+    setDeleteConfirm({ type: 'batch' });
+  }
+
+  async function performDelete(paperId: string) {
     try {
       await fetch(`/api/projects/${projectId}/papers?id=${paperId}`, { method: "DELETE" });
       setPapers((prev) => prev.filter((p) => p.id !== paperId));
     } catch {
-      // ignore
+      toast.error("删除失败", { description: "请稍后重试" });
     }
+  }
+
+  function handleDelete(paperId: string) {
+    setDeleteConfirm({ type: 'single', id: paperId });
   }
 
   const filterOptions: { key: FilterType; label: string; count: number }[] = [
@@ -393,6 +410,8 @@ export default function PapersPage() {
                     selected={selected.has(paper.id)}
                     onSelect={() => toggleSelect(paper.id)}
                     onDelete={() => handleDelete(paper.id)}
+                    projectId={projectId}
+                    onExtractionDone={setPapers}
                   />
                 ))}
               </div>
@@ -412,6 +431,35 @@ export default function PapersPage() {
           </button>
         </div>
       )}
+
+      {/* 删除确认对话框 */}
+      {deleteConfirm && (
+        <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {deleteConfirm.type === 'batch'
+                  ? `确定删除 ${selected.size} 篇文献？`
+                  : "确定删除这篇文献？"}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                此操作不可撤销，相关的提取数据也将被删除。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setDeleteConfirm(null)}>取消</AlertDialogCancel>
+              <AlertDialogAction onClick={() => {
+                if (deleteConfirm.type === 'batch') {
+                  performBatchDelete();
+                } else if (deleteConfirm.id) {
+                  performDelete(deleteConfirm.id);
+                }
+                setDeleteConfirm(null);
+              }}>确定删除</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </main>
   );
 }
@@ -419,7 +467,7 @@ export default function PapersPage() {
 // ===== 论文卡片组件 =====
 
 function PaperCard({
-  paper, expanded, onToggle, selected, onSelect, onDelete,
+  paper, expanded, onToggle, selected, onSelect, onDelete, projectId, onExtractionDone,
 }: {
   paper: Paper;
   expanded: boolean;
@@ -427,6 +475,8 @@ function PaperCard({
   selected: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  projectId: string;
+  onExtractionDone: React.Dispatch<React.SetStateAction<Paper[]>>;
 }) {
   const [extracting, setExtracting] = useState(false);
 
@@ -443,12 +493,16 @@ function PaperCard({
       if (res.ok) {
         const data = await res.json();
         const exps = data.results?.[0]?.extraction?.experiments || [];
-        alert(`提取完成：${exps.length} 个实验`);
-        // 刷新页面
-        window.location.reload();
+        toast.success("提取完成", { description: `提取到 ${exps.length} 个实验数据` });
+        // Re-fetch papers list
+        const updatedRes = await fetch(`/api/projects/${projectId}/papers`);
+        if (updatedRes.ok) {
+          const updatedData = await updatedRes.json();
+          onExtractionDone(updatedData.papers);
+        }
       }
     } catch {
-      alert("提取失败");
+      toast.error("提取失败", { description: "请稍后重试" });
     } finally {
       setExtracting(false);
     }
