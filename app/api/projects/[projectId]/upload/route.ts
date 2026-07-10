@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db-server";
 import { auth } from "@/lib/auth";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse");
+const pdfParse = require("pdf-parse-new");
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
