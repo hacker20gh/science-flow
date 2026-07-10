@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { useProjectStore } from "@/store/project-store";
 
@@ -9,14 +9,38 @@ interface ProjectShellProps {
   children: React.ReactNode;
 }
 
+interface ProjectInfo {
+  name: string;
+  hypotheses: string[];
+}
+
 export function ProjectShell({ projectId, children }: ProjectShellProps) {
   const [chatOpen, setChatOpen] = useState(false);
+  const [projectInfo, setProjectInfo] = useState<ProjectInfo>({
+    name: "当前项目",
+    hypotheses: [],
+  });
   const { papers } = useProjectStore();
 
+  // 从 API 获取项目信息
+  useEffect(() => {
+    fetch(`/api/projects/${projectId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.project) {
+          setProjectInfo({
+            name: d.project.name,
+            hypotheses: d.project.hypotheses?.map((h: { statement: string }) => h.statement) || [],
+          });
+        }
+      })
+      .catch(() => {});
+  }, [projectId]);
+
   const projectContext = {
-    name: "PD-1 耐药机制在肝癌中的研究",
+    name: projectInfo.name,
     papers: papers.slice(0, 10).map((p) => p.title),
-    hypotheses: ["sorafenib 通过 NF-κB 上调 HCC 中的 PD-L1 表达"],
+    hypotheses: projectInfo.hypotheses,
   };
 
   return (

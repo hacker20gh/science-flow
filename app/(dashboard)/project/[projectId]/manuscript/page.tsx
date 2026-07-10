@@ -1,20 +1,37 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
 import { useProjectStore } from "@/store/project-store";
+import { exportManuscriptToLatex, downloadFile } from "@/lib/export";
 import type { ManuscriptDraft } from "@/lib/llm/manuscript";
 import type { ReviewSimulation } from "@/lib/llm/reviewer";
 
 const SECTIONS = [
-  { id: "abstract", label: "Abstract", icon: "📋", desc: "背景 + 方法 + 结果 + 结论" },
-  { id: "introduction", label: "Introduction", icon: "📖", desc: "从宽到窄，引出你的假设" },
-  { id: "methods", label: "Methods", icon: "🔬", desc: "可重复的实验细节" },
-  { id: "results", label: "Results", icon: "📊", desc: "按逻辑顺序展示发现" },
-  { id: "discussion", label: "Discussion", icon: "💬", desc: "解读结果，联系文献" },
+  { id: "abstract", label: "Abstract", desc: "背景 + 方法 + 结果 + 结论" },
+  { id: "introduction", label: "Introduction", desc: "从宽到窄，引出你的假设" },
+  { id: "methods", label: "Methods", desc: "可重复的实验细节" },
+  { id: "results", label: "Results", desc: "按逻辑顺序展示发现" },
+  { id: "discussion", label: "Discussion", desc: "解读结果，联系文献" },
 ] as const;
 
 export default function ManuscriptPage() {
+  const { projectId } = useParams<{ projectId: string }>();
   const { papers, matrix } = useProjectStore();
+  const [projectName, setProjectName] = useState("");
+  const [hypothesis, setHypothesis] = useState("");
+
+  useEffect(() => {
+    fetch(`/api/projects/${projectId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.project) {
+          setProjectName(d.project.name);
+          setHypothesis(d.project.hypotheses?.[0]?.statement || "");
+        }
+      })
+      .catch(() => {});
+  }, [projectId]);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [draft, setDraft] = useState<ManuscriptDraft | null>(null);
@@ -36,8 +53,8 @@ export default function ManuscriptPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectName: "PD-1 耐药机制在肝癌中的研究",
-          hypothesis: "sorafenib 通过 NF-κB 上调 HCC 中的 PD-L1 表达",
+          projectName: projectName || "科研项目",
+          hypothesis: hypothesis || "待确定假设",
           matrixSummary: matrix
             ? `${matrix.totalPapers} 篇文献，${matrix.totalExperiments} 个实验`
             : "",
@@ -86,10 +103,21 @@ export default function ManuscriptPage() {
         <div className="flex gap-2">
           {draft && (
             <>
-              <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+              <button
+                onClick={() => {
+                  const sections: Record<string, string | undefined> = {};
+                  for (const s of SECTIONS) {
+                    const data = draft[s.id as keyof ManuscriptDraft];
+                    sections[s.id] = data?.content;
+                  }
+                  const latex = exportManuscriptToLatex(sections);
+                  downloadFile(latex, "manuscript.tex", "application/x-latex");
+                }}
+                className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+              >
                 下载 LaTeX
               </button>
-              <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+              <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 opacity-50 cursor-not-allowed">
                 下载 Word
               </button>
               <button
@@ -147,8 +175,7 @@ export default function ManuscriptPage() {
                 onClick={() => handleGenerate(s.id)}
                 className="p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all text-left"
               >
-                <span className="text-lg">{s.icon}</span>
-                <h3 className="font-medium text-sm mt-2">{s.label}</h3>
+                <h3 className="font-medium text-sm">{s.label}</h3>
                 <p className="text-xs text-gray-500 mt-1">{s.desc}</p>
               </button>
             ))}
@@ -188,7 +215,6 @@ export default function ManuscriptPage() {
                       : "text-gray-600 hover:bg-gray-50"
                   }`}
                 >
-                  <span>{s.icon} </span>
                   <span>{s.label}</span>
                   {sectionData && (
                     <span className="text-xs text-gray-400 ml-1">

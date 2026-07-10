@@ -8,6 +8,7 @@ import { generateMatrix } from "@/lib/matrix/generator";
 import { useProjectStore } from "@/store/project-store";
 import { DEMO_EXTRATIONS } from "@/lib/matrix/demo-data";
 import { useParams } from "next/navigation";
+import { exportMatrixToCsv, downloadFile } from "@/lib/export";
 
 export default function BrainPage() {
   const params = useParams();
@@ -93,10 +94,16 @@ export default function BrainPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">机制矩阵</h2>
           <div className="flex gap-2">
-            <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+            <button
+              onClick={() => {
+                const csv = exportMatrixToCsv(matrixData);
+                downloadFile(csv, "mechanism-matrix.csv", "text/csv;charset=utf-8");
+              }}
+              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+            >
               导出 CSV
             </button>
-            <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+            <button className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 opacity-50 cursor-not-allowed">
               导出 LaTeX
             </button>
           </div>
@@ -108,51 +115,54 @@ export default function BrainPage() {
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">假设追踪器</h2>
-          <button className="px-3 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">
-            + 提出新假设
-          </button>
         </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">
-                  🔄 验证中
-                </span>
-                <h3 className="font-medium text-sm">
-                  sorafenib 通过 NF-κB 上调 HCC 细胞中的 PD-L1 表达
-                </h3>
-              </div>
+        {useDemo ? (
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">
+                    🔄 验证中
+                  </span>
+                  <h3 className="font-medium text-sm">
+                    sorafenib 通过 NF-κB 上调 HCC 细胞中的 PD-L1 表达
+                  </h3>
+                </div>
 
-              <div className="mt-3">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="text-gray-500">证据强度</span>
-                  <span className="font-medium text-green-600">80%</span>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-gray-500">证据强度</span>
+                    <span className="font-medium text-green-600">80%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div className="bg-green-500 h-2 rounded-full" style={{ width: "80%" }} />
+                  </div>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-green-500 h-2 rounded-full" style={{ width: "80%" }} />
-                </div>
-              </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <p className="text-green-600 font-medium mb-1">✅ 支持证据 (3)</p>
-                  <ul className="space-y-1 text-gray-600">
-                    <li>• Liu 2024：NF-κB 与 PD-L1 正相关</li>
-                    <li>• Exp#2：sorafenib 2-3μM 上调 PD-L1</li>
-                    <li>• Exp#3：NF-κB 抑制剂减弱上调</li>
-                  </ul>
-                </div>
-                <div>
-                  <p className="text-amber-600 font-medium mb-1">⚠️ 反对证据 (1)</p>
-                  <ul className="space-y-1 text-gray-600">
-                    <li>• Chen 2023：10μM 下调（浓度差异）</li>
-                  </ul>
+                <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <p className="text-green-600 font-medium mb-1">✅ 支持证据 (3)</p>
+                    <ul className="space-y-1 text-gray-600">
+                      <li>• Liu 2024：NF-κB 与 PD-L1 正相关</li>
+                      <li>• Exp#2：sorafenib 2-3μM 上调 PD-L1</li>
+                      <li>• Exp#3：NF-κB 抑制剂减弱上调</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="text-amber-600 font-medium mb-1">⚠️ 反对证据 (1)</p>
+                    <ul className="space-y-1 text-gray-600">
+                      <li>• Chen 2023：10μM 下调（浓度差异）</li>
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-white border border-gray-200 rounded-xl p-6 text-center text-gray-400 text-sm">
+            搜索文献并提出假设后，假设追踪器会自动显示
+          </div>
+        )}
       </section>
 
       {/* 待办清单 */}

@@ -1,12 +1,28 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useProjectStore } from "@/store/project-store";
+import { ChartRenderer } from "@/components/charts/chart-renderer";
 import type { AnalysisResult } from "@/lib/llm/analysis";
 
 export default function DataPage() {
   const { addEvent } = useProjectStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function parseCsvForChart(csv: string): Array<Record<string, string | number>> {
+    const lines = csv.trim().split("\n");
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map((h) => h.trim());
+    return lines.slice(1, 11).map((line) => {
+      const values = line.split(",").map((v) => v.trim());
+      const row: Record<string, string | number> = {};
+      headers.forEach((h, i) => {
+        const num = parseFloat(values[i]);
+        row[h] = isNaN(num) ? values[i] || "" : num;
+      });
+      return row;
+    });
+  }
 
   const [csvData, setCsvData] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
@@ -228,6 +244,32 @@ export default function DataPage() {
                 </div>
               )}
             </div>
+
+            {/* 渲染示例图表 */}
+            {(result.figure_config.type === "bar_chart" || result.figure_config.type === "box_plot") && csvData && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <ChartRenderer
+                  type="bar"
+                  title={result.figure_config.title}
+                  xLabel={result.figure_config.x_axis}
+                  yLabel={result.figure_config.y_axis}
+                  data={parseCsvForChart(csvData)}
+                  series={["value"]}
+                />
+              </div>
+            )}
+            {(result.figure_config.type === "line_chart" || result.figure_config.type === "scatter_plot") && csvData && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <ChartRenderer
+                  type="line"
+                  title={result.figure_config.title}
+                  xLabel={result.figure_config.x_axis}
+                  yLabel={result.figure_config.y_axis}
+                  data={parseCsvForChart(csvData)}
+                  series={["value"]}
+                />
+              </div>
+            )}
           </div>
 
           {/* 操作 */}
