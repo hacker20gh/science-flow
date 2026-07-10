@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
+import { Plus, BookOpen, FlaskConical, Calendar, Microscope } from "lucide-react";
 
 interface Project {
   id: string;
@@ -93,9 +94,10 @@ export default function HomePage() {
             </div>
             <button
               onClick={() => setShowCreate(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all text-sm font-medium flex items-center gap-2"
             >
-              + 新建项目
+              <Plus size={16} />
+              新建项目
             </button>
           </div>
 
@@ -142,14 +144,17 @@ export default function HomePage() {
           {/* 项目列表 */}
           {!loading && projects.length === 0 && (
             <div className="text-center py-16">
-              <div className="text-4xl mb-3">🔬</div>
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <Microscope size={32} className="text-primary" />
+              </div>
               <h3 className="text-lg font-medium text-gray-600 mb-2">还没有项目</h3>
               <p className="text-sm text-gray-400 mb-6">创建你的第一个科研项目，开始探索</p>
               <button
                 onClick={() => setShowCreate(true)}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                className="px-6 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/90 transition-all flex items-center gap-2 mx-auto"
               >
-                + 新建项目
+                <Plus size={16} />
+                新建项目
               </button>
             </div>
           )}
@@ -165,10 +170,10 @@ export default function HomePage() {
                 {project.description && (
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{project.description}</p>
                 )}
-                <div className="flex gap-4 text-xs text-gray-400">
-                  <span>📖 {project._count.papers} 篇文献</span>
-                  <span>🧪 {project._count.experiments} 个实验</span>
-                  <span>📅 {project._count.timeline} 条记录</span>
+                <div className="flex gap-4 text-xs text-gray-400 mt-4">
+                  <span className="flex items-center gap-1"><BookOpen size={12} /> {project._count.papers} 篇文献</span>
+                  <span className="flex items-center gap-1"><FlaskConical size={12} /> {project._count.experiments} 个实验</span>
+                  <span className="flex items-center gap-1"><Calendar size={12} /> {project._count.timeline} 条记录</span>
                 </div>
                 <div className="mt-3 text-xs text-gray-400">
                   创建于 {new Date(project.createdAt).toLocaleDateString("zh-CN")}
@@ -180,10 +185,10 @@ export default function HomePage() {
             {projects.length > 0 && (
               <button
                 onClick={() => setShowCreate(true)}
-                className="p-6 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-blue-300 hover:text-blue-500 cursor-pointer transition-colors"
+                className="p-6 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-primary/30 hover:text-primary cursor-pointer transition-all"
               >
-                <div className="text-3xl mb-2">+</div>
-                <div className="text-sm font-medium">新建项目</div>
+                <Plus size={24} />
+                <div className="text-sm font-medium mt-2">新建项目</div>
               </button>
             )}
           </div>
