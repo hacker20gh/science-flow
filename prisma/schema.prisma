@@ -13,6 +13,7 @@ model User {
   email     String   @unique
   name      String?
   avatar    String?
+  password  String?  // bcrypt 哈希后的密码
   projects  Project[]
   createdAt DateTime @default(now())
 }
@@ -34,6 +35,8 @@ model Project {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 // ===== 文献 =====
@@ -59,6 +62,9 @@ model Paper {
   oaUrl  String? // Open Access URL
 
   createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([pmid])
 }
 
 // ===== 文献提取结果 =====

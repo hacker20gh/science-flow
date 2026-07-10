@@ -8,24 +8,28 @@
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _prisma: any = null;
-let _loaded = false;
+let _loading: Promise<any> | null = null;
 
 /**
  * 获取 Prisma 客户端（异步，Edge Runtime 兼容）
  * 在 Edge Runtime 中调用会返回 null
  */
 export async function getPrisma() {
-  if (_loaded) return _prisma;
-  _loaded = true;
-
+  if (_prisma) return _prisma;
   if (!process.env.DATABASE_URL) return null;
 
-  try {
-    // 动态 import：Edge Runtime 中会失败并 catch
-    const mod = await import("@/lib/db-server");
-    _prisma = mod.prisma;
-    return _prisma;
-  } catch {
-    return null;
+  // 确保只加载一次，并发调用等待同一个 Promise
+  if (!_loading) {
+    _loading = (async () => {
+      try {
+        const mod = await import("@/lib/db-server");
+        _prisma = mod.prisma;
+        return _prisma;
+      } catch {
+        return null;
+      }
+    })();
   }
+
+  return _loading;
 }

@@ -5,7 +5,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置", manuscripts: [] }, { status: 503 });
   }
 
@@ -16,7 +16,6 @@ export async function GET(
       where: { projectId },
       orderBy: { updatedAt: "desc" },
     });
-
     return Response.json({ manuscripts });
   } catch (error) {
     console.error("Failed to list manuscripts:", error);
@@ -28,34 +27,39 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
-  const body = await req.json();
 
   try {
-    const manuscript = await prisma.manuscript.create({
-      data: {
-        projectId,
-        journal: body.journal || null,
-        language: body.language || "en",
-        abstract: body.abstract || null,
-        introduction: body.introduction || null,
-        methods: body.methods || null,
-        results: body.results || null,
-        discussion: body.discussion || null,
-      },
-    });
+    const body = await req.json();
 
-    await prisma.timelineEvent.create({
-      data: {
-        projectId,
-        type: "manuscript",
-        title: "创建论文草稿",
-        content: { manuscriptId: manuscript.id },
-      },
+    const manuscript = await prisma.$transaction(async (tx: any) => {
+      const m = await tx.manuscript.create({
+        data: {
+          projectId,
+          journal: body.journal || null,
+          language: body.language || "en",
+          abstract: body.abstract || null,
+          introduction: body.introduction || null,
+          methods: body.methods || null,
+          results: body.results || null,
+          discussion: body.discussion || null,
+        },
+      });
+
+      await tx.timelineEvent.create({
+        data: {
+          projectId,
+          type: "manuscript",
+          title: "创建论文草稿",
+          content: { manuscriptId: m.id },
+        },
+      });
+
+      return m;
     });
 
     return Response.json({ manuscript }, { status: 201 });

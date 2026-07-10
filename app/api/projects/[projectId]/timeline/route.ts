@@ -5,7 +5,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置", events: [] }, { status: 503 });
   }
 
@@ -16,7 +16,6 @@ export async function GET(
       where: { projectId },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
-
     return Response.json({ events });
   } catch (error) {
     console.error("Failed to list timeline:", error);
@@ -28,14 +27,19 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
-  const body = await req.json();
 
   try {
+    const body = await req.json();
+
+    if (!body.type || !body.title) {
+      return Response.json({ error: "type 和 title 必填" }, { status: 400 });
+    }
+
     const event = await prisma.timelineEvent.create({
       data: {
         projectId,

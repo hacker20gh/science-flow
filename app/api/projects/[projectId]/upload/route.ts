@@ -3,60 +3,71 @@ import { writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import { prisma } from "@/lib/db-server";
-
-const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+import { auth } from "@/lib/auth";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require("pdf-parse");
 
-async function parsePdf(buffer: Buffer) {
-  return pdfParse(buffer);
+const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+
+function sanitizeProjectId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 50);
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user) {
+      return Response.json({ error: "未登录" }, { status: 401 });
+    }
+
     const formData = await req.formData();
-    const projectId = formData.get("projectId") as string;
+    const rawProjectId = formData.get("projectId") as string;
     const file = formData.get("file") as File;
 
-    if (!projectId || !file) {
+    if (!rawProjectId || !file) {
       return Response.json({ error: "projectId 和 file 必填" }, { status: 400 });
+    }
+
+    const projectId = sanitizeProjectId(rawProjectId);
+    if (!projectId) {
+      return Response.json({ error: "无效的 projectId" }, { status: 400 });
     }
 
     if (file.type !== "application/pdf") {
       return Response.json({ error: "只支持 PDF 文件" }, { status: 400 });
     }
 
-    // 确保上传目录存在
+    // 限制文件大小 50MB
+    if (file.size > 50 * 1024 * 1024) {
+      return Response.json({ error: "文件过大（最大 50MB）" }, { status: 400 });
+    }
+
     const projectDir = path.join(UPLOAD_DIR, projectId);
     if (!existsSync(projectDir)) {
       await mkdir(projectDir, { recursive: true });
     }
 
-    // 保存 PDF 到本地
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const filePath = path.join(projectDir, safeName);
     await writeFile(filePath, buffer);
 
-    // 提取 PDF 文本
     let fullText = "";
     let pageCount = 0;
     try {
-      const pdfData = await parsePdf(buffer);
+      const pdfData = await pdfParse(buffer);
       fullText = pdfData.text;
       pageCount = pdfData.numpages;
     } catch {
-      // PDF 解析失败不阻断流程
+      // PDF 解析失败不阻断
     }
 
-    // 从文件名和 PDF 元数据推断标题
     const title = safeName.replace(/\.pdf$/i, "").replace(/_/g, " ");
 
-    // 保存到数据库（如果可用）
     let paperId = `local-${Date.now()}`;
-    if (process.env.DATABASE_URL && prisma) {
+    if (prisma) {
       try {
         const paper = await prisma.paper.create({
           data: {

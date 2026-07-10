@@ -5,7 +5,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
@@ -38,20 +38,29 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
-  const body = await req.json();
 
   try {
+    const body = await req.json();
+
+    const updateData: Record<string, unknown> = {};
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string" || !body.name.trim()) {
+        return Response.json({ error: "项目名称不能为空" }, { status: 400 });
+      }
+      updateData.name = body.name.trim();
+    }
+    if (body.description !== undefined) {
+      updateData.description = body.description;
+    }
+
     const project = await prisma.project.update({
       where: { id: projectId },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.description !== undefined && { description: body.description }),
-      },
+      data: updateData,
     });
 
     return Response.json({ project });
@@ -65,7 +74,7 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 

@@ -1,5 +1,6 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   session: { strategy: "jwt" },
@@ -16,33 +17,30 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        // 有数据库时，尝试查 User 表
-        if (process.env.DATABASE_URL) {
-          try {
-            const { getPrisma } = await import("@/lib/db");
-            const prisma = await getPrisma();
-            if (prisma) {
-              const user = await prisma.user.findUnique({
-                where: { email: credentials.email as string },
-              });
-              if (user) {
-                return { id: user.id, email: user.email, name: user.name };
-              }
-            }
-          } catch {
-            // 数据库连接失败，fallback 到 demo 账号
-          }
-        }
+        if (!process.env.DATABASE_URL) return null;
 
-        // Demo 账号（无需数据库）
-        if (
-          credentials.email === "demo@sciflow.ai" &&
-          credentials.password === "demo123"
-        ) {
-          return { id: "demo-user", email: "demo@sciflow.ai", name: "演示用户" };
-        }
+        try {
+          const { getPrisma } = await import("@/lib/db");
+          const prisma = await getPrisma();
+          if (!prisma) return null;
 
-        return null;
+          const user = await prisma.user.findUnique({
+            where: { email: credentials.email as string },
+          });
+
+          if (!user || !user.password) return null;
+
+          const isValid = await bcrypt.compare(
+            credentials.password as string,
+            user.password
+          );
+
+          if (!isValid) return null;
+
+          return { id: user.id, email: user.email, name: user.name };
+        } catch {
+          return null;
+        }
       },
     }),
   ],

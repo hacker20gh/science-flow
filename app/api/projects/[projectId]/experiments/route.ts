@@ -5,7 +5,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置", experiments: [] }, { status: 503 });
   }
 
@@ -16,7 +16,6 @@ export async function GET(
       where: { projectId },
       orderBy: { createdAt: "desc" },
     });
-
     return Response.json({ experiments });
   } catch (error) {
     console.error("Failed to list experiments:", error);
@@ -28,34 +27,42 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
-  const body = await req.json();
 
   try {
-    const experiment = await prisma.experiment.create({
-      data: {
-        projectId,
-        hypothesisId: body.hypothesisId || null,
-        name: body.name,
-        type: body.type || "custom",
-        status: "designed",
-        protocol: body.protocol || {},
-        variables: body.variables || {},
-      },
-    });
+    const body = await req.json();
 
-    // 记录时间线
-    await prisma.timelineEvent.create({
-      data: {
-        projectId,
-        type: "experiment_design",
-        title: `设计实验：${body.name}`,
-        content: { experimentId: experiment.id, type: body.type },
-      },
+    if (!body.name || typeof body.name !== "string") {
+      return Response.json({ error: "name 必填" }, { status: 400 });
+    }
+
+    const experiment = await prisma.$transaction(async (tx: any) => {
+      const exp = await tx.experiment.create({
+        data: {
+          projectId,
+          hypothesisId: body.hypothesisId || null,
+          name: body.name,
+          type: body.type || "custom",
+          status: "designed",
+          protocol: body.protocol || {},
+          variables: body.variables || {},
+        },
+      });
+
+      await tx.timelineEvent.create({
+        data: {
+          projectId,
+          type: "experiment_design",
+          title: `设计实验：${body.name}`,
+          content: { experimentId: exp.id, type: body.type },
+        },
+      });
+
+      return exp;
     });
 
     return Response.json({ experiment }, { status: 201 });

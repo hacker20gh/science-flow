@@ -5,7 +5,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置", hypotheses: [] }, { status: 503 });
   }
 
@@ -16,7 +16,6 @@ export async function GET(
       where: { projectId },
       orderBy: { createdAt: "desc" },
     });
-
     return Response.json({ hypotheses });
   } catch (error) {
     console.error("Failed to list hypotheses:", error);
@@ -28,32 +27,44 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
-  const body = await req.json();
 
   try {
-    const hypothesis = await prisma.hypothesis.create({
-      data: {
-        projectId,
-        statement: body.statement,
-        status: body.status || "pending",
-        evidence: body.evidence || null,
-        basedOn: body.basedOn || [],
-      },
-    });
+    const body = await req.json();
 
-    // 记录时间线
-    await prisma.timelineEvent.create({
-      data: {
-        projectId,
-        type: "hypothesis",
-        title: `提出假设：${body.statement.slice(0, 50)}${body.statement.length > 50 ? "..." : ""}`,
-        content: { hypothesisId: hypothesis.id, statement: body.statement },
-      },
+    if (!body.statement || typeof body.statement !== "string") {
+      return Response.json({ error: "statement 必填" }, { status: 400 });
+    }
+
+    const hypothesis = await prisma.$transaction(async (tx: any) => {
+      const h = await tx.hypothesis.create({
+        data: {
+          projectId,
+          statement: body.statement,
+          status: body.status || "pending",
+          evidence: body.evidence || null,
+          basedOn: body.basedOn || [],
+        },
+      });
+
+      const title = body.statement.length > 50
+        ? `提出假设：${body.statement.slice(0, 50)}...`
+        : `提出假设：${body.statement}`;
+
+      await tx.timelineEvent.create({
+        data: {
+          projectId,
+          type: "hypothesis",
+          title,
+          content: { hypothesisId: h.id, statement: body.statement },
+        },
+      });
+
+      return h;
     });
 
     return Response.json({ hypothesis }, { status: 201 });

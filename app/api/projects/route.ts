@@ -1,24 +1,26 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { auth } from "@/lib/auth";
 
-// 演示用户 ID（未接入 Auth 前使用）
 const DEMO_USER_ID = "demo-user";
 
 export async function GET() {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置", projects: [] }, { status: 503 });
   }
 
   try {
-    // 确保演示用户存在
+    const session = await auth();
+    const userId = session?.user?.id || DEMO_USER_ID;
+
     await prisma.user.upsert({
-      where: { id: DEMO_USER_ID },
-      create: { id: DEMO_USER_ID, email: "demo@sciflow.ai", name: "演示用户" },
+      where: { id: userId },
+      create: { id: userId, email: `${userId}@sciflow.ai`, name: "用户" },
       update: {},
     });
 
     const projects = await prisma.project.findMany({
-      where: { userId: DEMO_USER_ID },
+      where: { userId },
       orderBy: { updatedAt: "desc" },
       include: {
         _count: { select: { papers: true, experiments: true, timeline: true } },
@@ -33,29 +35,30 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  if (!process.env.DATABASE_URL) {
+  if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   try {
+    const session = await auth();
+    const userId = session?.user?.id || DEMO_USER_ID;
     const body = await req.json();
-    const { name, description } = body;
 
-    if (!name) {
+    if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
       return Response.json({ error: "项目名称不能为空" }, { status: 400 });
     }
 
     await prisma.user.upsert({
-      where: { id: DEMO_USER_ID },
-      create: { id: DEMO_USER_ID, email: "demo@sciflow.ai", name: "演示用户" },
+      where: { id: userId },
+      create: { id: userId, email: `${userId}@sciflow.ai`, name: "用户" },
       update: {},
     });
 
     const project = await prisma.project.create({
       data: {
-        name,
-        description: description || null,
-        userId: DEMO_USER_ID,
+        name: body.name.trim(),
+        description: body.description || null,
+        userId,
       },
     });
 
