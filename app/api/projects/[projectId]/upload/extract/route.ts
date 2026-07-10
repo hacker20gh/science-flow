@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { readFile } from "fs/promises";
 import path from "path";
 import { extractFromText } from "@/lib/llm/extraction";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/db-server";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 

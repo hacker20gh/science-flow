@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/db-server";
 
 // 演示用户 ID（未接入 Auth 前使用）
 const DEMO_USER_ID = "demo-user";

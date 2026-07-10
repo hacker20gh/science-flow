@@ -20,7 +20,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (process.env.DATABASE_URL) {
           try {
             const { getPrisma } = await import("@/lib/db");
-            const prisma = getPrisma();
+            const prisma = await getPrisma();
             if (prisma) {
               const user = await prisma.user.findUnique({
                 where: { email: credentials.email as string },

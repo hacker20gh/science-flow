@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/db-server";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
