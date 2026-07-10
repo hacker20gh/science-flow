@@ -7,6 +7,7 @@ import { ExperimentDesignCard } from "@/components/experiment/design-card";
 import { ProcessAssistant } from "@/components/assistant/process-assistant";
 import { analyzeProjectState } from "@/lib/assistant/process-assistant";
 import { useProjectStore } from "@/store/project-store";
+import { consumeSSEStream } from "@/lib/llm/streaming";
 import type { ExperimentDesign } from "@/lib/llm/experiment-design";
 
 export default function ExperimentsPage() {
@@ -19,6 +20,7 @@ export default function ExperimentsPage() {
   const [gapOrConflict, setGapOrConflict] = useState("");
   const [design, setDesign] = useState<ExperimentDesign | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progressMessage, setProgressMessage] = useState("");
 
   // 从 store 提取上下文
   const extractedPapers = papers.filter(
@@ -52,8 +54,11 @@ export default function ExperimentsPage() {
     setView("generating");
     setError(null);
 
+    setProgressMessage("");
+
+    let res: Response;
     try {
-      const res = await fetch("/api/experiments/design", {
+      res = await fetch("/api/experiments/design", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -66,15 +71,30 @@ export default function ExperimentsPage() {
         }),
       });
 
-      if (!res.ok) throw new Error((await res.json()).error || "生成失败");
-
-      const data = await res.json();
-      setDesign(data);
-      setView("result");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "生成失败");
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "生成失败");
       setView("input");
+      return;
     }
+
+    consumeSSEStream(res, {
+      onProgress: (step) => {
+        setProgressMessage(step || "正在生成...");
+      },
+      onResult: (data) => {
+        setDesign(data as ExperimentDesign);
+        setView("result");
+      },
+      onError: (message) => {
+        setError(message);
+        setView("input");
+      },
+      onDone: () => {},
+    });
   }
 
   return (
@@ -173,7 +193,9 @@ export default function ExperimentsPage() {
       {view === "generating" && (
         <div className="text-center py-12 space-y-3">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-600" />
-          <p className="text-sm text-gray-500">正在设计实验方案...</p>
+          <p className="text-sm text-gray-500">
+            {progressMessage || "正在设计实验方案..."}
+          </p>
           <p className="text-xs text-gray-400">
             AI 正在分析你的机制矩阵和假设，通常需要 30-60 秒
           </p>
