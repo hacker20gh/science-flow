@@ -1,18 +1,42 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { Timeline } from "@/components/timeline/timeline";
 import { useProjectStore } from "@/store/project-store";
+import type { TimelineEvent } from "@/lib/timeline/events";
 
 export default function TimelinePage() {
+  const { projectId } = useParams<{ projectId: string }>();
   const { timeline, loadDemoTimeline } = useProjectStore();
+  const [dbEvents, setDbEvents] = useState<TimelineEvent[] | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // 如果没有事件，加载 demo 数据
+  // 优先从数据库加载，失败则用 demo 数据
   useEffect(() => {
-    if (timeline.length === 0) {
-      loadDemoTimeline();
-    }
-  }, [timeline.length, loadDemoTimeline]);
+    fetch(`/api/projects/${projectId}/timeline`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.events && d.events.length > 0) {
+          setDbEvents(
+            d.events.map((e: Record<string, unknown>) => ({
+              id: e.id as string,
+              type: e.type as TimelineEvent["type"],
+              title: e.title as string,
+              description: (e.content as Record<string, unknown>)?.description as string || "",
+              timestamp: new Date(e.createdAt as string),
+              metadata: e.metadata as Record<string, unknown> | undefined,
+            }))
+          );
+        } else {
+          loadDemoTimeline();
+        }
+      })
+      .catch(() => loadDemoTimeline())
+      .finally(() => setLoading(false));
+  }, [projectId, loadDemoTimeline]);
+
+  const events = dbEvents || timeline;
 
   return (
     <main className="p-8 max-w-3xl mx-auto">
@@ -23,7 +47,11 @@ export default function TimelinePage() {
         </p>
       </div>
 
-      <Timeline events={timeline} />
+      {loading && (
+        <div className="text-gray-400 text-sm py-8 text-center">加载中...</div>
+      )}
+
+      {!loading && <Timeline events={events} />}
     </main>
   );
 }

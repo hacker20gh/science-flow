@@ -196,7 +196,23 @@ export default function ExperimentsPage() {
               重新设计
             </button>
           </div>
-          <ExperimentDesignCard design={design} onSave={() => alert("已保存！")} />
+          <ExperimentDesignCard
+            design={design}
+            onSave={() => {
+              // 持久化到数据库
+              fetch(`/api/projects/${projectId}/experiments`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  name: design.name,
+                  type: "custom",
+                  protocol: design.protocol,
+                  variables: design.variables,
+                }),
+              }).catch(() => {});
+              alert("实验方案已保存！");
+            }}
+          />
         </div>
       )}
     </main>

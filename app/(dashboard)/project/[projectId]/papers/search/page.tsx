@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
 import { SearchForm, type SearchOptions } from "@/components/papers/search-form";
 import { SearchResults, type Paper } from "@/components/papers/search-results";
 import { ExtractionReview } from "@/components/papers/extraction-review";
@@ -41,6 +42,7 @@ interface ExtractionResult {
 }
 
 export default function ProjectPaperSearchPage() {
+  const { projectId } = useParams<{ projectId: string }>();
   const { papers: storedPapers, addPapers, updatePaperExtraction } = useProjectStore();
 
   const [view, setView] = useState<"search" | "extracting" | "review">("search");
@@ -94,6 +96,24 @@ export default function ProjectPaperSearchPage() {
     }));
     addPapers(stored);
 
+    // 1b. 持久化到数据库（后台，不阻塞 UI）
+    for (const p of papers) {
+      fetch(`/api/projects/${projectId}/papers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: p.title,
+          doi: p.doi || null,
+          pmid: p.pmid || null,
+          authors: p.authors,
+          journal: p.journal,
+          year: p.year,
+          abstract: p.abstract,
+          source: p.sources?.[0] || "semantic_scholar",
+        }),
+      }).catch(() => {});
+    }
+
     // 2. 触发提取
     setView("extracting");
     setExtractionProgress({ done: 0, total: papers.length });
@@ -116,7 +136,7 @@ export default function ProjectPaperSearchPage() {
       const data = await res.json();
       setExtractionData(data.results);
 
-      // 3. 把提取结果写回 store
+      // 3. 把提取结果写回 store + 持久化到数据库
       for (const result of data.results) {
         if (result.extraction?.experiments) {
           updatePaperExtraction(
@@ -124,6 +144,15 @@ export default function ProjectPaperSearchPage() {
             "done",
             result.extraction.experiments
           );
+          // 持久化提取结果
+          fetch(`/api/projects/${projectId}/extractions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paperId: result.paperId,
+              extractions: result.extraction.experiments,
+            }),
+          }).catch(() => {});
         } else {
           updatePaperExtraction(
             result.paperId,
