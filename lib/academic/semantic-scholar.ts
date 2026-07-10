@@ -21,6 +21,7 @@ export interface S2Paper {
   oaUrl: string | null;
   oaPdfUrl: string | null;
   tldr: string | null;
+  publicationTypes: string[];
 }
 
 interface SearchOptions {
@@ -43,6 +44,7 @@ const FIELDS = [
   "openAccessPdf",
   "externalIds",
   "tldr",
+  "publicationTypes",
 ].join(",");
 
 /**
@@ -155,6 +157,7 @@ function mapS2Paper(raw: any): S2Paper {
     oaUrl: null, // S2 openAccessPdf.url 是 PDF 链接，不是 landing page
     oaPdfUrl: raw.openAccessPdf?.url || null,
     tldr: raw.tldr?.text || null,
+    publicationTypes: raw.publicationTypes || [],
   };
 }
 

@@ -20,8 +20,9 @@ export interface OpenAlexPaper {
   isOpenAccess: boolean;
   oaUrl: string | null;
   oaPdfUrl: string | null;
-  openAccessStatus: string; // gold, green, hybrid, bronze, closed
-  concept: string[]; // 学科领域
+  openAccessStatus: string;
+  concept: string[];
+  type: string; // article, review, etc.
 }
 
 interface SearchOptions {
@@ -108,6 +109,7 @@ function mapOpenAlexPaper(raw: any): OpenAlexPaper {
     oaPdfUrl: oa.is_oa ? oa.oa_url : null,
     openAccessStatus: oa.oa_status || "closed",
     concept: concepts,
+    type: raw.type || "article",
   };
 }
 

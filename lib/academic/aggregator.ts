@@ -254,7 +254,7 @@ function fromS2(p: S2Paper): UnifiedPaper {
     oaPdfUrl: p.oaPdfUrl || null,
     oaStatus: p.isOpenAccess ? "gold" : "closed",
     tldr: p.tldr,
-    articleType: "journal-article",
+    articleType: normalizeS2ArticleType(p.publicationTypes),
     sources: ["semantic_scholar"],
   };
 }
@@ -277,7 +277,7 @@ function fromOpenAlex(p: OpenAlexPaper): UnifiedPaper {
     oaPdfUrl: p.oaPdfUrl,
     oaStatus: p.openAccessStatus,
     tldr: null,
-    articleType: "研究论文",
+    articleType: normalizeOpenAlexType(p.type),
     sources: ["openalex"],
   };
 }
@@ -363,10 +363,64 @@ const ARTICLE_TYPE_MAP: Record<string, string> = {
 
 function normalizeArticleType(pubmedTypes: string[]): string {
   if (pubmedTypes.length === 0) return "研究论文";
-  // 取第一个匹配的类型（PubMed 通常把最主要的类型放第一个）
   for (const pt of pubmedTypes) {
     const mapped = ARTICLE_TYPE_MAP[pt];
     if (mapped) return mapped;
   }
-  return "研究论文"; // 默认
+  return "研究论文";
+}
+
+/**
+ * S2 publicationTypes → 中文标签
+ */
+const S2_TYPE_MAP: Record<string, string> = {
+  "JournalArticle": "研究论文",
+  "Review": "综述",
+  "MetaAnalysis": "Meta 分析",
+  "ClinicalTrial": "临床试验",
+  "CaseReport": "病例报告",
+  "Editorial": "社论",
+  "Letter": "通信",
+  "Conference": "会议论文",
+  "Dataset": "数据集",
+  "EditorialContent": "社论",
+  "Study": "研究论文",
+  "Book": "专著",
+  "BookSection": "书章",
+  "Reference": "参考文献",
+};
+
+function normalizeS2ArticleType(types: string[]): string {
+  if (!types || types.length === 0) return "研究论文";
+  for (const t of types) {
+    const mapped = S2_TYPE_MAP[t];
+    if (mapped) return mapped;
+  }
+  return "研究论文";
+}
+
+/**
+ * OpenAlex type → 中文标签
+ */
+const OPENALEX_TYPE_MAP: Record<string, string> = {
+  "article": "研究论文",
+  "review": "综述",
+  "editorial": "社论",
+  "letter": "通信",
+  "erratum": "勘误",
+  "dataset": "数据集",
+  "book": "专著",
+  "book-chapter": "书章",
+  "proceedings-article": "会议论文",
+  "reference-entry": "参考文献",
+  "dissertation": "学位论文",
+  "grant": "基金",
+  "report": "报告",
+  "standard": "标准",
+  "paratext": "辅助文本",
+  "other": "其他",
+};
+
+function normalizeOpenAlexType(type: string): string {
+  return OPENALEX_TYPE_MAP[type] || "研究论文";
 }
