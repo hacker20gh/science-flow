@@ -18,6 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useProjectStore } from "@/store/project-store";
 
 interface Extraction {
   id: string;
@@ -57,6 +58,7 @@ const SOURCE_LABELS: Record<string, string> = {
 
 export default function PapersPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const { removePaper } = useProjectStore();
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -218,6 +220,7 @@ export default function PapersPage() {
           fetch(`/api/projects/${projectId}/papers?id=${id}`, { method: "DELETE" })
         )
       );
+      [...selected].forEach((id) => removePaper(id));
       setPapers((prev) => prev.filter((p) => !selected.has(p.id)));
       clearSelection();
     } catch {
@@ -235,6 +238,7 @@ export default function PapersPage() {
     try {
       await fetch(`/api/projects/${projectId}/papers?id=${paperId}`, { method: "DELETE" });
       setPapers((prev) => prev.filter((p) => p.id !== paperId));
+      removePaper(paperId);
     } catch {
       toast.error("删除失败", { description: "请稍后重试" });
     }
@@ -479,6 +483,7 @@ function PaperCard({
   onExtractionDone: React.Dispatch<React.SetStateAction<Paper[]>>;
 }) {
   const [extracting, setExtracting] = useState(false);
+  const { updatePaperExtraction } = useProjectStore();
 
   async function handleExtract() {
     setExtracting(true);
@@ -499,6 +504,7 @@ function PaperCard({
         if (updatedRes.ok) {
           const updatedData = await updatedRes.json();
           onExtractionDone(updatedData.papers);
+          updatePaperExtraction(paper.id, "done", exps as import("@/lib/llm/extraction").ExperimentResult[]);
         }
       }
     } catch {
