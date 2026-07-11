@@ -1,101 +1,99 @@
 "use client";
 
-/**
- * 流式进度组件
- *
- * 用于显示重型 LLM 任务的实时进度（论文组装、实验设计等）
- */
+import { useState, useEffect, useRef } from "react";
+import { consumeSSEStream, type SSEConsumerOptions } from "@/lib/llm/streaming";
 
 interface StreamingProgressProps {
-  /** 任务标题，如 "正在生成论文..." */
-  title: string;
-  /** 当前步骤名称 */
-  currentStep?: string;
-  /** 当前完成的步骤数 */
-  current: number;
-  /** 总步骤数 */
-  total: number;
-  /** 各步骤名称列表（可选，用于显示详细进度） */
-  steps?: string[];
-  /** 停止回调 */
-  onStop?: () => void;
-  /** 是否正在生成 */
-  isStreaming: boolean;
+  response?: Response | null;
+  externalText?: string;
+  step?: string;
+  current?: number;
+  total?: number;
+  loading?: boolean;
+  onCancel?: () => void;
+  onResult?: (data: unknown) => void;
+  onError?: (message: string) => void;
+  onDone?: () => void;
 }
 
-export function StreamingProgress({
-  title,
-  currentStep,
+export default function StreamingProgress({
+  response,
+  externalText,
+  step,
   current,
   total,
-  steps,
-  onStop,
-  isStreaming,
+  loading,
+  onCancel,
+  onResult,
+  onError,
+  onDone,
 }: StreamingProgressProps) {
-  const progress = total > 0 ? (current / total) * 100 : 0;
+  const [streamedText, setStreamedText] = useState("");
+  const [progress, setProgress] = useState({ step: "", current: 0, total: 0 });
+  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!response) return;
+    setStreamedText("");
+    setError(null);
+
+    const options: SSEConsumerOptions = {
+      onText: (text) => setStreamedText((prev) => prev + text),
+      onProgress: (s, c, t) => setProgress({ step: s, current: c, total: t }),
+      onResult: (data) => onResult?.(data),
+      onError: (msg) => { setError(msg); onError?.(msg); },
+      onDone: () => onDone?.(),
+    };
+
+    consumeSSEStream(response, options).catch((err) => {
+      const msg = err instanceof Error ? err.message : "流读取失败";
+      setError(msg);
+      onError?.(msg);
+    });
+  }, [response]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [streamedText]);
+
+  const displayText = externalText || streamedText;
+  const displayStep = step || progress.step;
+  const displayCurrent = current ?? progress.current;
+  const displayTotal = total ?? progress.total;
+
+  if (!loading && !displayText && !error) return null;
 
   return (
-    <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 space-y-3">
-      {/* 标题行 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {isStreaming && (
-            <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      {(displayStep || displayTotal > 0) && (
+        <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 flex items-center gap-3 text-xs">
+          {loading && (
+            <span className="inline-block w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
           )}
-          <span className="text-sm font-medium text-blue-900">{title}</span>
-        </div>
-        <span className="text-xs text-blue-600">
-          {current}/{total}
-        </span>
-      </div>
-
-      {/* 进度条 */}
-      <div className="w-full bg-blue-100 rounded-full h-2">
-        <div
-          className="bg-blue-500 h-2 rounded-full transition-all duration-500 ease-out"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-
-      {/* 当前步骤 */}
-      {currentStep && (
-        <p className="text-xs text-blue-700">
-          {isStreaming ? "⏳" : "✅"} {currentStep}
-        </p>
-      )}
-
-      {/* 详细步骤列表（如果提供了 steps） */}
-      {steps && steps.length > 0 && (
-        <div className="grid grid-cols-2 gap-1">
-          {steps.map((step, i) => {
-            const isDone = i < current;
-            const isActive = i === current && isStreaming;
-            return (
-              <div
-                key={step}
-                className={`text-xs px-2 py-1 rounded ${
-                  isDone
-                    ? "text-green-700 bg-green-50"
-                    : isActive
-                      ? "text-blue-700 bg-blue-100 font-medium"
-                      : "text-gray-400"
-                }`}
-              >
-                {isDone ? "✓" : isActive ? "⏳" : "○"} {step}
-              </div>
-            );
-          })}
+          <span className="text-blue-700">{displayStep}</span>
+          {displayTotal > 0 && (
+            <span className="text-blue-500 ml-auto">{displayCurrent}/{displayTotal}</span>
+          )}
+          {onCancel && loading && (
+            <button onClick={onCancel} className="text-red-500 hover:text-red-700 ml-2">取消</button>
+          )}
         </div>
       )}
-
-      {/* 停止按钮 */}
-      {isStreaming && onStop && (
-        <button
-          onClick={onStop}
-          className="text-xs text-red-600 hover:text-red-700 underline"
-        >
-          ⏹ 停止生成
-        </button>
+      {displayText && (
+        <div ref={containerRef} className="px-4 py-3 max-h-[300px] overflow-y-auto">
+          <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">
+            {displayText}
+            {loading && <span className="inline-block w-1.5 h-3.5 bg-blue-500 animate-pulse ml-0.5" />}
+          </pre>
+        </div>
+      )}
+      {error && (
+        <div className="px-4 py-2 bg-red-50 border-t border-red-100 text-xs text-red-600">
+          ❌ {error}
+        </div>
       )}
     </div>
   );

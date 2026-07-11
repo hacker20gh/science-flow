@@ -81,6 +81,54 @@ export async function streamLLMResponse(
   return fullText;
 }
 
+/**
+ * 流式调用 LLM，支持 tool_use
+ *
+ * 实时发送文本增量，同时捕获 tool_use block。
+ * 返回完整文本 + 工具调用列表。
+ */
+export async function streamLLMWithToolUse(
+  client: Awaited<ReturnType<typeof import("./client").getLLMClient>>,
+  params: Parameters<ReturnType<typeof import("./client").getLLMClient>["messages"]["create"]>[0],
+  emit: (event: SSEEvent) => void
+): Promise<{ fullText: string; toolUseBlocks: Array<{ name: string; input: unknown }> }> {
+  const response = await client.messages.create({ ...params, stream: true });
+
+  let fullText = "";
+  const toolUseBlocks: Array<{ name: string; input: unknown }> = [];
+  let currentToolName = "";
+  let currentToolInput = "";
+
+  for await (const event of response) {
+    if (event.type === "content_block_start") {
+      if (event.content_block.type === "tool_use") {
+        currentToolName = event.content_block.name;
+        currentToolInput = "";
+      }
+    } else if (event.type === "content_block_delta") {
+      if (event.delta.type === "text_delta") {
+        fullText += event.delta.text;
+        emit({ type: "text", text: event.delta.text });
+      } else if (event.delta.type === "input_json_delta") {
+        currentToolInput += event.delta.partial_json;
+      }
+    } else if (event.type === "content_block_stop") {
+      if (currentToolName) {
+        try {
+          const input = JSON.parse(currentToolInput || "{}");
+          toolUseBlocks.push({ name: currentToolName, input });
+        } catch {
+          // malformed tool input, skip
+        }
+        currentToolName = "";
+        currentToolInput = "";
+      }
+    }
+  }
+
+  return { fullText, toolUseBlocks };
+}
+
 // ===== 前端 SSE 消费者工具 =====
 
 export interface SSEConsumerOptions {

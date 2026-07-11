@@ -8,6 +8,7 @@ import {
   ExternalLink, Trash2, RefreshCw, Loader2, Download, Filter, ArrowUpDown,
 } from "lucide-react";
 import { PapersSkeleton } from "@/components/skeletons";
+import { consumeSSEStream } from "@/lib/llm/streaming";
 import { toast } from "sonner";
 import { exportToBibtex, exportToRis, downloadFile } from "@/lib/export";
 import {
@@ -70,6 +71,7 @@ export default function PapersPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
+  const [extractProgress, setExtractProgress] = useState<string>("");
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single' | 'batch'; id?: string } | null>(null);
 
   useEffect(() => {
@@ -207,6 +209,7 @@ export default function PapersPage() {
     if (selectedPapers.length === 0) return;
 
     setBatchLoading(true);
+    setExtractProgress("正在提交提取请求...");
     try {
       const res = await fetch("/api/papers/extract", {
         method: "POST",
@@ -219,21 +222,44 @@ export default function PapersPage() {
           })),
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        // 刷新文献列表
-        const refresh = await fetch(`/api/projects/${projectId}/papers`);
-        if (refresh.ok) {
-          const d = await refresh.json();
-          setPapers(d.papers || []);
-        }
-        clearSelection();
-        toast.success("批量提取完成", { description: `成功提取 ${data.summary?.success || 0} 篇文献的实验数据` });
+
+      if (!res.ok) {
+        throw new Error("提取请求失败");
       }
+
+      // SSE 流式消费
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let finalData: any = null;
+      await consumeSSEStream(res, {
+        onProgress: (step, current, total) => {
+          setExtractProgress(`${step} (${current}/${total})`);
+        },
+        onResult: (data) => {
+          const d = data as { final?: boolean; single?: unknown; completed?: number; total?: number; results?: unknown[]; summary?: { success?: number; total?: number; errors?: number; totalExperiments?: number } };
+          if (d.final) {
+            finalData = d;
+          }
+        },
+        onError: (msg) => {
+          toast.error("提取失败", { description: msg });
+        },
+      });
+
+      // 刷新文献列表
+      const refresh = await fetch(`/api/projects/${projectId}/papers`);
+      if (refresh.ok) {
+        const d = await refresh.json();
+        setPapers(d.papers || []);
+      }
+      clearSelection();
+      toast.success("批量提取完成", {
+        description: `成功提取 ${finalData?.summary?.success || 0} 篇文献的实验数据`,
+      });
     } catch {
       toast.error("批量提取失败", { description: "请稍后重试" });
     } finally {
       setBatchLoading(false);
+      setExtractProgress("");
     }
   }
 
@@ -390,6 +416,9 @@ export default function PapersPage() {
             {batchLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             批量提取
           </button>
+          {extractProgress && (
+            <span className="text-xs text-blue-600 animate-pulse">{extractProgress}</span>
+          )}
           <button
             onClick={batchDelete}
             disabled={batchLoading}
@@ -544,17 +573,24 @@ function PaperCard({
           papers: [{ paperId: paper.id, title: paper.title, abstract: paper.abstract }],
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        const exps = data.results?.[0]?.extraction?.experiments || [];
-        toast.success("提取完成", { description: `提取到 ${exps.length} 个实验数据` });
-        // Re-fetch papers list
-        const updatedRes = await fetch(`/api/projects/${projectId}/papers`);
-        if (updatedRes.ok) {
-          const updatedData = await updatedRes.json();
-          onExtractionDone(updatedData.papers);
-          updatePaperExtraction(paper.id, "done", exps as import("@/lib/llm/extraction").ExperimentResult[]);
-        }
+      if (!res.ok) throw new Error("提取请求失败");
+
+      let exps: import("@/lib/llm/extraction").ExperimentResult[] = [];
+      await consumeSSEStream(res, {
+        onResult: (data) => {
+          const d = data as { final?: boolean; results?: Array<{ extraction?: { experiments?: import("@/lib/llm/extraction").ExperimentResult[] } }> };
+          if (d.final && d.results?.[0]?.extraction?.experiments) {
+            exps = d.results[0].extraction.experiments;
+          }
+        },
+      });
+
+      toast.success("提取完成", { description: `提取到 ${exps.length} 个实验数据` });
+      const updatedRes = await fetch(`/api/projects/${projectId}/papers`);
+      if (updatedRes.ok) {
+        const updatedData = await updatedRes.json();
+        onExtractionDone(updatedData.papers);
+        updatePaperExtraction(paper.id, "done", exps);
       }
     } catch {
       toast.error("提取失败", { description: "请稍后重试" });

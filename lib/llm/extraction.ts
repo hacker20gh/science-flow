@@ -236,7 +236,7 @@ export async function batchExtract(
   const results = new Map<string, ExtractionResult>();
   let completed = 0;
 
-  const concurrency = 3;
+  const concurrency = 5;
   const queue = [...papers];
 
   async function worker() {

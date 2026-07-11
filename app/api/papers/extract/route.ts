@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractFromText, type ExtractionResult } from "@/lib/llm/extraction";
+import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
 
 interface ExtractRequestBody {
   papers: Array<{
@@ -111,7 +112,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 逐篇提取（简单并发，不需要 progress callback）
+    // 逐篇提取（流式返回每篇结果）
     const results: Array<{
       paperId: string;
       title: string;
@@ -119,76 +120,58 @@ export async function POST(req: NextRequest) {
       error?: string;
     }> = [];
 
-    const CONCURRENCY = 3;
+    const CONCURRENCY = 5;
     const queue = [...papers];
 
-    async function worker() {
-      while (queue.length > 0) {
-        const paper = queue.shift()!;
-        try {
-          // 优先级：fullText（请求参数） > fullText（DB） > abstract
-          const text = paper.fullText || dbFullTexts[paper.paperId] || paper.abstract || "";
-          const textSource = paper.fullText ? "请求参数" : dbFullTexts[paper.paperId] ? "DB全文" : "摘要";
-          if (!text) {
-            results.push({
-              paperId: paper.paperId,
-              title: paper.title,
-              extraction: null,
-              error: "No text available for extraction",
-            });
-            continue;
+    return createSSEStream(async (emit) => {
+      emit({ type: "progress", step: "正在准备提取...", current: 0, total: papers.length });
+
+      async function worker() {
+        while (queue.length > 0) {
+          const paper = queue.shift()!;
+          try {
+            const text = paper.fullText || dbFullTexts[paper.paperId] || paper.abstract || "";
+            if (!text) {
+              const result = { paperId: paper.paperId, title: paper.title, extraction: null, error: "No text available" };
+              results.push(result);
+              emit({ type: "progress", step: `跳过: ${paper.title}（无文本）`, current: results.length, total: papers.length });
+              continue;
+            }
+
+            emit({ type: "progress", step: `正在提取: ${paper.title}`, current: results.length, total: papers.length });
+            const extraction = await extractFromText(text, paper.title);
+            const result = { paperId: paper.paperId, title: paper.title, extraction };
+            results.push(result);
+            // 每篇完成立即发送结果
+            emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
+          } catch (error) {
+            const result = { paperId: paper.paperId, title: paper.title, extraction: null, error: error instanceof Error ? error.message : "Extraction failed" };
+            results.push(result);
+            emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
           }
-
-          console.log(`[Extract] 开始提取: "${paper.title}" (来源: ${textSource}, 文本长度: ${text.length})`);
-          const extraction = await extractFromText(text, paper.title);
-          console.log(`[Extract] 提取完成: "${paper.title}" → ${extraction.experiments.length} 个实验`);
-          results.push({
-            paperId: paper.paperId,
-            title: paper.title,
-            extraction,
-          });
-        } catch (error) {
-          results.push({
-            paperId: paper.paperId,
-            title: paper.title,
-            extraction: null,
-            error: error instanceof Error ? error.message : "Extraction failed",
-          });
+          await sleep(500);
         }
-
-        await sleep(500); // 速率控制
       }
-    }
 
-    await Promise.all(
-      Array.from({ length: CONCURRENCY }, () => worker())
-    );
+      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
-    // 汇总统计
-    const successCount = results.filter((r) => r.extraction).length;
-    const errorCount = results.filter((r) => r.error).length;
-    const totalExperiments = results.reduce((sum, r) => {
-      if (r.extraction?.experiments) {
-        return sum + r.extraction.experiments.length;
-      }
-      return sum;
-    }, 0);
-
-    return NextResponse.json({
-      results,
-      summary: {
-        total: papers.length,
-        success: successCount,
-        errors: errorCount,
-        totalExperiments,
-      },
+      // 发送最终汇总
+      const successCount = results.filter((r) => r.extraction).length;
+      const totalExperiments = results.reduce((sum, r) => sum + (r.extraction?.experiments?.length || 0), 0);
+      emit({
+        type: "result",
+        data: {
+          final: true,
+          results,
+          summary: { total: papers.length, success: successCount, errors: results.length - successCount, totalExperiments },
+        },
+      });
     });
   } catch (error) {
     console.error("Extraction error:", error);
-    return NextResponse.json(
-      { error: "Extraction failed. Please try again." },
-      { status: 500 }
-    );
+    return createSSEStream(async (emit) => {
+      emit({ type: "error", message: "Extraction failed. Please try again." });
+    });
   }
 }
 

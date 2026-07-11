@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
+import { consumeSSEStream } from "@/lib/llm/streaming";
 import { useParams, useRouter } from "next/navigation";
 import { SearchForm, type SearchOptions } from "@/components/papers/search-form";
 import { SearchResults, type Paper } from "@/components/papers/search-results";
@@ -252,14 +253,43 @@ export default function ProjectPaperSearchPage() {
         }),
       });
 
-      if (!res.ok) throw new Error((await res.json()).error || "提取失败");
+      if (!res.ok) throw new Error("提取失败");
 
-      const data = await res.json();
-      setExtractionData(data.results);
+      // SSE 流式消费
+      let results: unknown[] = [];
+      await consumeSSEStream(res, {
+        onProgress: (step, current, total) => {
+          setExtractionDetails((prev) => prev.map((d, i) => {
+            if (i < current) return { ...d, status: i === current - 1 ? "running" as const : d.status };
+            return d;
+          }));
+        },
+        onResult: (data) => {
+          const d = data as { final?: boolean; results?: unknown[]; single?: unknown; completed?: number };
+          if (d.single && d.completed !== undefined) {
+            // 单篇完成，更新进度
+            setExtractionDetails((prev) => prev.map((item, i) => {
+              if (i === d.completed! - 1) {
+                const single = d.single as { extraction?: { experiments?: unknown[] } };
+                return { ...item, status: single.extraction ? "done" as const : "error" as const, experiments: single.extraction?.experiments?.length || 0 };
+              }
+              return item;
+            }));
+          }
+          if (d.final) {
+            results = d.results || [];
+          }
+        },
+        onError: (msg) => {
+          throw new Error(msg);
+        },
+      });
+
+      setExtractionData(results as ExtractionResult[]);
 
       // 更新进度详情
       setExtractionDetails((prev) => prev.map((d, i) => {
-        const result = data.results?.[i];
+        const result = (results as Array<{ extraction?: { experiments?: unknown[] }; error?: string }>)?.[i];
         if (!result) return d;
         return {
           ...d,
@@ -271,7 +301,7 @@ export default function ProjectPaperSearchPage() {
 
       // 持久化提取结果
       const saveStatuses: Record<string, "saving" | "saved" | "error"> = {};
-      for (const result of data.results) {
+      for (const result of results as Array<{ paperId: string; extraction?: { experiments: import("@/lib/llm/extraction").ExperimentResult[] }; error?: string }>) {
         if (result.extraction?.experiments) {
           updatePaperExtraction(result.paperId, "done", result.extraction.experiments);
           saveStatuses[result.paperId] = "saving";
