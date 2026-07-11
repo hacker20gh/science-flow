@@ -16,7 +16,8 @@ model User {
   password  String?  // bcrypt 哈希后的密码
   llmConfig Json?    // { baseUrl, models: { extraction, chat, analysis } }
   projects  Project[]
-  chatMessages ChatMessage[]
+  chatMessages    ChatMessage[]
+  conversations   Conversation[]
   createdAt DateTime @default(now())
 }
 
@@ -45,9 +46,11 @@ model Project {
   hypotheses   Hypothesis[]
   timeline     TimelineEvent[]
   manuscripts  Manuscript[]
-  chatMessages ChatMessage[]
+  chatMessages  ChatMessage[]
+  conversations Conversation[]
   searchHistory SearchHistory[]
-  matrix       MechanismMatrix?
+  matrix        MechanismMatrix?
+  todos         TodoItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -214,18 +217,39 @@ model Manuscript {
 // ===== AI 对话消息 =====
 
 model ChatMessage {
+  id             String       @id @default(cuid())
+  projectId      String
+  userId         String
+  conversationId String?
+  role           String       // "user" | "assistant" | "system"
+  content        String
+  metadata       Json?        // token usage, model used, tool calls, etc.
+  createdAt      DateTime     @default(now())
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+// ===== 对话管理 =====
+
+model Conversation {
   id        String   @id @default(cuid())
   projectId String
   userId    String
-  role      String   // "user" | "assistant" | "system"
-  content   String
-  metadata  Json?    // token usage, model used, tool calls, etc.
+  title     String   @default("新对话")
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([projectId, createdAt])
+  @@index([projectId, userId])
   @@index([userId])
 }
 
@@ -259,4 +283,22 @@ model MechanismMatrix {
 
   @@unique([projectId])
   @@index([projectId])
+}
+
+// ===== 待办事项 =====
+
+model TodoItem {
+  id          String    @id @default(cuid())
+  projectId   String
+  type        String    // conflict | gap | suggestion | experiment_check
+  title       String
+  detail      String?
+  status      String    @default("pending") // pending | completed
+  metadata    Json?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, status])
 }
