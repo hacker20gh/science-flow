@@ -129,7 +129,10 @@ IMPORTANT RULES:
 2. Only extract findings EXPLICITLY stated in the paper. Do NOT infer or hallucinate.
 3. If information is not available, use null.
 4. For each finding, include the EXACT quote from the text as evidence.
-5. Be precise about quantitative values.`;
+5. Be precise about quantitative values.
+6. Use CANONICAL pathway names: NF-κB (not NF-kB or NF-kappaB), PI3K/AKT, MAPK/ERK, JAK/STAT, mTOR, Wnt, Notch, TGF-β, p53, HIF-1α, AMPK. For PD-L1 immune checkpoint, use "PD-1/PD-L1" or "PD-L1".
+7. Use CANONICAL phenotype names: Apoptosis (not cell apoptosis), Cell Viability (not cell survival), Cell Proliferation (not cell growth), Cell Migration (not cell motility), Metastasis, Drug Resistance.
+8. For pathway_effects[].method, use the experimental technique (e.g., "Western blot", "qPCR", "flow cytometry", "luciferase reporter assay"), NOT the statistical method.`;
 
 // ===== 智能截断 =====
 

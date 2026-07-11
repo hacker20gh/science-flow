@@ -8,7 +8,7 @@ import { analyzeProjectState } from "@/lib/assistant/process-assistant";
 import { HypothesisCard } from "@/components/brain/hypothesis-card";
 import { HypothesisForm } from "@/components/brain/hypothesis-form";
 import { TaskBoard } from "@/components/brain/task-board";
-import { generateMatrix, type MatrixData } from "@/lib/matrix/generator";
+import { generateMatrix, generateMatrixFromDB, type MatrixData, type DBExtraction } from "@/lib/matrix/generator";
 import { useProjectStore } from "@/store/project-store";
 import { DEMO_EXTRATIONS } from "@/lib/matrix/demo-data";
 import { useParams } from "next/navigation";
@@ -31,10 +31,7 @@ export default function BrainPage() {
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([]);
   const [dbMatrix, setDbMatrix] = useState<MatrixData | null>(null);
   const [matrixLoading, setMatrixLoading] = useState(true);
-  const [dbPapers, setDbPapers] = useState<Array<{
-    id: string; title: string; year: number | null;
-    extractions: Array<{ experiments: unknown }>;
-  }> | null>(null);
+  const [dbExtractions, setDbExtractions] = useState<DBExtraction[] | null>(null);
 
   // Hypothesis CRUD state
   const [showForm, setShowForm] = useState(false);
@@ -123,33 +120,27 @@ export default function BrainPage() {
     [formMode, editingHypothesis, handleCreateHypothesis, handleUpdateHypothesis]
   );
 
-  // 从 DB 获取真实文献数据（包含提取结果）
+  // 从 DB 获取真实提取数据（直接用于矩阵生成）
   useEffect(() => {
     if (!projectId) return;
-    fetch(`/api/projects/${projectId}/papers`)
+    fetch(`/api/projects/${projectId}/extractions`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.papers) setDbPapers(data.papers);
+        if (data.extractions) setDbExtractions(data.extractions);
       })
       .catch(() => {});
   }, [projectId]);
 
-  // 从 DB 文献构建 extractedPapers
+  // 从 DB 文献构建 extractedPapers（用于 fallback）
   const extractedPapers = useMemo(() => {
-    if (dbPapers) {
-      return dbPapers
-        .filter((p) => p.extractions.length > 0)
-        .map((p) => ({
-          paperId: p.id,
-          title: p.title,
-          year: p.year ?? undefined,
-          experiments: p.extractions.flatMap((e) => {
-            try {
-              const data = typeof e.experiments === "string" ? JSON.parse(e.experiments as string) : e.experiments;
-              return Array.isArray(data) ? data : [];
-            } catch { return []; }
-          }),
-        }));
+    // 如果有 DB 提取数据，直接从 DB extractions 生成（不再需要 papers 中转）
+    if (dbExtractions && dbExtractions.length > 0) {
+      return dbExtractions.map((e) => ({
+        paperId: e.paperId,
+        title: e.paper.title,
+        year: e.paper.year ?? undefined,
+        experiments: [],
+      }));
     }
     // fallback 到 store
     return storePapers
@@ -160,9 +151,9 @@ export default function BrainPage() {
         year: p.year,
         experiments: p.experiments,
       }));
-  }, [dbPapers, storePapers]);
+  }, [dbExtractions, storePapers]);
 
-  const useDemo = extractedPapers.length === 0;
+  const useDemo = !dbExtractions || dbExtractions.length === 0;
 
   // 从数据库获取假设
   useEffect(() => {
@@ -191,8 +182,18 @@ export default function BrainPage() {
         if (data.matrix?.data) {
           // DB 有矩阵，直接使用
           setDbMatrix(data.matrix.data as MatrixData);
+        } else if (dbExtractions && dbExtractions.length > 0) {
+          // DB 没有矩阵，从 DB 提取数据实时生成并保存
+          const generated = generateMatrixFromDB(dbExtractions);
+          setDbMatrix(generated);
+          // fire-and-forget 保存
+          fetch(`/api/projects/${projectId}/matrix`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data: generated }),
+          }).catch(() => {});
         } else if (extractedPapers.length > 0) {
-          // DB 没有矩阵，从已提取文献实时生成并保存
+          // 从 store 数据实时生成（fallback）
           const generated = generateMatrix(
             extractedPapers.map((p) => ({
               paperId: p.paperId,
@@ -202,7 +203,6 @@ export default function BrainPage() {
             }))
           );
           setDbMatrix(generated);
-          // fire-and-forget 保存
           fetch(`/api/projects/${projectId}/matrix`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -236,6 +236,11 @@ export default function BrainPage() {
       );
     }
 
+    // 有 DB 提取数据时使用 DB-based 生成
+    if (dbExtractions && dbExtractions.length > 0) {
+      return generateMatrixFromDB(dbExtractions);
+    }
+
     return generateMatrix(
       extractedPapers.map((p) => ({
         paperId: p.paperId,
@@ -244,7 +249,7 @@ export default function BrainPage() {
         experiments: p.experiments,
       }))
     );
-  }, [useDemo, dbMatrix, storeMatrix, extractedPapers]);
+  }, [useDemo, dbMatrix, storeMatrix, extractedPapers, dbExtractions]);
 
   return (
     <main className="p-8 max-w-7xl mx-auto space-y-8">

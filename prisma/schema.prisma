@@ -96,12 +96,17 @@ model Extraction {
 
   drugName     String?  // 药物/干预名称
   drugConc     String?  // 药物浓度
+  duration     String?  // 处理时间，如 24h
+  coTreatment  String?  // 联合处理
   cellLine     String?  // 细胞系
+  species      String?  // 物种（human, mouse 等）
+  passage      String?  // 传代范围
   pathway      String?  // 信号通路（第一个，向后兼容）
   pathwayDir   String?  // up, down, no_change
   phenotype    String?  // 表型（第一个，向后兼容）
   phenotypeDir String?  // up, down, no_change
-  method       String?  // 实验方法
+  method       String?  // 统计方法（ANOVA, t-test 等）
+  expMethod    String?  // 实验方法（Western blot, qPCR 等）
   conclusion   String?  // 关键结论
   rawText      String?  // 原文片段（用于溯源）
 
@@ -109,6 +114,8 @@ model Extraction {
   pathwayEffects  Json?   // [{ pathway, direction, significance, method }]
   phenotypeEffects Json?  // [{ phenotype, direction, fold_change }]
 
+  controls   Json?     // 对照组列表 ["Vehicle", "TNF-α positive"]
+  sampleSize Int?      // 样本量（生物学重复数）
   confidence Float?    // LLM 提取置信度 0-1
   verified   Boolean   @default(false)
 

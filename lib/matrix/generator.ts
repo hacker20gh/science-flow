@@ -1,10 +1,11 @@
 /**
  * 机制矩阵数据生成器
  *
- * 从 LLM 提取结果生成矩阵数据结构
+ * 从 LLM 提取结果或 DB 直接读取生成矩阵数据结构
  */
 
 import type { ExperimentResult } from "@/lib/llm/extraction";
+import { normalizePathway, normalizePhenotype } from "./normalize";
 
 // ===== 矩阵数据结构 =====
 
@@ -234,4 +235,262 @@ function ensureColumn(
 
 function incrementCount(counts: Map<string, number>, id: string) {
   counts.set(id, (counts.get(id) || 0) + 1);
+}
+
+// ===== DB-based 矩阵生成 =====
+
+export interface DBExtraction {
+  id: string;
+  paperId: string;
+  paper: { title: string; year: number | null };
+  drugName: string | null;
+  drugConc: string | null;
+  cellLine: string | null;
+  species: string | null;
+  duration: string | null;
+  pathwayEffects: Array<{
+    pathway: string;
+    direction: string;
+    significance?: string | null;
+    method?: string | null;
+  }> | null;
+  phenotypeEffects: Array<{
+    phenotype: string;
+    direction: string;
+    fold_change?: string | null;
+  }> | null;
+  method: string | null;
+  expMethod: string | null;
+  sampleSize: number | null;
+  conclusion: string | null;
+  rawText: string | null;
+}
+
+/**
+ * 从数据库提取结果直接生成矩阵
+ *
+ * 与 generateMatrix() 的区别：
+ * - 直接读取 DB 中的 extraction 结构（非 LLM 内存输出）
+ * - 使用 normalize.ts 归一化名称，避免同列异名
+ * - 使用智能冲突检测（区分真冲突与可解释差异）
+ * - 使用智能空白检测（仅标记有意义的空白）
+ */
+export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
+  const rows: MatrixRow[] = [];
+  const allColumns = new Map<string, MatrixColumn>();
+  const columnCounts = new Map<string, number>();
+
+  for (const ext of extractions) {
+    const drugConc = [ext.drugName, ext.drugConc].filter(Boolean).join(" ");
+    const cellLine = ext.cellLine || "未知";
+
+    const cells: Record<string, MatrixCell> = {};
+
+    // 通路效果 → 列（使用 normalize 归一化名称）
+    if (ext.pathwayEffects) {
+      for (const pe of ext.pathwayEffects) {
+        const normalizedName = normalizePathway(pe.pathway);
+        const colId = `pathway:${normalizedName}`;
+        ensureColumn(allColumns, colId, normalizedName, "pathway", columnCounts);
+
+        cells[colId] = {
+          direction: pe.direction as "up" | "down" | "no_change" | null,
+          significance: pe.significance || null,
+          method: pe.method || ext.expMethod || null,
+          detail: [pe.method || ext.expMethod, pe.significance]
+            .filter(Boolean)
+            .join(" ")
+            .trim(),
+          paperTitle: ext.paper.title,
+          evidenceQuote: ext.rawText || ext.conclusion || "",
+          experimentIndex: 0,
+        };
+        incrementCount(columnCounts, colId);
+      }
+    }
+
+    // 表型效果 → 列（使用 normalize 归一化名称）
+    if (ext.phenotypeEffects) {
+      for (const ph of ext.phenotypeEffects) {
+        const normalizedName = normalizePhenotype(ph.phenotype);
+        const colId = `phenotype:${normalizedName}`;
+        ensureColumn(allColumns, colId, normalizedName, "phenotype", columnCounts);
+
+        cells[colId] = {
+          direction: ph.direction as "up" | "down" | "no_change" | null,
+          significance: null,
+          method: null,
+          detail: ph.fold_change || "",
+          paperTitle: ext.paper.title,
+          evidenceQuote: ext.rawText || ext.conclusion || "",
+          experimentIndex: 0,
+        };
+        incrementCount(columnCounts, colId);
+      }
+    }
+
+    rows.push({
+      id: ext.id,
+      paperTitle: ext.paper.title,
+      paperId: ext.paperId,
+      drugConc,
+      cellLine,
+      year: ext.paper.year ?? undefined,
+      cells,
+    });
+  }
+
+  // 更新列的 count 值
+  for (const [id, count] of columnCounts) {
+    const col = allColumns.get(id);
+    if (col) col.count = count;
+  }
+
+  // 按数据覆盖率排序列
+  const columns = Array.from(allColumns.values()).sort(
+    (a, b) => b.count - a.count
+  );
+
+  // 智能冲突检测
+  const conflicts = detectSmartConflicts(rows, columns);
+
+  // 智能空白检测
+  const gaps = detectSmartGaps(rows, columns);
+
+  const paperIds = new Set(extractions.map((e) => e.paperId));
+
+  return {
+    rows,
+    columns,
+    conflicts,
+    gaps,
+    totalExperiments: rows.length,
+    totalPapers: paperIds.size,
+  };
+}
+
+// ===== 智能冲突检测 =====
+
+/**
+ * 智能冲突检测 — 区分「真冲突」与「可解释差异」
+ *
+ * 真冲突：相同实验条件（药物浓度 + 细胞系）下，不同文献报道相反方向
+ * 可解释差异：不同剂量/不同细胞系导致的差异（如剂量依赖关系）
+ */
+function detectSmartConflicts(
+  rows: MatrixRow[],
+  columns: MatrixColumn[]
+): MatrixConflict[] {
+  const conflicts: MatrixConflict[] = [];
+
+  for (const col of columns) {
+    const cellGroups = new Map<string, MatrixRow[]>();
+
+    for (const row of rows) {
+      const cell = row.cells[col.id];
+      if (!cell || !cell.direction || cell.direction === "no_change") continue;
+      const existing = cellGroups.get(cell.direction) || [];
+      existing.push(row);
+      cellGroups.set(cell.direction, existing);
+    }
+
+    const ups = cellGroups.get("up") || [];
+    const downs = cellGroups.get("down") || [];
+
+    if (ups.length === 0 || downs.length === 0) continue;
+
+    // 按 (drugConc, cellLine) 分组，检查是否有真冲突
+    const conditions = new Map<string, { ups: number; downs: number }>();
+    for (const row of [...ups, ...downs]) {
+      const key = `${row.drugConc}|||${row.cellLine}`;
+      const dir = ups.includes(row) ? "up" : "down";
+      const existing = conditions.get(key) || { ups: 0, downs: 0 };
+      if (dir === "up") existing.ups++;
+      else existing.downs++;
+      conditions.set(key, existing);
+    }
+
+    // 判断是否有真冲突（相同条件下方向相反）
+    let hasRealConflict = false;
+    const conditionDetails: string[] = [];
+
+    for (const [key, counts] of conditions) {
+      if (counts.ups > 0 && counts.downs > 0) {
+        hasRealConflict = true;
+        const [conc, cell] = key.split("|||");
+        conditionDetails.push(
+          `${conc || "未知浓度"} ${cell || ""} 中 ${counts.ups}↑ vs ${counts.downs}↓`
+        );
+      }
+    }
+
+    if (hasRealConflict) {
+      conflicts.push({
+        columnId: col.id,
+        conflictingRows: [...ups, ...downs],
+        description: `真冲突：${conditionDetails.join("；")}`,
+      });
+    } else if (ups.length > 0 && downs.length > 0) {
+      // 可解释差异：不同剂量或不同细胞系
+      const uniqueConcs = new Set(
+        [...ups, ...downs].map((r) => r.drugConc).filter(Boolean)
+      );
+      const uniqueCells = new Set(
+        [...ups, ...downs].map((r) => r.cellLine).filter(Boolean)
+      );
+
+      let reason = "";
+      if (uniqueConcs.size > 1)
+        reason = `剂量依赖关系（${[...uniqueConcs].join(" vs ")}）`;
+      else if (uniqueCells.size > 1)
+        reason = `细胞系差异（${[...uniqueCells].join(" vs ")}）`;
+      else
+        reason = `${ups.length} 篇上调 vs ${downs.length} 篇下调`;
+
+      conflicts.push({
+        columnId: col.id,
+        conflictingRows: [...ups, ...downs],
+        description: reason,
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+// ===== 智能空白检测 =====
+
+/**
+ * 智能空白检测 — 只标记有意义的空白
+ *
+ * 仅当：
+ * 1. 行（论文）至少有 2 列数据（是活跃实验）
+ * 2. 列至少有 1 行数据（是已研究的维度）
+ */
+function detectSmartGaps(
+  rows: MatrixRow[],
+  columns: MatrixColumn[]
+): MatrixGap[] {
+  const gaps: MatrixGap[] = [];
+
+  // 活跃行：至少 2 列有数据
+  const activeRows = rows.filter(
+    (r) => Object.keys(r.cells).length >= 2
+  );
+  // 已研究列：至少 1 行有数据
+  const studiedColumns = columns.filter((c) => c.count >= 1);
+
+  for (const row of activeRows) {
+    for (const col of studiedColumns) {
+      if (!row.cells[col.id]) {
+        gaps.push({
+          columnId: col.id,
+          rowId: row.id,
+          suggestion: `${row.paperTitle} 未研究 ${col.label}`,
+        });
+      }
+    }
+  }
+
+  return gaps;
 }
