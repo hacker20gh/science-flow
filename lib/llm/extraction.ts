@@ -39,6 +39,7 @@ export const ExperimentSchema = z.object({
   sample_size: z.number().nullable(),
   conclusion: z.string(),
   evidence_quote: z.string(),
+  confidence: z.number().min(0).max(1).optional(),
 });
 
 export const ExtractionResultSchema = z.object({
@@ -132,7 +133,10 @@ IMPORTANT RULES:
 5. Be precise about quantitative values.
 6. Use CANONICAL pathway names: NF-κB (not NF-kB or NF-kappaB), PI3K/AKT, MAPK/ERK, JAK/STAT, mTOR, Wnt, Notch, TGF-β, p53, HIF-1α, AMPK. For PD-L1 immune checkpoint, use "PD-1/PD-L1" or "PD-L1".
 7. Use CANONICAL phenotype names: Apoptosis (not cell apoptosis), Cell Viability (not cell survival), Cell Proliferation (not cell growth), Cell Migration (not cell motility), Metastasis, Drug Resistance.
-8. For pathway_effects[].method, use the experimental technique (e.g., "Western blot", "qPCR", "flow cytometry", "luciferase reporter assay"), NOT the statistical method.`;
+8. For pathway_effects[].method, use the experimental technique (e.g., "Western blot", "qPCR", "flow cytometry", "luciferase reporter assay"), NOT the statistical method.
+9. For each experiment, assess your extraction confidence (0-1):
+   1.0 = explicitly stated in text, 0.8 = strongly implied, 0.5 = inferred from context, 0.3 = uncertain.
+   Include this as "confidence" in your output.`;
 
 // ===== 智能截断 =====
 

@@ -15,7 +15,7 @@ import Anthropic from "@anthropic-ai/sdk";
 // 默认配置
 const DEFAULT_BASE_URL = "http://127.0.0.1:15721";
 const DEFAULT_MODELS = {
-  extraction: "claude-haiku-4-5",
+  extraction: "claude-sonnet-5",
   chat: "claude-sonnet-5",
   analysis: "claude-opus-4-8",
 };

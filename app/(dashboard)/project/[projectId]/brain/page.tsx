@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Plus } from "lucide-react";
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
+import { AIInsights } from "@/components/matrix/ai-insights";
 import { ProcessAssistant } from "@/components/assistant/process-assistant";
 import { analyzeProjectState } from "@/lib/assistant/process-assistant";
 import { HypothesisCard } from "@/components/brain/hypothesis-card";
@@ -297,6 +298,9 @@ export default function BrainPage() {
           basePath={`/project/${projectId}`}
         />
       )}
+
+      {/* AI 洞察面板 */}
+      {!useDemo && <AIInsights matrixData={matrixData} projectId={projectId} />}
 
       {/* 机制矩阵 */}
       <motion.section
