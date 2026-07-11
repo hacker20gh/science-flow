@@ -91,16 +91,36 @@ export async function streamLLMWithToolUse(
   client: Awaited<ReturnType<typeof import("./client").getLLMClient>>,
   params: Parameters<ReturnType<typeof import("./client").getLLMClient>["messages"]["create"]>[0],
   emit: (event: SSEEvent) => void
-): Promise<{ fullText: string; toolUseBlocks: Array<{ name: string; input: unknown }> }> {
+): Promise<{
+  fullText: string;
+  toolUseBlocks: Array<{ name: string; input: unknown }>;
+  usage: { inputTokens: number; outputTokens: number; cachedTokens: number };
+}> {
   const response = await client.messages.create({ ...params, stream: true });
 
   let fullText = "";
   const toolUseBlocks: Array<{ name: string; input: unknown }> = [];
   let currentToolName = "";
   let currentToolInput = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedTokens = 0;
 
   for await (const event of response) {
-    if (event.type === "content_block_start") {
+    if (event.type === "message_start") {
+      // message_start 包含 input_tokens 和 cache_read_input_tokens
+      const usage = event.message?.usage;
+      if (usage) {
+        inputTokens = usage.input_tokens || 0;
+        cachedTokens = usage.cache_read_input_tokens || 0;
+      }
+    } else if (event.type === "message_delta") {
+      // message_delta 包含 output_tokens
+      const usage = event.usage;
+      if (usage) {
+        outputTokens = usage.output_tokens || 0;
+      }
+    } else if (event.type === "content_block_start") {
       if (event.content_block.type === "tool_use") {
         currentToolName = event.content_block.name;
         currentToolInput = "";
@@ -126,7 +146,7 @@ export async function streamLLMWithToolUse(
     }
   }
 
-  return { fullText, toolUseBlocks };
+  return { fullText, toolUseBlocks, usage: { inputTokens, outputTokens, cachedTokens } };
 }
 
 // ===== 前端 SSE 消费者工具 =====

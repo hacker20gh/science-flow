@@ -8,12 +8,13 @@
 export interface TokenUsageRecord {
   id: string;
   timestamp: number;
-  feature: string; // extraction, chat, design, troubleshoot, analysis, manuscript, review, preprocess
+  feature: string;
   model: string;
   inputTokens: number;
   outputTokens: number;
-  cachedTokens: number; // cache_read_input_tokens
+  cachedTokens: number;
   durationMs: number;
+  isRetry?: boolean; // 标记是否为重试调用
 }
 
 // 服务端内存存储
@@ -46,6 +47,7 @@ export function trackTokenUsage(params: {
   outputTokens: number;
   cachedTokens?: number;
   durationMs?: number;
+  isRetry?: boolean;
 }): void {
   const record: TokenUsageRecord = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -56,6 +58,7 @@ export function trackTokenUsage(params: {
     outputTokens: params.outputTokens,
     cachedTokens: params.cachedTokens || 0,
     durationMs: params.durationMs || 0,
+    isRetry: params.isRetry || false,
   };
 
   usageHistory.push(record);
@@ -79,9 +82,10 @@ export function getTokenUsageStats(timeRange?: { start: number; end: number }) {
       outputTokens: acc.outputTokens + r.outputTokens,
       cachedTokens: acc.cachedTokens + r.cachedTokens,
       calls: acc.calls + 1,
+      successfulCalls: acc.successfulCalls + (r.isRetry ? 0 : 1),
       costUSD: acc.costUSD + estimateCost(r.model, r.inputTokens, r.outputTokens),
     }),
-    { inputTokens: 0, outputTokens: 0, cachedTokens: 0, calls: 0, costUSD: 0 },
+    { inputTokens: 0, outputTokens: 0, cachedTokens: 0, calls: 0, successfulCalls: 0, costUSD: 0 },
   );
 
   // 按功能分组

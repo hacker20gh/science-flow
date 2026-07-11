@@ -8,6 +8,7 @@ interface TokenStats {
     outputTokens: number;
     cachedTokens: number;
     calls: number;
+    successfulCalls: number;
     costUSD: number;
     costCNY: number;
   };
@@ -46,7 +47,7 @@ export default function FloatingTokenPanel() {
   const t = stats?.totals;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 font-sans">
+    <div className="fixed top-4 right-4 z-50 font-sans">
       {!open && (
         <button
           onClick={() => setOpen(true)}
@@ -91,7 +92,7 @@ function OverviewTab({ stats }: { stats: TokenStats }) {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
-        <Card label="总调用" value={`${t.calls} 次`} />
+        <Card label="成功调用" value={`${t.successfulCalls} 次`} sub={`含重试 ${t.calls - t.successfulCalls} 次`} />
         <Card label="总 Token" value={((t.inputTokens + t.outputTokens) / 1000).toFixed(1) + "k"} />
         <Card label="输入" value={(t.inputTokens / 1000).toFixed(1) + "k"} sub={`缓存 ${(t.cachedTokens / 1000).toFixed(1)}k`} />
         <Card label="输出" value={(t.outputTokens / 1000).toFixed(1) + "k"} />

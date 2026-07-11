@@ -4,6 +4,7 @@ import { buildRichContext, manageMessageBudget } from "@/lib/llm/context-builder
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
 import { CHAT_TOOLS, executeTool } from "@/lib/llm/chat-tools";
+import { trackTokenUsage } from "@/lib/token-tracker";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -136,9 +137,21 @@ export async function POST(req: NextRequest) {
           const toolUseBlocks: any[] = [];
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let currentBlock: any = null;
+          let chatInputTokens = 0;
+          let chatOutputTokens = 0;
+          let chatCachedTokens = 0;
 
           for await (const event of streamResponse) {
-            if (event.type === "content_block_start") {
+            if (event.type === "message_start") {
+              const usage = event.message?.usage;
+              if (usage) {
+                chatInputTokens = usage.input_tokens || 0;
+                chatCachedTokens = usage.cache_read_input_tokens || 0;
+              }
+            } else if (event.type === "message_delta") {
+              const usage = event.usage;
+              if (usage) chatOutputTokens = usage.output_tokens || 0;
+            } else if (event.type === "content_block_start") {
               currentBlock = event.content_block;
             } else if (event.type === "content_block_delta") {
               if (event.delta.type === "text_delta") {
@@ -154,6 +167,17 @@ export async function POST(req: NextRequest) {
               }
               currentBlock = null;
             }
+          }
+
+          // 记录 token 用量
+          if (chatInputTokens > 0 || chatOutputTokens > 0) {
+            trackTokenUsage({
+              feature: "chat",
+              model: MODELS.chat,
+              inputTokens: chatInputTokens,
+              outputTokens: chatOutputTokens,
+              cachedTokens: chatCachedTokens,
+            });
           }
 
           // 如果没有 text 但有 thinking（MIMO 等模型），用 thinking 作为可见回复

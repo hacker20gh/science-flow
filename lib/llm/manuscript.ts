@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
+import { trackTokenUsage } from "@/lib/token-tracker";
 
 export interface ManuscriptSection {
   section: string;
@@ -82,7 +83,14 @@ Writing rules:
 
     if (onToken) {
       // 真流式：逐 token 发送
-      const { toolUseBlocks } = await streamLLMWithToolUse(client, llmParams, onToken);
+      const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, onToken);
+      trackTokenUsage({
+        feature: "manuscript",
+        model: MODELS.analysis,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cachedTokens: usage.cachedTokens,
+      });
       const toolResult = toolUseBlocks.find((t) => t.name === "generate_manuscript");
       if (toolResult) {
         draft = ManuscriptDraftSchema.parse(toolResult.input);

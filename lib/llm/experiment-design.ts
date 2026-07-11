@@ -7,6 +7,7 @@ import { getLLMClient, MODELS, withLLMRetry } from "./client";
 import { calculateSampleSize } from "@/lib/power-analysis";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
+import { trackTokenUsage } from "@/lib/token-tracker";
 
 export interface ExperimentDesign {
   name: string;
@@ -129,7 +130,14 @@ Output: {"name":"NF-κB inhibition by Drug X in RAW264.7","hypothesis":"...","ra
 
     if (onToken) {
       // 真流式：逐 token 发送
-      const { toolUseBlocks } = await streamLLMWithToolUse(client, llmParams, onToken);
+      const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, onToken);
+      trackTokenUsage({
+        feature: "design",
+        model: MODELS.analysis,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cachedTokens: usage.cachedTokens,
+      });
       const toolResult = toolUseBlocks.find((t) => t.name === "design_experiment");
       if (toolResult) {
         design = ExperimentDesignSchema.parse(toolResult.input);

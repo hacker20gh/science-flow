@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
+import { trackTokenUsage } from "@/lib/token-tracker";
 
 export interface AnalysisResult {
   data_type: "dose_response" | "time_course" | "group_comparison" | "correlation";
@@ -114,7 +115,14 @@ Output: {"data_type":"group_comparison","description":"...","statistical_analysi
 
     if (onToken) {
       // 真流式：逐 token 发送
-      const { toolUseBlocks } = await streamLLMWithToolUse(client, llmParams, onToken);
+      const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, onToken);
+      trackTokenUsage({
+        feature: "analysis",
+        model: MODELS.analysis,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cachedTokens: usage.cachedTokens,
+      });
       const toolResult = toolUseBlocks.find((t) => t.name === "analyze_data");
       if (toolResult) {
         result = AnalysisResultSchema.parse(toolResult.input);
