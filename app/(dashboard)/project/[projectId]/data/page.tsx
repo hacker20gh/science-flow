@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useCallback } from "react";
+import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { useProjectStore } from "@/store/project-store";
 import { ChartRenderer } from "@/components/charts/chart-renderer";
 import type { AnalysisResult } from "@/lib/llm/analysis";
@@ -9,19 +11,27 @@ export default function DataPage() {
   const { addEvent } = useProjectStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function parseCsvForChart(csv: string): Array<Record<string, string | number>> {
-    const lines = csv.trim().split("\n");
-    if (lines.length < 2) return [];
-    const headers = lines[0].split(",").map((h) => h.trim());
-    return lines.slice(1, 11).map((line) => {
-      const values = line.split(",").map((v) => v.trim());
-      const row: Record<string, string | number> = {};
+  function parseCsvForChart(text: string): Array<Record<string, string | number>> {
+    const result = Papa.parse(text, { skipEmptyLines: true });
+    if (result.data.length < 2) return [];
+    const headers = (result.data[0] as string[]).map((h) => h.trim());
+    return result.data.slice(1, 21).map((row) => {
+      const values = row as string[];
+      const record: Record<string, string | number> = {};
       headers.forEach((h, i) => {
-        const num = parseFloat(values[i]);
-        row[h] = isNaN(num) ? values[i] || "" : num;
+        const val = values[i]?.trim() ?? "";
+        const num = parseFloat(val);
+        record[h] = isNaN(num) || val === "" ? val : num;
       });
-      return row;
+      return record;
     });
+  }
+
+  function parseExcelToCsv(workbook: XLSX.WorkBook): string {
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return "";
+    const sheet = workbook.Sheets[sheetName];
+    return XLSX.utils.sheet_to_csv(sheet);
   }
 
   const [csvData, setCsvData] = useState<string>("");
@@ -30,19 +40,62 @@ export default function DataPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const processFile = useCallback((file: File) => {
+    setFileName(file.name);
+    setError(null);
+
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (ext === "xlsx" || ext === "xls") {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+          const csv = parseExcelToCsv(workbook);
+          if (!csv.trim()) {
+            setError("Excel 文件为空或无法解析");
+            return;
+          }
+          setCsvData(csv);
+        } catch {
+          setError("Excel 文件解析失败，请检查文件格式");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      // CSV / TSV / TXT — use papaparse via raw text
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setCsvData(text);
+      };
+      reader.readAsText(file);
+    }
+  }, []);
 
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    processFile(file);
+  }
 
-    setFileName(file.name);
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      setCsvData(text);
-    };
-    reader.readAsText(file);
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
   }
 
   async function handleAnalyze() {
@@ -91,12 +144,19 @@ export default function DataPage() {
           {/* 文件上传 */}
           <div
             onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+              isDragging
+                ? "border-blue-500 bg-blue-50"
+                : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50"
+            }`}
           >
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.tsv,.txt"
+              accept=".csv,.tsv,.xlsx,.xls,.txt"
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -110,7 +170,7 @@ export default function DataPage() {
                 <p className="text-3xl mb-2">📁</p>
                 <p className="text-sm font-medium">拖拽或点击上传数据文件</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  支持 CSV、TSV 格式
+                  支持 CSV、TSV、Excel (xlsx/xls) 格式
                 </p>
               </>
             )}
@@ -258,10 +318,22 @@ export default function DataPage() {
                 />
               </div>
             )}
-            {(result.figure_config.type === "line_chart" || result.figure_config.type === "scatter_plot") && csvData && (
+            {result.figure_config.type === "line_chart" && csvData && (
               <div className="mt-4 border-t border-gray-100 pt-4">
                 <ChartRenderer
                   type="line"
+                  title={result.figure_config.title}
+                  xLabel={result.figure_config.x_axis}
+                  yLabel={result.figure_config.y_axis}
+                  data={parseCsvForChart(csvData)}
+                  series={["value"]}
+                />
+              </div>
+            )}
+            {result.figure_config.type === "scatter_plot" && csvData && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <ChartRenderer
+                  type="scatter"
                   title={result.figure_config.title}
                   xLabel={result.figure_config.x_axis}
                   yLabel={result.figure_config.y_axis}

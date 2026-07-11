@@ -2,11 +2,13 @@
 
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  LineChart, Line, ResponsiveContainer,
+  LineChart, Line,
+  ScatterChart, Scatter,
+  ResponsiveContainer,
 } from "recharts";
 
 interface ChartDataProps {
-  type: "bar" | "line";
+  type: "bar" | "line" | "scatter";
   title: string;
   xLabel: string;
   yLabel: string;
@@ -30,28 +32,61 @@ export function ChartRenderer({
 
   const xKey = Object.keys(data[0]).find((k) => typeof data[0][k] === "string") || Object.keys(data[0])[0];
 
+  const axisProps = {
+    cartesianGrid: <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />,
+    xAxis: (
+      <XAxis
+        dataKey={xKey}
+        label={{ value: xLabel, position: "bottom", offset: -5, fontSize: 12 }}
+      />
+    ),
+    yAxis: (
+      <YAxis
+        label={{ value: yLabel, angle: -90, position: "insideLeft", fontSize: 12 }}
+      />
+    ),
+    tooltip: <Tooltip />,
+    legend: <Legend />,
+  };
+
   return (
     <div>
       <h4 className="text-sm font-medium text-gray-700 mb-2">{title}</h4>
       <ResponsiveContainer width="100%" height={280}>
         {type === "bar" ? (
           <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-            <XAxis dataKey={xKey} label={{ value: xLabel, position: "bottom", offset: -5, fontSize: 12 }} />
-            <YAxis label={{ value: yLabel, angle: -90, position: "insideLeft", fontSize: 12 }} />
-            <Tooltip />
-            <Legend />
+            {axisProps.cartesianGrid}
+            {axisProps.xAxis}
+            {axisProps.yAxis}
+            {axisProps.tooltip}
+            {axisProps.legend}
             {series.map((s, i) => (
               <Bar key={s} dataKey={s} fill={colors[i % colors.length]} radius={[4, 4, 0, 0]} />
             ))}
           </BarChart>
+        ) : type === "scatter" ? (
+          <ScatterChart>
+            {axisProps.cartesianGrid}
+            {axisProps.xAxis}
+            {axisProps.yAxis}
+            {axisProps.tooltip}
+            {axisProps.legend}
+            {series.map((s, i) => (
+              <Scatter
+                key={s}
+                name={s}
+                data={data}
+                fill={colors[i % colors.length]}
+              />
+            ))}
+          </ScatterChart>
         ) : (
           <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-            <XAxis dataKey={xKey} label={{ value: xLabel, position: "bottom", offset: -5, fontSize: 12 }} />
-            <YAxis label={{ value: yLabel, angle: -90, position: "insideLeft", fontSize: 12 }} />
-            <Tooltip />
-            <Legend />
+            {axisProps.cartesianGrid}
+            {axisProps.xAxis}
+            {axisProps.yAxis}
+            {axisProps.tooltip}
+            {axisProps.legend}
             {series.map((s, i) => (
               <Line key={s} type="monotone" dataKey={s} stroke={colors[i % colors.length]} strokeWidth={2} dot={{ r: 3 }} />
             ))}
