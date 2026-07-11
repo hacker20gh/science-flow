@@ -1,13 +1,70 @@
 /**
  * 通用 JSON 提取工具
  *
- * 从 LLM 文本输出中提取结构化 JSON。
- * 用于 tool_use 不可用时的 fallback（如 MIMO、GPT 等非 Anthropic 模型）。
+ * 从 LLM 响应中提取结构化数据。
+ * 优先使用 tool_use（Anthropic 原生），文本提取作为 fallback。
  */
 
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import type { Message } from "@anthropic-ai/sdk/resources/messages";
+import type { Message, Tool } from "@anthropic-ai/sdk/resources/messages";
+
+// ===== Tool 定义工具 =====
+
+/**
+ * 从 Zod schema 生成 Anthropic tool 定义。
+ * 模块只需定义 Zod schema，自动生成 tool JSON Schema。
+ */
+export function createToolFromSchema(
+  name: string,
+  description: string,
+  schema: z.ZodSchema,
+): Tool {
+  const jsonSchema = zodToJsonSchema(schema);
+  return {
+    name,
+    description,
+    input_schema: jsonSchema as Tool["input_schema"],
+  };
+}
+
+/**
+ * Zod schema → JSON Schema（递归转换）
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function zodToJsonSchema(schema: z.ZodSchema): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const def = (schema as any)._def;
+
+  if (def?.typeName === "ZodObject" && def?.shape) {
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const [key, val] of Object.entries(def.shape)) {
+      properties[key] = zodToJsonSchema(val as z.ZodSchema);
+      // 检查是否可选
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const valDef = (val as any)._def;
+      if (valDef?.typeName !== "ZodOptional" && valDef?.typeName !== "ZodNullable") {
+        required.push(key);
+      }
+    }
+    return { type: "object", properties, required };
+  }
+  if (def?.typeName === "ZodArray") {
+    return { type: "array", items: zodToJsonSchema(def.type) };
+  }
+  if (def?.typeName === "ZodString") return { type: "string" };
+  if (def?.typeName === "ZodNumber") return { type: "number" };
+  if (def?.typeName === "ZodBoolean") return { type: "boolean" };
+  if (def?.typeName === "ZodNullable") return zodToJsonSchema(def.innerType);
+  if (def?.typeName === "ZodOptional") return zodToJsonSchema(def.innerType);
+  if (def?.typeName === "ZodRecord") return { type: "object", additionalProperties: zodToJsonSchema(def.valueType) };
+  if (def?.typeName === "ZodEnum") return { type: "string", enum: def.values };
+  if (def?.typeName === "ZodLiteral") return { type: "string", const: def.value };
+  return { type: "object" };
+}
+
+// ===== 结构化输出提取 =====
 
 /**
  * 从 LLM 响应中提取结构化数据
@@ -25,75 +82,45 @@ export async function extractStructuredOutput<T>(
 ): Promise<T> {
   const label = options?.label ?? "LLM";
 
-  // 调试：打印响应块类型
-  const blockTypes = response.content.map((b) => b.type);
-  console.log(`[${label}] 响应块类型: [${blockTypes.join(", ")}]`);
-
-  // 调试：打印 text block 内容（前500字符）
-  for (const block of response.content) {
-    if (block.type === "text" && block.text) {
-      console.log(`[${label}] text block 内容 (前500): ${block.text.slice(0, 500)}`);
-    }
-  }
-
-  // 方法 1：从 tool_use block 提取
+  // 方法 1：从 tool_use block 提取（首选）
   for (const block of response.content) {
     if (block.type === "tool_use") {
       const parsed = schema.safeParse(block.input);
       if (parsed.success) return parsed.data;
-      console.warn(`[${label}] tool_use Zod validation failed:`, parsed.error.flatten());
+      console.warn(`[${label}] tool_use validation failed, trying text fallback:`, parsed.error.flatten());
     }
   }
 
-  // 方法 2：从文本中提取 JSON（更宽松的匹配）
+  // 方法 2：从文本中提取 JSON（fallback）
   for (const block of response.content) {
     if (block.type === "text") {
       const result = extractJSONFromText(block.text, schema);
       if (result !== null) {
-        console.log(`[${label}] Fallback: extracted JSON from text`);
+        console.log(`[${label}] extracted JSON from text fallback`);
         return result;
       }
-      // 如果提取失败，检查是否有 JSON 但校验失败
-      const jsonMatch = block.text.match(/(\{[\s\S]*\})/);
-      if (jsonMatch) {
-        console.warn(`[${label}] text block 包含 JSON 但 Zod 校验失败`);
-        try {
-          const parsed = JSON.parse(jsonMatch[1]);
-          console.warn(`[${label}] JSON keys: ${Object.keys(parsed).join(", ")}`);
-          if (parsed.experiments) {
-            console.warn(`[${label}] experiments 长度: ${parsed.experiments.length}`);
-            if (parsed.experiments[0]) {
-              console.warn(`[${label}] 第一个 experiment keys: ${Object.keys(parsed.experiments[0]).join(", ")}`);
-            }
-          }
-        } catch {
-          console.warn(`[${label}] JSON 解析也失败了`);
-        }
-      }
-      // 如果提取失败，尝试从 thinking 块中提取
     }
+    // thinking 块作为最后手段
     if (block.type === "thinking") {
-      // thinking 块有时包含实际的 JSON 回复
       const text = (block as { thinking: string }).thinking;
       if (text) {
-        console.log(`[${label}] thinking block 内容 (前500): ${text.slice(0, 500)}`);
         const result = extractJSONFromText(text, schema);
         if (result !== null) {
-          console.log(`[${label}] Fallback: extracted JSON from thinking block`);
+          console.log(`[${label}] extracted JSON from thinking block`);
           return result;
         }
       }
     }
   }
 
-  // 方法 3：如果提供了 retryFn，重试一次
+  // 方法 3：重试
   if (options?.retryFn) {
-    console.warn(`[${label}] Primary extraction failed, retrying...`);
+    console.warn(`[${label}] extraction failed, retrying...`);
     try {
       const retryResponse = (await options.retryFn()) as Message;
       return extractStructuredOutput(retryResponse, schema, { label });
     } catch (retryError) {
-      console.error(`[${label}] Retry also failed:`, (retryError as Error)?.message);
+      console.error(`[${label}] retry failed:`, (retryError as Error)?.message);
     }
   }
 

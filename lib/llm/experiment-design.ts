@@ -5,7 +5,7 @@
 import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
 import { calculateSampleSize } from "@/lib/power-analysis";
-import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
+import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 
 export interface ExperimentDesign {
   name: string;
@@ -82,106 +82,11 @@ const ExperimentDesignSchema = z.object({
   references: z.array(z.string()),
 });
 
-const DESIGN_TOOL = {
-  name: "design_experiment",
-  description: "Design a biomedical experiment based on the research context. Return a complete experimental design.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      name: { type: "string" as const },
-      hypothesis: { type: "string" as const },
-      rationale: { type: "string" as const },
-      variables: {
-        type: "object" as const,
-        properties: {
-          independent: { type: "array" as const, items: { type: "string" as const } },
-          dependent: { type: "array" as const, items: { type: "string" as const } },
-          controlled: { type: "array" as const, items: { type: "string" as const } },
-        },
-        required: ["independent", "dependent", "controlled"],
-      },
-      groups: {
-        type: "array" as const,
-        items: {
-          type: "object" as const,
-          properties: {
-            name: { type: "string" as const },
-            description: { type: "string" as const },
-            purpose: { type: "string" as const },
-          },
-          required: ["name", "description", "purpose"],
-        },
-      },
-      protocol: {
-        type: "object" as const,
-        properties: {
-          cellLine: { type: "string" as const },
-          passage: { type: ["string" as const, "null" as const] },
-          reagents: {
-            type: "array" as const,
-            items: {
-              type: "object" as const,
-              properties: {
-                name: { type: "string" as const },
-                concentration: { type: "string" as const },
-                source: { type: ["string" as const, "null" as const] },
-              },
-              required: ["name", "concentration", "source"],
-            },
-          },
-          steps: {
-            type: "array" as const,
-            items: {
-              type: "object" as const,
-              properties: {
-                day: { type: "string" as const },
-                action: { type: "string" as const },
-                details: { type: "string" as const },
-              },
-              required: ["day", "action", "details"],
-            },
-          },
-          readouts: { type: "array" as const, items: { type: "string" as const } },
-          duration: { type: "string" as const },
-        },
-        required: ["cellLine", "steps", "readouts", "duration"],
-      },
-      controls_check: {
-        type: "object" as const,
-        properties: {
-          has_vehicle: { type: "boolean" as const },
-          has_positive: { type: "boolean" as const },
-          has_negative: { type: "boolean" as const },
-          missing: { type: "array" as const, items: { type: "string" as const } },
-          suggestions: { type: "array" as const, items: { type: "string" as const } },
-        },
-        required: ["has_vehicle", "has_positive", "has_negative", "missing", "suggestions"],
-      },
-      sample_size: {
-        type: "object" as const,
-        properties: {
-          recommended: { type: "number" as const },
-          rationale: { type: "string" as const },
-        },
-        required: ["recommended", "rationale"],
-      },
-      expected_outcomes: {
-        type: "array" as const,
-        items: {
-          type: "object" as const,
-          properties: {
-            scenario: { type: "string" as const },
-            interpretation: { type: "string" as const },
-            nextStep: { type: "string" as const },
-          },
-          required: ["scenario", "interpretation", "nextStep"],
-        },
-      },
-      references: { type: "array" as const, items: { type: "string" as const } },
-    },
-    required: ["name", "hypothesis", "rationale", "variables", "groups", "protocol", "controls_check", "sample_size", "expected_outcomes", "references"],
-  },
-};
+const DESIGN_TOOL = createToolFromSchema(
+  "design_experiment",
+  "Design a biomedical experiment based on the research context. Return a complete experimental design.",
+  ExperimentDesignSchema,
+);
 
 export async function designExperiment(params: {
   hypothesis: string;
@@ -195,13 +100,25 @@ export async function designExperiment(params: {
 
     const userMessage = `Design an experiment based on this context:\n\n${context}`;
 
-    const systemPrompt = "You are an expert biomedical researcher designing experiments. Design a rigorous experiment with proper controls, adequate sample size, and clear expected outcomes. Be specific about reagents, cell lines, concentrations, and timing. Cite specific papers as rationale.\n\nCRITICAL: You MUST return ONLY a JSON object with this exact structure:\n{\"name\":\"string\",\"hypothesis\":\"string\",\"rationale\":\"string\",\"variables\":{\"independent\":[\"string\"],\"dependent\":[\"string\"],\"controlled\":[\"string\"]},\"groups\":[{\"name\":\"string\",\"description\":\"string\",\"purpose\":\"string\"}],\"protocol\":{\"cellLine\":\"string\",\"passage\":\"string or null\",\"reagents\":[{\"name\":\"string\",\"concentration\":\"string\",\"source\":\"string or null\"}],\"steps\":[{\"day\":\"string\",\"action\":\"string\",\"details\":\"string\"}],\"readouts\":[\"string\"],\"duration\":\"string\"},\"controls_check\":{\"has_vehicle\":true,\"has_positive\":true,\"has_negative\":true,\"missing\":[\"string\"],\"suggestions\":[\"string\"]},\"sample_size\":{\"recommended\":20,\"rationale\":\"string\"},\"expected_outcomes\":[{\"scenario\":\"string\",\"interpretation\":\"string\",\"nextStep\":\"string\"}],\"references\":[\"string\"]}\nDo NOT wrap in markdown code blocks.";
+    const systemPrompt = `You are an expert biomedical researcher designing experiments.
+Rules:
+- Include vehicle, positive, and negative controls; flag any missing
+- Specify exact reagent names, concentrations, and suppliers
+- Define timing for each step; cite literature as rationale
+- Recommend sample size with statistical justification
+- Predict 2-3 expected outcomes with interpretations and next steps
+
+EXAMPLE:
+Input: Hypothesis: "Drug X inhibits NF-κB signaling in macrophages"
+Output: {"name":"NF-κB inhibition by Drug X in RAW264.7","hypothesis":"...","rationale":"...","variables":{"independent":["Drug X concentration"],"dependent":["NF-κB p65 nuclear translocation","TNF-α secretion"],"controlled":["cell density","passage number","LPS stimulation time"]},"groups":[{"name":"Vehicle","description":"DMSO 0.1%","purpose":"negative control"},{"name":"LPS only","description":"LPS 100ng/mL","purpose":"positive control"},{"name":"Drug X + LPS","description":"Drug X 10μM + LPS","purpose":"treatment"}],"protocol":{"cellLine":"RAW264.7","passage":"<15","reagents":[{"name":"LPS","concentration":"100 ng/mL","source":"Sigma L2630"},{"name":"Drug X","concentration":"10 μM","source":"MedChemExpress HY-12345"}],"steps":[{"day":"Day 0","action":"Seed cells","details":"1×10⁵/well in 24-well plate"},{"day":"Day 1","action":"Treat","details":"Add Drug X or DMSO, incubate 1h, then LPS 6h"}],"readouts":["Western blot p65","ELISA TNF-α"],"duration":"2 days"},"controls_check":{"has_vehicle":true,"has_positive":true,"has_negative":false,"missing":["untreated (no LPS, no DMSO)"],"suggestions":["Add naive control: cells with media only"]},"sample_size":{"recommended":3,"rationale":"3 biological replicates × 3 technical replicates"},"expected_outcomes":[{"scenario":"Drug X reduces p65 nuclear translocation by >50%","interpretation":"Confirms NF-κB pathway inhibition","nextStep":"Dose-response curve (0.1-100 μM)"}],"references":["Author et al., Journal, Year"]}`;
 
     const response = await client.messages.create({
       model: MODELS.analysis,
       max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
+      tools: [DESIGN_TOOL],
+      tool_choice: { type: "tool", name: "design_experiment" },
     });
 
     const design = await extractStructuredOutput(response, ExperimentDesignSchema, {
@@ -209,7 +126,7 @@ export async function designExperiment(params: {
       retryFn: createRetryFunction(client, {
         model: MODELS.analysis,
         maxTokens: 8192,
-        system: "You are an expert biomedical researcher designing experiments. Design a rigorous experiment with proper controls, adequate sample size, and clear expected outcomes. Be specific about reagents, cell lines, concentrations, and timing. Cite specific papers as rationale.",
+        system: "You are an expert biomedical researcher designing experiments. Design a rigorous experiment with proper controls, adequate sample size, and clear expected outcomes.",
         userMessage,
         originalContent: userMessage,
       }),

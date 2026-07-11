@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
-import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
+import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 
 export interface AnalysisResult {
   data_type: "dose_response" | "time_course" | "group_comparison" | "correlation";
@@ -68,7 +68,11 @@ const AnalysisResultSchema = z.object({
   }),
 });
 
-const ANALYSIS_SYSTEM_SUFFIX = `\n\nCRITICAL: You MUST return ONLY a valid JSON object. No thinking, no explanation, no markdown code blocks. The JSON MUST have this exact structure:\n{"data_type":"string","description":"string","statistical_analysis":{"recommended_test":"string","rationale":"string","assumptions":["string"],"post_hoc":"string or null"},"results":{"summary_stats":"string","test_results":"string","p_values":[{"comparison":"string","p_value":"string","significance":"string"}],"effect_size":"string"},"interpretation":{"conclusion":"string","biological_meaning":"string","caveats":["string"]},"figure_config":{"type":"string","title":"string","x_axis":"string","y_axis":"string","annotations":["string"]}}`;
+const ANALYSIS_TOOL = createToolFromSchema(
+  "analyze_data",
+  "Analyze experimental data. Return statistical test recommendations, results, interpretation, and figure configuration.",
+  AnalysisResultSchema,
+);
 
 export async function analyzeData(params: {
   dataDescription: string;
@@ -80,13 +84,26 @@ export async function analyzeData(params: {
     const context = `实验数据: ${params.dataDescription}\n\n原始数据(CSV):\n${params.rawData}${params.experimentContext ? `\n\n实验背景: ${params.experimentContext}` : ""}`;
 
     const userMessage = `Analyze this data:\n\n${context}`;
-    const systemPrompt = `You are a biostatistician. Identify the data type, recommend appropriate statistical tests with rationale, perform analysis, interpret results, and suggest figure type. Always report exact p-values, calculate effect sizes, and flag if sample size is insufficient.${ANALYSIS_SYSTEM_SUFFIX}`;
+    const systemPrompt = `You are a biostatistician analyzing experimental data.
+Rules:
+- Classify data type (dose_response / time_course / group_comparison / correlation)
+- Recommend statistical test with rationale and assumption checks
+- Report exact p-values and effect sizes (Cohen's d, eta-squared, etc.)
+- Flag insufficient sample size (n<3 per group)
+- Interpret results biologically; list caveats
+- Suggest appropriate figure type with axis labels and annotations
+
+EXAMPLE:
+Input: 3 groups of cell viability measurements (Control, Drug A, Drug B)
+Output: {"data_type":"group_comparison","description":"...","statistical_analysis":{"recommended_test":"One-way ANOVA with Tukey post-hoc","rationale":"3 independent groups, continuous DV","assumptions":["Normality (Shapiro-Wilk)","Homogeneity of variance (Levene's)"],"post_hoc":"Tukey HSD"},"results":{"summary_stats":"Control: 95±3%, Drug A: 72±5%, Drug B: 45±4%","test_results":"F(2,12)=45.2, p<0.001","p_values":[{"comparison":"Control vs Drug A","p_value":"0.003","significance":"**"},{"comparison":"Control vs Drug B","p_value":"<0.001","significance":"***"}],"effect_size":"eta-squared=0.88"},"interpretation":{"conclusion":"Both drugs reduce viability significantly","biological_meaning":"Drug B is more cytotoxic","caveats":["Single time point only","In vitro may not reflect in vivo"]},"figure_config":{"type":"box_plot","title":"Cell Viability by Treatment","x_axis":"Treatment Group","y_axis":"Viability (%)","annotations":["***p<0.001"]}}`;
 
     const response = await client.messages.create({
       model: MODELS.analysis,
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
+      tools: [ANALYSIS_TOOL],
+      tool_choice: { type: "tool", name: "analyze_data" },
     });
 
     return await extractStructuredOutput(response, AnalysisResultSchema, {
@@ -94,7 +111,7 @@ export async function analyzeData(params: {
       retryFn: createRetryFunction(client, {
         model: MODELS.analysis,
         maxTokens: 4096,
-        system: systemPrompt,
+        system: "You are a biostatistician. Identify the data type, recommend appropriate statistical tests, perform analysis, interpret results, and suggest figure type.",
         userMessage,
         originalContent: userMessage,
         schema: AnalysisResultSchema,

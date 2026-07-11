@@ -6,6 +6,7 @@
  */
 
 import { prisma } from "@/lib/db-server";
+import { invalidateContextCache } from "@/lib/llm/context-builder";
 
 // ===== 工具定义（Anthropic tool_use 格式） =====
 
@@ -151,36 +152,60 @@ export async function executeTool(
   userId: string
 ): Promise<ToolResult> {
   try {
+    let result: ToolResult;
     switch (toolName) {
       case "search_literature":
-        return await executeSearchLiterature(input);
+        result = await executeSearchLiterature(input);
+        break;
       case "list_papers":
-        return await executeListPapers(input);
+        result = await executeListPapers(input);
+        break;
       case "view_extractions":
-        return await executeViewExtractions(input);
+        result = await executeViewExtractions(input);
+        break;
       case "create_hypothesis":
-        return await executeCreateHypothesis(input, userId);
+        result = await executeCreateHypothesis(input, userId);
+        break;
       case "view_matrix":
-        return await executeViewMatrix(input);
+        result = await executeViewMatrix(input);
+        break;
       case "get_project_status":
-        return await executeGetProjectStatus(input);
+        result = await executeGetProjectStatus(input);
+        break;
       case "update_hypothesis":
-        return await executeUpdateHypothesis(input);
+        result = await executeUpdateHypothesis(input);
+        break;
       case "edit_matrix_cell":
-        return await executeEditMatrixCell(input);
+        result = await executeEditMatrixCell(input);
+        break;
       case "search_knowledge":
-        return await executeSearchKnowledge(input);
+        result = await executeSearchKnowledge(input);
+        break;
       case "get_workflow_status":
-        return await executeGetWorkflowStatus(input);
+        result = await executeGetWorkflowStatus(input);
+        break;
       default:
-        return { tool_name: toolName, result: JSON.stringify({ error: `Unknown tool: ${toolName}` }) };
+        result = { tool_name: toolName, result: JSON.stringify({ error: `Unknown tool: ${toolName}` }) };
     }
+    maybeInvalidateCache(toolName, input);
+    return result;
   } catch (error) {
     console.error(`[chat-tools] Error executing ${toolName}:`, error);
     return {
       tool_name: toolName,
       result: JSON.stringify({ error: `工具执行失败: ${error instanceof Error ? error.message : "未知错误"}` }),
     };
+  }
+}
+
+/**
+ * 执行工具后，如果涉及写操作，失效上下文缓存
+ */
+function maybeInvalidateCache(toolName: string, input: Record<string, unknown>) {
+  const WRITE_TOOLS = ["create_hypothesis", "update_hypothesis", "edit_matrix_cell"];
+  if (WRITE_TOOLS.includes(toolName)) {
+    const projectId = input.projectId as string;
+    if (projectId) invalidateContextCache(projectId);
   }
 }
 

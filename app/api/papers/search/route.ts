@@ -3,9 +3,9 @@ import { aggregateSearch, enrichWithOa, enrichWithBioRxiv } from "@/lib/academic
 import { preprocessQuery } from "@/lib/llm/query-preprocessor";
 import { prisma } from "@/lib/db-server";
 
-// 5 分钟结果缓存
+// 30 分钟结果缓存
 const resultCache = new Map<string, { data: unknown; ts: number }>();
-const RESULT_CACHE_TTL = 5 * 60 * 1000;
+const RESULT_CACHE_TTL = 30 * 60 * 1000;
 
 function getCacheKey(body: Record<string, unknown>): string {
   return JSON.stringify({ q: body.query, m: body.maxResults, mi: body.minYear, ma: body.maxYear, c: body.minCitationCount, s: body.sortBy, t: body.articleTypes, o: body.onlyOpenAccess });

@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
-import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
+import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 
 // ===== Zod Schema =====
 
@@ -51,92 +51,51 @@ export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
 
 // ===== Tool 定义 =====
 
-const EXTRACTION_TOOL = {
-  name: "extract_experiments",
-  description: "Extract structured experimental findings from a biomedical paper. Return one JSON object with an 'experiments' array.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      experiments: {
-        type: "array" as const,
-        description: "Array of experiment entries extracted from the paper",
-        items: {
-          type: "object" as const,
-          properties: {
-            drug_intervention: {
-              type: "object" as const,
-              properties: {
-                name: { type: "string" as const, description: "Drug name" },
-                concentration: { type: ["string" as const, "null" as const], description: "e.g. 2 μM" },
-                duration: { type: ["string" as const, "null" as const], description: "e.g. 24h" },
-                co_treatment: { type: ["string" as const, "null" as const] },
-              },
-              required: ["name", "concentration", "duration", "co_treatment"],
-            },
-            model: {
-              type: "object" as const,
-              properties: {
-                cell_line: { type: ["string" as const, "null" as const] },
-                species: { type: ["string" as const, "null" as const] },
-                passage: { type: ["string" as const, "null" as const] },
-              },
-              required: ["cell_line", "species", "passage"],
-            },
-            pathway_effects: {
-              type: "array" as const,
-              items: {
-                type: "object" as const,
-                properties: {
-                  pathway: { type: "string" as const },
-                  direction: { type: "string" as const, enum: ["up", "down", "no_change"] },
-                  significance: { type: ["string" as const, "null" as const] },
-                  method: { type: ["string" as const, "null" as const] },
-                },
-                required: ["pathway", "direction", "significance", "method"],
-              },
-            },
-            phenotype_effects: {
-              type: "array" as const,
-              items: {
-                type: "object" as const,
-                properties: {
-                  phenotype: { type: "string" as const },
-                  direction: { type: "string" as const, enum: ["up", "down", "no_change"] },
-                  fold_change: { type: ["string" as const, "null" as const] },
-                },
-                required: ["phenotype", "direction", "fold_change"],
-              },
-            },
-            controls: { type: "array" as const, items: { type: "string" as const } },
-            statistical_test: { type: ["string" as const, "null" as const] },
-            sample_size: { type: ["number" as const, "null" as const] },
-            conclusion: { type: "string" as const },
-            evidence_quote: { type: "string" as const },
-          },
-          required: ["drug_intervention", "model", "pathway_effects", "phenotype_effects", "controls", "conclusion", "evidence_quote"],
-        },
-      },
-    },
-    required: ["experiments"],
-  },
-};
+const EXTRACTION_TOOL = createToolFromSchema(
+  "extract_paper_data",
+  "Extract structured experimental data from a biomedical paper",
+  ExtractionResultSchema,
+);
 
 // ===== Prompt =====
 
-const CORE_PROMPT = `You are a biomedical literature analysis expert extracting experimental findings.
+const CORE_PROMPT = `You are a biomedical literature analysis expert.
 
-IMPORTANT RULES:
-1. A single paper may contain MULTIPLE independent experiments. Extract each as a separate entry.
-2. Only extract findings EXPLICITLY stated in the paper. Do NOT infer or hallucinate.
-3. If information is not available, use null.
-4. For each finding, include the EXACT quote from the text as evidence.
-5. Be precise about quantitative values.
-6. Use CANONICAL pathway names: NF-κB (not NF-kB or NF-kappaB), PI3K/AKT, MAPK/ERK, JAK/STAT, mTOR, Wnt, Notch, TGF-β, p53, HIF-1α, AMPK. For PD-L1 immune checkpoint, use "PD-1/PD-L1" or "PD-L1".
-7. Use CANONICAL phenotype names: Apoptosis (not cell apoptosis), Cell Viability (not cell survival), Cell Proliferation (not cell growth), Cell Migration (not cell motility), Metastasis, Drug Resistance.
-8. For pathway_effects[].method, use the experimental technique (e.g., "Western blot", "qPCR", "flow cytometry", "luciferase reporter assay"), NOT the statistical method.
-9. For each experiment, assess your extraction confidence (0-1):
-   1.0 = explicitly stated in text, 0.8 = strongly implied, 0.5 = inferred from context, 0.3 = uncertain.
-   Include this as "confidence" in your output.`;
+EXTRACTION RULES:
+- A single paper may contain MULTIPLE independent experiments. Extract each separately.
+- Only extract findings EXPLICITLY stated in the text. Do NOT infer or hallucinate.
+- If information is not available, use null.
+
+ANTI-HALLUCINATION (hard rules):
+- Each field MUST have an evidence_quote from the original text.
+- If you cannot find evidence for a field, set it to null. NEVER guess.
+- Concentrations/doses MUST include units (e.g. "2 μM", "10 mg/kg").
+- Statistical methods must be explicitly mentioned in the text, not inferred.
+- Sample size: set to null if not explicitly stated.
+
+NAMING CONVENTIONS:
+- Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, mTOR, Wnt, Notch, TGF-β, p53, HIF-1α, AMPK, PD-1/PD-L1.
+- Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Metastasis, Drug Resistance.
+- pathway_effects[].method: experimental technique (e.g. "Western blot", "qPCR"), NOT statistical method.
+- Confidence (0-1): 1.0 = explicitly stated, 0.8 = strongly implied, 0.5 = inferred, 0.3 = uncertain.
+
+FEW-SHOT EXAMPLE:
+Input excerpt: "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53 (Western blot, p<0.01, n=3) and increased apoptosis (flow cytometry, 2.5-fold). DMSO was used as vehicle control."
+Expected output:
+{
+  "experiments": [{
+    "drug_intervention": {"name": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
+    "model": {"cell_line": "HeLa", "species": "human", "passage": null},
+    "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": "p<0.01", "method": "Western blot"}],
+    "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold"}],
+    "controls": ["DMSO vehicle control"],
+    "statistical_test": null,
+    "sample_size": 3,
+    "conclusion": "Cisplatin upregulates p53 and induces apoptosis in HeLa cells",
+    "evidence_quote": "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53",
+    "confidence": 0.95
+  }]
+}`;
 
 // ===== 智能截断 =====
 
@@ -234,19 +193,18 @@ export async function extractFromText(
 
     const userMessage = `Extract all experimental findings from this paper:\n\nTitle: ${title}\n\nContent:\n${text}`;
 
-    // MIMO 不支持 response_format，靠 system prompt 强制 JSON 输出
-    const systemPrompt = CORE_PROMPT + "\n\nCRITICAL: You MUST return ONLY a JSON object. No thinking, no explanation, no markdown. The JSON MUST have this exact structure:\n" + JSON.stringify({"experiments":[{"drug_intervention":{"name":"string","concentration":"string or null","duration":"string or null","co_treatment":"string or null"},"model":{"cell_line":"string or null","species":"string or null","passage":"string or null"},"pathway_effects":[{"pathway":"string","direction":"up|down|no_change","significance":"string or null","method":"string or null"}],"phenotype_effects":[{"phenotype":"string","direction":"up|down|no_change","fold_change":"string or null"}],"controls":["string"],"statistical_test":"string or null","sample_size":0,"conclusion":"string","evidence_quote":"string"}]}, null, 2) + "\n\nIf no experiments are found, return {\"experiments\":[]}. Do NOT wrap in markdown code blocks.";
-
     const response = await client.messages.create({
       model: MODELS.extraction,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system: CORE_PROMPT,
       messages: [
         {
           role: "user",
           content: userMessage,
         },
       ],
+      tools: [EXTRACTION_TOOL],
+      tool_choice: { type: "tool", name: "extract_paper_data" },
     });
 
     return await extractStructuredOutput(response, ExtractionResultSchema, {

@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
-import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
+import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 
 export interface ReviewerComment {
   section: string;
@@ -52,7 +52,11 @@ const ReviewSimulationSchema = z.object({
   priority_fixes: z.array(z.string()),
 });
 
-const REVIEW_SYSTEM_SUFFIX = `\n\nCRITICAL: You MUST return ONLY a valid JSON object. No thinking, no explanation, no markdown code blocks. The JSON MUST have this exact structure:\n{"reviewers":[{"reviewer_id":"1","persona":"methods expert","overall_assessment":"string","summary":"string","comments":[{"section":"string","severity":"critical|major|minor|suggestion","category":"string","comment":"string","suggested_fix":"string"}],"score":7}],"overall_verdict":"accept|minor_revision|major_revision|reject","priority_fixes":["string"]}`;
+const REVIEW_TOOL = createToolFromSchema(
+  "generate_review",
+  "Generate peer review simulation with 3 distinct reviewer personas",
+  ReviewSimulationSchema,
+);
 
 export async function simulateReview(params: {
   manuscript: { abstract?: string; introduction?: string; methods?: string; results?: string; discussion?: string };
@@ -68,13 +72,23 @@ export async function simulateReview(params: {
     const context = `目标期刊: ${params.journal || "一般性生物医学期刊"}\n\n${sections}`;
 
     const userMessage = `Review this manuscript:\n\n${context}`;
-    const systemPrompt = `Simulate 3 peer reviewers for a biomedical paper: Reviewer 1 (methods expert), Reviewer 2 (domain expert), Reviewer 3 (writing expert). Be critical but fair. Focus on real issues that would affect acceptance.${REVIEW_SYSTEM_SUFFIX}`;
+    const systemPrompt = `Simulate 3 peer reviewers for a biomedical paper:
+- Reviewer 1: Methods expert — focus on experimental design, controls, statistical validity
+- Reviewer 2: Domain expert — focus on novelty, literature coverage, theoretical framework
+- Reviewer 3: Writing expert — focus on clarity, structure, argumentation
+
+Rules:
+- Be critical but fair. Focus on real issues that would affect acceptance.
+- When pointing out issues, you MUST quote specific paragraphs or sentences from the manuscript
+- Do not give vague suggestions. Each suggestion must be concrete and actionable`;
 
     const response = await client.messages.create({
       model: MODELS.analysis,
       max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
+      tools: [REVIEW_TOOL],
+      tool_choice: { type: "tool", name: "generate_review" },
     });
 
     return await extractStructuredOutput(response, ReviewSimulationSchema, {

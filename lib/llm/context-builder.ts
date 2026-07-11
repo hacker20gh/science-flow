@@ -13,6 +13,15 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3);
 }
 
+// ===== 缓存 =====
+
+const contextCache = new Map<string, { data: RichContext; ts: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+
+export function invalidateContextCache(projectId: string) {
+  contextCache.delete(projectId);
+}
+
 // ===== 构建丰富的项目上下文 =====
 
 interface RichContext {
@@ -22,10 +31,16 @@ interface RichContext {
 
 /**
  * 从项目数据中构建 AI 对话上下文
- * Token 预算：总计不超过 4000 tokens（约 12000 字符）
+ * Token 预算：总计不超过 8000 tokens（约 24000 字符）
  */
 export async function buildRichContext(projectId: string): Promise<RichContext> {
-  const TOKEN_BUDGET = 4000;
+  // 检查缓存
+  const cached = contextCache.get(projectId);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) {
+    return cached.data;
+  }
+
+  const TOKEN_BUDGET = 8000;
   let usedTokens = 0;
   const sections: string[] = [];
 
@@ -145,7 +160,7 @@ export async function buildRichContext(projectId: string): Promise<RichContext> 
       where: { projectId },
       select: { type: true, title: true, createdAt: true },
       orderBy: { createdAt: "desc" },
-      take: 5,
+      take: 10,
     });
 
     if (timeline.length > 0) {
@@ -160,10 +175,42 @@ export async function buildRichContext(projectId: string): Promise<RichContext> 
       }
     }
 
-    return {
+    // 7. 失败实验记录（从时间线中提取 failure 类型）
+    const failedEvents = timeline.filter((e: { type: string }) =>
+      e.type === "failure" || e.type === "experiment_failed"
+    );
+    if (failedEvents.length > 0) {
+      const section = `## ⚠️ 失败记录\n${failedEvents.map((e: { title: string }) => `- ${e.title}`).join("\n")}`;
+      const tokens = estimateTokens(section);
+      if (usedTokens + tokens <= TOKEN_BUDGET) {
+        usedTokens += tokens;
+        sections.push(section);
+      }
+    }
+
+    // 8. 未解决问题（从 matrix gaps 推断）
+    const missingPathways = new Set<string>();
+    for (const e of extractions) {
+      if (e.pathway && !e.pathwayDir) missingPathways.add(e.pathway);
+    }
+    if (missingPathways.size > 0) {
+      const section = `## 🔍 待验证方向\n${[...missingPathways].map((p: string) => `- ${p}：方向未确认`).join("\n")}`;
+      const tokens = estimateTokens(section);
+      if (usedTokens + tokens <= TOKEN_BUDGET) {
+        usedTokens += tokens;
+        sections.push(section);
+      }
+    }
+
+    const result: RichContext = {
       context: sections.join("\n\n"),
       tokenCount: usedTokens,
     };
+
+    // 写入缓存
+    contextCache.set(projectId, { data: result, ts: Date.now() });
+
+    return result;
   } catch (error) {
     console.error("[context-builder] Failed to build context:", error);
     return { context: "", tokenCount: 0 };

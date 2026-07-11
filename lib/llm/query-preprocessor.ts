@@ -35,30 +35,17 @@ const ProcessedQuerySchema = z.object({
 const queryCache = new Map<string, { result: ProcessedQuery; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
 
-const PREPROCESS_PROMPT = `You are a biomedical literature search expert with deep knowledge of PubMed, Semantic Scholar, and OpenAlex search syntax.
-
-Convert the user's research query into optimized search strategies.
+const PREPROCESS_PROMPT = `You are a biomedical literature search expert. Convert the user's research query into optimized search strategies for PubMed, Semantic Scholar, and OpenAlex.
 
 RULES:
-1. If input is Chinese, translate all concepts to English for queries.
-2. optimizedQuery: general Boolean query with AND/OR (for all backends).
-3. pubmedQuery: PubMed-specific query with MeSH terms and field tags like [tiab], [MeSH], [Title]. Example: "hepatocellular carcinoma"[MeSH] AND "sorafenib"[tiab]
-4. s2Query: Semantic Scholar keyword search. Use simple terms, avoid MeSH syntax.
-5. openAlexQuery: OpenAlex full-text search with concepts. Use natural language terms.
-6. meshTerms: list of relevant MeSH descriptors in English.
-7. searchIntent: summary of what the user wants (same language as input).
-8. suggestedRefinements: actionable suggestions if the query is too broad (same language as input).
+- If input is Chinese, translate all concepts to English for queries.
+- pubmedQuery: use MeSH terms with field tags like [tiab], [MeSH], [Title]. Example: "hepatocellular carcinoma"[MeSH] AND "sorafenib"[tiab]
+- s2Query: simple keyword search (no MeSH syntax).
+- openAlexQuery: natural language terms with concepts.
+- meshTerms: relevant MeSH descriptors in English.
+- searchIntent / suggestedRefinements: use the same language as the input.
 
-CRITICAL: Return ONLY a valid JSON object with this exact structure:
-{
-  "optimizedQuery": "string",
-  "pubmedQuery": "string",
-  "s2Query": "string",
-  "openAlexQuery": "string",
-  "meshTerms": ["string"],
-  "searchIntent": "string",
-  "suggestedRefinements": ["string"]
-}`;
+Return ONLY a valid JSON object. No markdown, no explanation.`;
 
 export async function preprocessQuery(userInput: string): Promise<ProcessedQuery> {
   // 缓存命中直接返回

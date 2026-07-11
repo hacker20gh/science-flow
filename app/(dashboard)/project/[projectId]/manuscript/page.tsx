@@ -9,6 +9,8 @@ import { exportManuscriptToLatex, exportManuscriptToWord, downloadFile } from "@
 import { consumeSSEStream } from "@/lib/llm/streaming";
 import type { ManuscriptDraft } from "@/lib/llm/manuscript";
 import type { ReviewSimulation } from "@/lib/llm/reviewer";
+import CitationPanel from "@/components/manuscript/citation-panel";
+import type { PaperForMatch } from "@/lib/manuscript/citation-parser";
 
 const SECTIONS = [
   { id: "abstract", label: "Abstract", desc: "背景 + 方法 + 结果 + 结论" },
@@ -55,6 +57,7 @@ export default function ManuscriptPage() {
   const [reviewProgress, setReviewProgress] = useState("");
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
+  const [showCitationPanel, setShowCitationPanel] = useState(true);
 
   const extractedPapers = papers.filter(
     (p) => p.extractionStatus === "done" && p.experiments.length > 0
@@ -411,6 +414,12 @@ export default function ManuscriptPage() {
                 <div className="flex gap-4 text-xs text-gray-500">
                   <span>📝 {currentSection.word_count} 词</span>
                   <span>📚 引用 {currentSection.citations.length} 篇</span>
+                  <button
+                    onClick={() => setShowCitationPanel(!showCitationPanel)}
+                    className="ml-auto text-blue-600 hover:text-blue-800"
+                  >
+                    {showCitationPanel ? "隐藏引用面板" : "显示引用面板"}
+                  </button>
                 </div>
 
                 {/* 修改建议 */}
@@ -434,6 +443,35 @@ export default function ManuscriptPage() {
               重新生成当前章节
             </button>
           </div>
+
+          {/* 引用验证面板 */}
+          {showCitationPanel && (
+            <aside className="w-72 shrink-0">
+              <CitationPanel
+                projectId={projectId}
+                text={currentSection?.content || ""}
+                onInsertCitation={(paper: PaperForMatch) => {
+                  const author = paper.authors[0]?.split(" ").pop() || "Author";
+                  const citeText = `(${author}, ${paper.year || "n.d."})`;
+                  if (editingSection === activeSection) {
+                    setEditContent((prev) => prev + citeText);
+                  } else {
+                    setDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            [activeSection]: {
+                              ...prev[activeSection as keyof ManuscriptDraft],
+                              content: prev[activeSection as keyof ManuscriptDraft].content + citeText,
+                            },
+                          }
+                        : prev,
+                    );
+                  }
+                }}
+              />
+            </aside>
+          )}
         </div>
       )}
 
