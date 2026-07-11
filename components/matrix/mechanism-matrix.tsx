@@ -34,6 +34,7 @@ import type {
   MatrixColumn,
   MatrixCell,
 } from "@/lib/matrix/generator";
+import { getStrengthLevel } from "@/lib/matrix/generator";
 import { CellEditor } from "./cell-editor";
 
 /* ---------- Sortable Column Header ---------- */
@@ -477,11 +478,15 @@ export function MechanismMatrix({
                     const isUp = cell?.direction === "up";
                     const isDown = cell?.direction === "down";
                     const isEmpty = !cell || (!cell.direction && !cell.significance);
+                    const strength = cell?.evidenceStrength != null
+                      ? getStrengthLevel(cell.evidenceStrength)
+                      : null;
 
                     return (
                       <td
                         key={col.id}
                         onClick={(e) => handleCellClick(row, col, e.currentTarget, cell || undefined)}
+                        title={cell ? `证据强度: ${cell.evidenceStrength ?? "?"}/100 — ${strength?.label ?? "未知"}` : undefined}
                         className={`
                           ${ds.cell} text-center cursor-pointer transition-all relative group
                           ${isEmpty
@@ -495,6 +500,20 @@ export function MechanismMatrix({
                           ${hasConflict && cell ? "ring-1 ring-inset ring-amber-300 animate-pulse-subtle" : ""}
                         `}
                       >
+                        {/* 证据强度指示点 */}
+                        {cell && cell.direction && strength && (
+                          <span
+                            className={`absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ${
+                              (cell.evidenceStrength ?? 0) >= 80
+                                ? "bg-green-500"
+                                : (cell.evidenceStrength ?? 0) >= 60
+                                  ? "bg-green-300"
+                                  : (cell.evidenceStrength ?? 0) >= 40
+                                    ? "bg-amber-400"
+                                    : "bg-gray-300"
+                            }`}
+                          />
+                        )}
                         {cell && cell.direction ? (
                           <span className="inline-flex flex-col items-center gap-0.5">
                             <span
@@ -585,6 +604,7 @@ export function MechanismMatrix({
               paperTitle: editingCell.row.paperTitle,
               evidenceQuote: "",
               experimentIndex: 0,
+              evidenceStrength: 0,
             }
           }
           row={editingCell.row}

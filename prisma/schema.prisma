@@ -18,6 +18,7 @@ model User {
   projects  Project[]
   chatMessages    ChatMessage[]
   conversations   Conversation[]
+  courseProgress  CourseProgress[]
   createdAt DateTime @default(now())
 }
 
@@ -308,4 +309,21 @@ model TodoItem {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId, status])
+}
+
+// ===== 课程进度 =====
+
+model CourseProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  courseId    String
+  lessonId    String
+  status      String    @default("not_started") // not_started | in_progress | completed
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId, lessonId])
+  @@index([userId, courseId])
 }

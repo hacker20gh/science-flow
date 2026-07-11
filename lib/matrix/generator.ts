@@ -17,6 +17,7 @@ export interface MatrixCell {
   paperTitle: string;
   evidenceQuote: string;
   experimentIndex: number; // 该论文的第几个实验
+  evidenceStrength: number; // 0-100 证据强度评分
 }
 
 export interface MatrixColumn {
@@ -55,6 +56,74 @@ export interface MatrixData {
   gaps: MatrixGap[];
   totalExperiments: number;
   totalPapers: number;
+}
+
+// ===== 证据强度评分 =====
+
+/**
+ * 计算单条证据的强度评分 (0-100)
+ *
+ * 评分维度：
+ * - 实验方法：金标准方法（Western blot, qPCR, 流式）得高分
+ * - 样本量：≥3 生物学重复得高分
+ * - 统计方法：有明确统计检验得高分
+ * - 显著性标记：有 p 值得高分
+ */
+export function calculateEvidenceStrength(opts: {
+  expMethod?: string | null;
+  sampleSize?: number | null;
+  statisticalMethod?: string | null;
+  significance?: string | null;
+}): number {
+  let score = 30; // 基础分
+
+  // 实验方法评分 (0-25)
+  if (opts.expMethod) {
+    const method = opts.expMethod.toLowerCase();
+    const goldStandard = ["western blot", "wb", "qpcr", "rt-pcr", "flow cytometry", "facs", "elisa", "immunofluorescence", "if", "confocal"];
+    const goodMethod = ["luciferase", "co-ip", "coimmunoprecipitation", "chip", "pull-down", "mass spec", "sequencing", "rna-seq"];
+    if (goldStandard.some(m => method.includes(m))) score += 25;
+    else if (goodMethod.some(m => method.includes(m))) score += 20;
+    else score += 10;
+  }
+
+  // 样本量评分 (0-25)
+  if (opts.sampleSize != null) {
+    if (opts.sampleSize >= 5) score += 25;
+    else if (opts.sampleSize >= 3) score += 20;
+    else if (opts.sampleSize >= 2) score += 10;
+    else score += 5;
+  }
+
+  // 统计方法评分 (0-15)
+  if (opts.statisticalMethod) {
+    score += 15;
+  }
+
+  // 显著性标记评分 (0-5)
+  if (opts.significance) {
+    const sig = opts.significance.toLowerCase();
+    if (sig.includes("0.001") || sig.includes("<0.001")) score += 5;
+    else if (sig.includes("0.01") || sig.includes("<0.01")) score += 4;
+    else if (sig.includes("0.05") || sig.includes("<0.05")) score += 3;
+    else if (sig !== "ns" && sig !== "n.s." && sig !== "not significant") score += 2;
+  }
+
+  return Math.min(100, Math.max(0, score));
+}
+
+/**
+ * 获取证据强度等级
+ */
+export function getStrengthLevel(score: number): {
+  label: string;
+  color: string;
+  bgColor: string;
+} {
+  if (score >= 80) return { label: "强证据", color: "text-green-800", bgColor: "bg-green-100" };
+  if (score >= 60) return { label: "中等证据", color: "text-green-700", bgColor: "bg-green-50" };
+  if (score >= 40) return { label: "弱证据", color: "text-amber-700", bgColor: "bg-amber-50" };
+  return { label: "极弱证据", color: "text-gray-500", bgColor: "bg-gray-50" };
 }
 
 // ===== 生成矩阵 =====
@@ -101,6 +170,12 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
           paperTitle: input.paperTitle,
           evidenceQuote: exp.evidence_quote,
           experimentIndex: i,
+          evidenceStrength: calculateEvidenceStrength({
+            expMethod: pe.method,
+            sampleSize: exp.sample_size,
+            statisticalMethod: exp.statistical_test,
+            significance: pe.significance,
+          }),
         };
         incrementCount(columnCounts, colId);
       }
@@ -118,6 +193,12 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
           paperTitle: input.paperTitle,
           evidenceQuote: exp.evidence_quote,
           experimentIndex: i,
+          evidenceStrength: calculateEvidenceStrength({
+            expMethod: null,
+            sampleSize: exp.sample_size,
+            statisticalMethod: exp.statistical_test,
+            significance: null,
+          }),
         };
         incrementCount(columnCounts, colId);
       }
@@ -304,6 +385,12 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
           paperTitle: ext.paper.title,
           evidenceQuote: ext.rawText || ext.conclusion || "",
           experimentIndex: 0,
+          evidenceStrength: calculateEvidenceStrength({
+            expMethod: ext.expMethod,
+            sampleSize: ext.sampleSize,
+            statisticalMethod: ext.method,
+            significance: pe.significance,
+          }),
         };
         incrementCount(columnCounts, colId);
       }
@@ -324,6 +411,12 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
           paperTitle: ext.paper.title,
           evidenceQuote: ext.rawText || ext.conclusion || "",
           experimentIndex: 0,
+          evidenceStrength: calculateEvidenceStrength({
+            expMethod: ext.expMethod,
+            sampleSize: ext.sampleSize,
+            statisticalMethod: ext.method,
+            significance: null,
+          }),
         };
         incrementCount(columnCounts, colId);
       }

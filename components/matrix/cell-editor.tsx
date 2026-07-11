@@ -177,6 +177,29 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: C
               <span className="text-gray-700">{cell.method}</span>
             </div>
           )}
+          <div>
+            <span className="text-gray-400">证据强度：</span>
+            <span className={`inline-flex items-center gap-1 font-medium ${
+              (cell.evidenceStrength ?? 0) >= 80
+                ? "text-green-700"
+                : (cell.evidenceStrength ?? 0) >= 60
+                  ? "text-green-600"
+                  : (cell.evidenceStrength ?? 0) >= 40
+                    ? "text-amber-600"
+                    : "text-gray-500"
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${
+                (cell.evidenceStrength ?? 0) >= 80
+                  ? "bg-green-500"
+                  : (cell.evidenceStrength ?? 0) >= 60
+                    ? "bg-green-300"
+                    : (cell.evidenceStrength ?? 0) >= 40
+                      ? "bg-amber-400"
+                      : "bg-gray-300"
+              }`} />
+              {cell.evidenceStrength ?? "?"}/100
+            </span>
+          </div>
           {cell.evidenceQuote && (
             <div>
               <span className="text-gray-400">原文引用：</span>
