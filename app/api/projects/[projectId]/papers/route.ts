@@ -79,6 +79,52 @@ export async function POST(
   }
 }
 
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+
+  const { projectId } = await params;
+  const paperId = req.nextUrl.searchParams.get("id");
+
+  if (!paperId) {
+    return Response.json({ error: "id 必填" }, { status: 400 });
+  }
+
+  try {
+    const body = await req.json();
+
+    // 确认论文属于该项目
+    const existing = await prisma.paper.findFirst({
+      where: { id: paperId, projectId },
+    });
+
+    if (!existing) {
+      return Response.json({ error: "论文不存在" }, { status: 404 });
+    }
+
+    const paper = await prisma.paper.update({
+      where: { id: paperId },
+      data: {
+        ...(body.title !== undefined && { title: body.title }),
+        ...(body.journal !== undefined && { journal: body.journal }),
+        ...(body.year !== undefined && { year: body.year }),
+        ...(body.doi !== undefined && { doi: body.doi }),
+        ...(body.pmid !== undefined && { pmid: body.pmid }),
+        ...(body.abstract !== undefined && { abstract: body.abstract }),
+      },
+    });
+
+    return Response.json({ paper });
+  } catch (error) {
+    console.error("Failed to update paper:", error);
+    return Response.json({ error: "更新论文失败" }, { status: 500 });
+  }
+}
+
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
