@@ -1,15 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { PValueSimulator } from "@/components/knowledge/p-value-simulator";
 import { Sidebar } from "@/components/layout/sidebar";
 
+export default function KnowledgePage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center">加载中...</div>}>
+      <KnowledgeContent />
+    </Suspense>
+  );
+}
+
 const KNOWLEDGE_CATEGORIES = [
   {
-    id: "statistics",
-    label: "统计基础",
     icon: "📊",
     articles: [
       {
@@ -789,7 +795,7 @@ Western Blot 是检测特定蛋白表达的金标准方法，但步骤繁多，�
   },
 };
 
-export default function KnowledgePage() {
+function KnowledgeContent() {
   const searchParams = useSearchParams();
   const [selectedArticle, setSelectedArticle] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>("statistics");
@@ -803,7 +809,7 @@ export default function KnowledgePage() {
       const category = KNOWLEDGE_CATEGORIES.find((c) =>
         c.articles.some((a) => a.id === articleId)
       );
-      if (category) setActiveCategory(category.id);
+      if (category) setActiveCategory(category?.id ?? "statistics");
     }
   }, [searchParams]);
 
@@ -894,7 +900,7 @@ export default function KnowledgePage() {
                 {KNOWLEDGE_CATEGORIES.map((cat) => (
                   <button
                     key={cat.id}
-                    onClick={() => setActiveCategory(cat.id)}
+                    onClick={() => setActiveCategory(cat?.id ?? "statistics")}
                     className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
                       activeCategory === cat.id
                         ? "bg-blue-600 text-white"
