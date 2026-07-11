@@ -2,10 +2,216 @@
 
 import { useState } from "react";
 import type { ExperimentDesign } from "@/lib/llm/experiment-design";
+import { jsPDF } from "jspdf";
 
 interface ExperimentDesignCardProps {
   design: ExperimentDesign;
   onSave?: () => void;
+}
+
+function exportProtocolPdf(design: ExperimentDesign) {
+  const doc = new jsPDF();
+  let y = 20;
+
+  // Title
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  const titleLines = doc.splitTextToSize(design.name, 170);
+  doc.text(titleLines, 20, y);
+  y += titleLines.length * 8 + 5;
+  doc.setFont("helvetica", "normal");
+
+  // Duration
+  doc.setFontSize(10);
+  doc.text(`Duration: ${design.protocol.duration}`, 20, y);
+  y += 8;
+
+  // Hypothesis
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Hypothesis", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  const hypLines = doc.splitTextToSize(design.hypothesis, 170);
+  doc.text(hypLines, 20, y);
+  y += hypLines.length * 4.5 + 5;
+
+  // Rationale
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Rationale", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  const ratLines = doc.splitTextToSize(design.rationale, 170);
+  doc.text(ratLines, 20, y);
+  y += ratLines.length * 4.5 + 5;
+
+  // Variables
+  if (y > 240) { doc.addPage(); y = 20; }
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Variables", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Independent: ${design.variables.independent.join(", ")}`, 20, y);
+  y += 5;
+  doc.text(`Dependent: ${design.variables.dependent.join(", ")}`, 20, y);
+  y += 5;
+  doc.text(`Controlled: ${design.variables.controlled.join(", ")}`, 20, y);
+  y += 8;
+
+  // Groups
+  if (y > 240) { doc.addPage(); y = 20; }
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Experimental Groups", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  for (const group of design.groups) {
+    if (y > 270) { doc.addPage(); y = 20; }
+    doc.setFont("helvetica", "bold");
+    doc.text(group.name, 20, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(` (${group.purpose})`, 20 + doc.getTextWidth(group.name), y);
+    y += 5;
+    const descLines = doc.splitTextToSize(group.description, 165);
+    doc.text(descLines, 25, y);
+    y += descLines.length * 4 + 3;
+  }
+  y += 3;
+
+  // Protocol
+  if (y > 240) { doc.addPage(); y = 20; }
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Protocol", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Cell line: ${design.protocol.cellLine}${design.protocol.passage ? ` (Passage ${design.protocol.passage})` : ""}`, 20, y);
+  y += 7;
+
+  // Reagents
+  doc.setFont("helvetica", "bold");
+  doc.text("Reagents:", 20, y);
+  y += 5;
+  doc.setFont("helvetica", "normal");
+  for (const r of design.protocol.reagents) {
+    if (y > 270) { doc.addPage(); y = 20; }
+    const src = r.source ? ` [${r.source}]` : "";
+    doc.text(`- ${r.name} ${r.concentration}${src}`, 25, y);
+    y += 5;
+  }
+  y += 3;
+
+  // Steps
+  doc.setFont("helvetica", "bold");
+  doc.text("Steps:", 20, y);
+  y += 5;
+  doc.setFont("helvetica", "normal");
+  for (const step of design.protocol.steps) {
+    if (y > 265) { doc.addPage(); y = 20; }
+    doc.setFont("helvetica", "bold");
+    doc.text(step.day, 25, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(` ${step.action}`, 25 + doc.getTextWidth(step.day) + 2, y);
+    y += 5;
+    if (step.details) {
+      const detailLines = doc.splitTextToSize(step.details, 155);
+      doc.text(detailLines, 30, y);
+      y += detailLines.length * 4 + 2;
+    }
+  }
+  y += 3;
+
+  // Readouts
+  if (y > 260) { doc.addPage(); y = 20; }
+  doc.setFont("helvetica", "bold");
+  doc.text("Readouts: ", 20, y);
+  doc.setFont("helvetica", "normal");
+  doc.text(design.protocol.readouts.join(", "), 20 + doc.getTextWidth("Readouts: "), y);
+  y += 10;
+
+  // Sample Size
+  if (y > 260) { doc.addPage(); y = 20; }
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Sample Size", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Recommended: n=${design.sample_size.recommended}`, 20, y);
+  y += 5;
+  const ssLines = doc.splitTextToSize(design.sample_size.rationale, 170);
+  doc.text(ssLines, 20, y);
+  y += ssLines.length * 4.5 + 5;
+
+  // Controls Check
+  if (y > 260) { doc.addPage(); y = 20; }
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Controls Check", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Vehicle: ${design.controls_check.has_vehicle ? "Yes" : "No"}`, 25, y); y += 5;
+  doc.text(`Positive control: ${design.controls_check.has_positive ? "Yes" : "No"}`, 25, y); y += 5;
+  doc.text(`Negative control: ${design.controls_check.has_negative ? "Yes" : "No"}`, 25, y); y += 5;
+  if (design.controls_check.missing.length > 0) {
+    doc.text(`Missing: ${design.controls_check.missing.join(", ")}`, 25, y); y += 5;
+  }
+  y += 3;
+
+  // Expected Outcomes
+  if (y > 240) { doc.addPage(); y = 20; }
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Expected Outcomes", 20, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  for (const [i, outcome] of design.expected_outcomes.entries()) {
+    if (y > 255) { doc.addPage(); y = 20; }
+    doc.setFont("helvetica", "bold");
+    doc.text(`Scenario ${i + 1}: ${outcome.scenario}`, 25, y);
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    const intLines = doc.splitTextToSize(outcome.interpretation, 155);
+    doc.text(intLines, 30, y);
+    y += intLines.length * 4 + 2;
+    doc.setTextColor(0, 0, 180);
+    const nextLines = doc.splitTextToSize(`-> ${outcome.nextStep}`, 155);
+    doc.text(nextLines, 30, y);
+    doc.setTextColor(0, 0, 0);
+    y += nextLines.length * 4 + 4;
+  }
+
+  // References
+  if (design.references.length > 0 && y > 260) {
+    doc.addPage(); y = 20;
+  }
+  if (design.references.length > 0) {
+    y += 3;
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("References", 20, y);
+    y += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    for (const ref of design.references) {
+      if (y > 270) { doc.addPage(); y = 20; }
+      const refLines = doc.splitTextToSize(ref, 170);
+      doc.text(refLines, 20, y);
+      y += refLines.length * 4 + 2;
+    }
+  }
+
+  const filename = design.name.slice(0, 50).replace(/[^a-zA-Z0-9一-鿿]/g, "_") + "_protocol.pdf";
+  doc.save(filename);
 }
 
 export function ExperimentDesignCard({ design, onSave }: ExperimentDesignCardProps) {
@@ -192,7 +398,9 @@ export function ExperimentDesignCard({ design, onSave }: ExperimentDesignCardPro
         >
           保存到项目
         </button>
-        <button className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
+        <button className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+          onClick={() => exportProtocolPdf(design)}
+        >
           下载 PDF
         </button>
       </div>

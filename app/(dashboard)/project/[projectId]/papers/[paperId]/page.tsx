@@ -5,9 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, ExternalLink, FileText, Database, ChevronDown, ChevronUp,
-  Pencil, Save, X,
+  Pencil, Save, X, Download,
 } from "lucide-react";
 import { toast } from "sonner";
+import { jsPDF } from "jspdf";
 
 interface Extraction {
   id: string;
@@ -42,6 +43,87 @@ interface Paper {
   impactFactor: number | null;
   createdAt: string;
   extractions: Extraction[];
+}
+
+function exportPaperPdf(paper: Paper) {
+  const doc = new jsPDF();
+  let y = 20;
+
+  // Title
+  doc.setFontSize(16);
+  const titleLines = doc.splitTextToSize(paper.title, 170);
+  doc.text(titleLines, 20, y);
+  y += titleLines.length * 8 + 5;
+
+  // Authors
+  if (paper.authors.length > 0) {
+    doc.setFontSize(10);
+    const authorLines = doc.splitTextToSize(paper.authors.join(", "), 170);
+    doc.text(authorLines, 20, y);
+    y += authorLines.length * 5 + 3;
+  }
+
+  // Journal, Year
+  doc.setFontSize(10);
+  doc.text(`${paper.journal || "Unknown"} (${paper.year || "n.d."})`, 20, y);
+  y += 8;
+
+  // DOI
+  if (paper.doi) {
+    doc.text(`DOI: ${paper.doi}`, 20, y);
+    y += 8;
+  }
+
+  // Impact Factor
+  if (paper.impactFactor) {
+    doc.text(`Impact Factor: ${paper.impactFactor}`, 20, y);
+    y += 8;
+  }
+
+  // Abstract
+  if (paper.abstract) {
+    y += 5;
+    if (y > 260) { doc.addPage(); y = 20; }
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("Abstract", 20, y);
+    y += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const abstractLines = doc.splitTextToSize(paper.abstract, 170);
+    doc.text(abstractLines, 20, y);
+    y += abstractLines.length * 4.5 + 5;
+  }
+
+  // Extractions
+  if (paper.extractions.length > 0) {
+    y += 5;
+    if (y > 260) { doc.addPage(); y = 20; }
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("Extracted Data", 20, y);
+    y += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    for (const ext of paper.extractions) {
+      if (y > 270) { doc.addPage(); y = 20; }
+      const parts = [
+        ext.drugName,
+        ext.drugConc,
+        ext.cellLine,
+        ext.pathway ? `${ext.pathway}${ext.pathwayDir ? ` (${ext.pathwayDir})` : ""}` : null,
+        ext.phenotype ? `${ext.phenotype}${ext.phenotypeDir ? ` (${ext.phenotypeDir})` : ""}` : null,
+        ext.conclusion,
+      ].filter(Boolean);
+      const line = parts.join(" | ");
+      const lines = doc.splitTextToSize(line, 170);
+      doc.text(lines, 20, y);
+      y += lines.length * 4 + 2;
+    }
+  }
+
+  const filename = paper.title.slice(0, 50).replace(/[^a-zA-Z0-9一-鿿]/g, "_") + ".pdf";
+  doc.save(filename);
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -253,6 +335,7 @@ export default function PaperDetailPage() {
               </button>
             </div>
           ) : (
+            <>
             <button
               onClick={() => setEditing(true)}
               className="shrink-0 p-2 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors"
@@ -260,6 +343,14 @@ export default function PaperDetailPage() {
             >
               <Pencil size={16} />
             </button>
+            <button
+              onClick={() => exportPaperPdf(paper)}
+              className="shrink-0 p-2 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors"
+              title="导出 PDF"
+            >
+              <Download size={16} />
+            </button>
+            </>
           )}
         </div>
 
