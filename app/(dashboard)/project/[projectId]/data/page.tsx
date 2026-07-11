@@ -5,6 +5,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { useProjectStore } from "@/store/project-store";
 import { ChartRenderer } from "@/components/charts/chart-renderer";
+import { consumeSSEStream } from "@/lib/llm/streaming";
 import type { AnalysisResult } from "@/lib/llm/analysis";
 
 export default function DataPage() {
@@ -41,6 +42,7 @@ export default function DataPage() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [progressMessage, setProgressMessage] = useState("");
 
   const processFile = useCallback((file: File) => {
     setFileName(file.name);
@@ -103,6 +105,7 @@ export default function DataPage() {
 
     setIsAnalyzing(true);
     setError(null);
+    setProgressMessage("");
 
     try {
       const res = await fetch("/api/analysis", {
@@ -116,17 +119,28 @@ export default function DataPage() {
 
       if (!res.ok) throw new Error((await res.json()).error || "分析失败");
 
-      const data = await res.json();
-      setResult(data);
-
-      addEvent(
-        "experiment_completed",
-        "数据分析完成",
-        `完成 ${fileName} 的统计分析：${data.statistical_analysis.recommended_test}`
-      );
+      consumeSSEStream(res, {
+        onProgress: (step) => {
+          setProgressMessage(step);
+        },
+        onResult: (data) => {
+          const analysisResult = data as AnalysisResult;
+          setResult(analysisResult);
+          addEvent(
+            "experiment_completed",
+            "数据分析完成",
+            `完成 ${fileName} 的统计分析：${analysisResult.statistical_analysis.recommended_test}`
+          );
+        },
+        onError: (msg) => {
+          setError(msg);
+        },
+        onDone: () => {
+          setIsAnalyzing(false);
+        },
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "分析失败");
-    } finally {
       setIsAnalyzing(false);
     }
   }
@@ -221,7 +235,7 @@ export default function DataPage() {
       {isAnalyzing && !result && (
         <div className="text-center py-8 space-y-3">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-600" />
-          <p className="text-sm text-gray-500">正在分析数据...</p>
+          <p className="text-sm text-gray-500">{progressMessage || "正在分析数据..."}</p>
         </div>
       )}
 

@@ -1,34 +1,41 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { createSSEStream } from "@/lib/llm/streaming";
 import { analyzeData, parseCSV } from "@/lib/llm/analysis";
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { csvData, experimentContext } = body;
+  const body = await req.json();
+  const { csvData, experimentContext } = body;
 
-    if (!csvData) {
-      return NextResponse.json(
-        { error: "csvData is required" },
-        { status: 400 }
-      );
-    }
+  if (!csvData) {
+    return new Response(
+      JSON.stringify({ error: "csvData is required" }),
+      { status: 400 }
+    );
+  }
 
-    // 解析 CSV
-    const { summary } = parseCSV(csvData);
+  const { summary } = parseCSV(csvData);
 
-    // 调 LLM 分析
+  return createSSEStream(async (emit) => {
+    emit({
+      type: "progress",
+      step: "正在解析数据结构...",
+      current: 0,
+      total: 2,
+    });
+
+    emit({
+      type: "progress",
+      step: "正在调用 AI 分析...",
+      current: 1,
+      total: 2,
+    });
+
     const result = await analyzeData({
       dataDescription: summary,
       rawData: csvData,
       experimentContext,
     });
 
-    return NextResponse.json(result);
-  } catch (error) {
-    console.error("Analysis error:", error);
-    return NextResponse.json(
-      { error: "Analysis failed" },
-      { status: 500 }
-    );
-  }
+    emit({ type: "result", data: result });
+  });
 }

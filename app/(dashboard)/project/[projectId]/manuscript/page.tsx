@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useProjectStore } from "@/store/project-store";
 import { exportManuscriptToLatex, exportManuscriptToWord, downloadFile } from "@/lib/export";
 import { consumeSSEStream } from "@/lib/llm/streaming";
@@ -51,6 +53,8 @@ export default function ManuscriptPage() {
   const [review, setReview] = useState<ReviewSimulation | null>(null);
   const [progressMessage, setProgressMessage] = useState("");
   const [reviewProgress, setReviewProgress] = useState("");
+  const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
 
   const extractedPapers = papers.filter(
     (p) => p.extractionStatus === "done" && p.experiments.length > 0
@@ -105,7 +109,16 @@ export default function ManuscriptPage() {
         setProgressMessage(step || "正在组装论文...");
       },
       onResult: (data) => {
-        setDraft(data as ManuscriptDraft);
+        const newDraft = data as ManuscriptDraft;
+        if (section !== "all" && draft) {
+          // Only update the target section, keep others unchanged
+          setDraft({
+            ...draft,
+            [section]: newDraft[section as keyof ManuscriptDraft],
+          });
+        } else {
+          setDraft(newDraft);
+        }
         setActiveSection(section === "all" ? "abstract" : section);
         setIsGenerating(false);
       },
@@ -348,11 +361,50 @@ export default function ManuscriptPage() {
             {currentSection && (
               <>
                 <div className="bg-white border border-gray-200 rounded-xl p-6">
-                  <div className="prose prose-sm max-w-none">
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                      {currentSection.content}
+                  {editingSection === activeSection ? (
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      onBlur={() => {
+                        // Save edited content to draft state
+                        setDraft((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                [activeSection]: {
+                                  ...prev[activeSection as keyof ManuscriptDraft],
+                                  content: editContent,
+                                },
+                              }
+                            : prev
+                        );
+                        setEditingSection(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setEditingSection(null);
+                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      className="w-full min-h-[300px] p-4 text-sm leading-relaxed border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                      autoFocus
+                    />
+                  ) : (
+                    <div
+                      onClick={() => {
+                        setEditingSection(activeSection);
+                        setEditContent(currentSection.content);
+                      }}
+                      className="cursor-text hover:bg-gray-50 rounded-lg p-4 -m-4 transition-colors"
+                      title="点击编辑"
+                    >
+                      <div className="prose prose-sm max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {currentSection.content}
+                        </ReactMarkdown>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* 元信息 */}
