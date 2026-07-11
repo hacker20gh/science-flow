@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
-import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Lightbulb, FlaskConical } from "lucide-react";
+import { useMemo, useState, useEffect, useCallback } from "react";
+import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Lightbulb, FlaskConical, Plus } from "lucide-react";
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
 import { ProcessAssistant } from "@/components/assistant/process-assistant";
-import { analyzeProjectState, calculateHypothesisStrength } from "@/lib/assistant/process-assistant";
+import { analyzeProjectState } from "@/lib/assistant/process-assistant";
+import { HypothesisCard } from "@/components/brain/hypothesis-card";
+import { HypothesisForm } from "@/components/brain/hypothesis-form";
 import { generateMatrix, type MatrixData } from "@/lib/matrix/generator";
 import { useProjectStore } from "@/store/project-store";
 import { DEMO_EXTRATIONS } from "@/lib/matrix/demo-data";
@@ -31,14 +33,6 @@ interface TodoItem {
   actionHref?: string;
 }
 
-const STATUS_LABELS: Record<string, { label: string; className: string }> = {
-  pending: { label: "待验证", className: "bg-gray-100 text-gray-600" },
-  testing: { label: "验证中", className: "bg-amber-100 text-amber-700" },
-  supported: { label: "已支持", className: "bg-green-100 text-green-700" },
-  refused: { label: "已拒绝", className: "bg-red-100 text-red-600" },
-  revised: { label: "已修订", className: "bg-blue-100 text-blue-600" },
-};
-
 export default function BrainPage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -50,6 +44,93 @@ export default function BrainPage() {
     id: string; title: string; year: number | null;
     extractions: Array<{ experiments: unknown }>;
   }> | null>(null);
+
+  // Hypothesis CRUD state
+  const [showForm, setShowForm] = useState(false);
+  const [editingHypothesis, setEditingHypothesis] = useState<Hypothesis | null>(null);
+  const [formMode, setFormMode] = useState<"create" | "edit">("create");
+
+  const refreshHypotheses = useCallback(() => {
+    if (!projectId) return;
+    fetch(`/api/projects/${projectId}/hypotheses`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.hypotheses) setHypotheses(data.hypotheses);
+      })
+      .catch(() => {});
+  }, [projectId]);
+
+  const handleCreateHypothesis = useCallback(
+    async (data: { statement: string; status: string; evidence?: unknown; basedOn?: string[] }) => {
+      try {
+        await fetch(`/api/projects/${projectId}/hypotheses`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        refreshHypotheses();
+      } catch {
+        // silently fail
+      }
+    },
+    [projectId, refreshHypotheses]
+  );
+
+  const handleUpdateHypothesis = useCallback(
+    async (id: string, data: { status?: string; statement?: string }) => {
+      try {
+        await fetch(`/api/projects/${projectId}/hypotheses`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, ...data }),
+        });
+        refreshHypotheses();
+      } catch {
+        // silently fail
+      }
+    },
+    [projectId, refreshHypotheses]
+  );
+
+  const handleDeleteHypothesis = useCallback(
+    async (id: string) => {
+      try {
+        await fetch(`/api/projects/${projectId}/hypotheses?id=${id}`, {
+          method: "DELETE",
+        });
+        refreshHypotheses();
+      } catch {
+        // silently fail
+      }
+    },
+    [projectId, refreshHypotheses]
+  );
+
+  const handleEditHypothesis = useCallback((h: Hypothesis) => {
+    setEditingHypothesis(h);
+    setFormMode("edit");
+    setShowForm(true);
+  }, []);
+
+  const handleOpenCreateForm = useCallback(() => {
+    setEditingHypothesis(null);
+    setFormMode("create");
+    setShowForm(true);
+  }, []);
+
+  const handleFormSubmit = useCallback(
+    (data: { statement: string; status: string; evidence?: unknown; basedOn?: string[] }) => {
+      if (formMode === "create") {
+        handleCreateHypothesis(data);
+      } else if (editingHypothesis) {
+        handleUpdateHypothesis(editingHypothesis.id, {
+          statement: data.statement,
+          status: data.status,
+        });
+      }
+    },
+    [formMode, editingHypothesis, handleCreateHypothesis, handleUpdateHypothesis]
+  );
 
   // 从 DB 获取真实文献数据（包含提取结果）
   useEffect(() => {
@@ -326,6 +407,15 @@ export default function BrainPage() {
               </span>
             )}
           </h2>
+          {!useDemo && (
+            <button
+              onClick={handleOpenCreateForm}
+              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1"
+            >
+              <Plus size={14} />
+              新建假设
+            </button>
+          )}
         </div>
 
         {useDemo ? (
@@ -381,115 +471,17 @@ export default function BrainPage() {
         ) : hypotheses.length > 0 ? (
           /* 真实数据：渲染所有假设 */
           <div className="space-y-4">
-            {hypotheses.map((h) => {
-              const evidence = (h.evidence as {
-                supporting?: string[];
-                contradicting?: string[];
-              }) || {};
-              const supporting = evidence.supporting ?? [];
-              const contradicting = evidence.contradicting ?? [];
-
-              const strength = calculateHypothesisStrength({
-                supportingPapers: supporting.length || (h.status === "supported" ? 1 : 0),
-                contradictingPapers: contradicting.length || (h.status === "refused" ? 1 : 0),
-                totalExperiments: matrixData.totalExperiments,
-              });
-
-              const statusInfo = STATUS_LABELS[h.status] ?? STATUS_LABELS.pending;
-
-              return (
-                <div
-                  key={h.id}
-                  className="bg-white border border-gray-200 rounded-xl p-6"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 ${statusInfo.className}`}
-                        >
-                          {h.status === "testing" && <RefreshCw size={12} />}
-                          {h.status === "supported" && <CheckCircle size={12} />}
-                          {statusInfo.label}
-                        </span>
-                        <h3 className="font-medium text-sm">{h.statement}</h3>
-                      </div>
-
-                      {/* 证据强度进度条 */}
-                      <div className="mt-3">
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-gray-500">证据强度</span>
-                          <span className={`font-medium ${strength.color}`}>
-                            {strength.score}% — {strength.label}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className={`h-2 rounded-full transition-all ${
-                              strength.score >= 60
-                                ? "bg-green-500"
-                                : strength.score >= 40
-                                  ? "bg-amber-500"
-                                  : "bg-red-400"
-                            }`}
-                            style={{ width: `${strength.score}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* 支持 / 反对证据 */}
-                      {(supporting.length > 0 || contradicting.length > 0) && (
-                        <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
-                          {supporting.length > 0 && (
-                            <div>
-                              <p className="text-green-600 font-medium mb-1 flex items-center gap-1">
-                                <CheckCircle size={14} />
-                                支持证据 ({supporting.length})
-                              </p>
-                              <ul className="space-y-1 text-gray-600">
-                                {supporting.slice(0, 4).map((s, i) => (
-                                  <li key={i}>• {s}</li>
-                                ))}
-                                {supporting.length > 4 && (
-                                  <li className="text-gray-400">
-                                    …还有 {supporting.length - 4} 条
-                                  </li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                          {contradicting.length > 0 && (
-                            <div>
-                              <p className="text-amber-600 font-medium mb-1 flex items-center gap-1">
-                                <AlertTriangle size={14} />
-                                反对证据 ({contradicting.length})
-                              </p>
-                              <ul className="space-y-1 text-gray-600">
-                                {contradicting.slice(0, 4).map((c, i) => (
-                                  <li key={i}>• {c}</li>
-                                ))}
-                                {contradicting.length > 4 && (
-                                  <li className="text-gray-400">
-                                    …还有 {contradicting.length - 4} 条
-                                  </li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* 基于来源 */}
-                      {h.basedOn.length > 0 && (
-                        <p className="mt-3 text-xs text-gray-400">
-                          基于：{h.basedOn.join("、")}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {hypotheses.map((h) => (
+              <HypothesisCard
+                key={h.id}
+                hypothesis={h}
+                projectId={projectId}
+                onUpdate={handleUpdateHypothesis}
+                onDelete={handleDeleteHypothesis}
+                onEdit={handleEditHypothesis}
+                totalExperiments={matrixData.totalExperiments}
+              />
+            ))}
           </div>
         ) : (
           /* 真实数据但无假设 */
@@ -575,6 +567,23 @@ export default function BrainPage() {
           )}
         </div>
       </section>
+      {/* Hypothesis Form Dialog */}
+      <HypothesisForm
+        isOpen={showForm}
+        onClose={() => setShowForm(false)}
+        onSubmit={handleFormSubmit}
+        mode={formMode}
+        initialData={
+          editingHypothesis
+            ? {
+                statement: editingHypothesis.statement,
+                status: editingHypothesis.status,
+                evidence: editingHypothesis.evidence as { supporting?: string[]; contradicting?: string[] } | undefined,
+                basedOn: editingHypothesis.basedOn,
+              }
+            : undefined
+        }
+      />
     </main>
   );
 }
