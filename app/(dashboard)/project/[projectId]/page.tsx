@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
+import { motion } from "framer-motion";
 import {
   BookOpen,
   FlaskConical,
@@ -23,6 +24,11 @@ import { WorkflowProgress } from "@/components/project/workflow-progress";
 import { generateInsights } from "@/lib/workflow/rules";
 import type { ProactiveInsight } from "@/lib/workflow/event-bus";
 import { toast } from "sonner";
+
+const fadeUp = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0 },
+};
 
 interface ProjectData {
   id: string;
@@ -228,42 +234,29 @@ export default function ProjectPage({
 
       {/* Quick stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-            <BookOpen size={20} className="text-blue-600" />
-          </div>
-          <div>
-            <div className="text-xl font-bold text-blue-600">{project.papers.length}</div>
-            <div className="text-xs text-gray-500">篇文献</div>
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center">
-            <FlaskConical size={20} className="text-green-600" />
-          </div>
-          <div>
-            <div className="text-xl font-bold text-green-600">{project.experiments.length}</div>
-            <div className="text-xs text-gray-500">个实验</div>
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
-            <Lightbulb size={20} className="text-amber-600" />
-          </div>
-          <div>
-            <div className="text-xl font-bold text-amber-600">{project.hypotheses.length}</div>
-            <div className="text-xs text-gray-500">个假设</div>
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
-            <FileText size={20} className="text-purple-600" />
-          </div>
-          <div>
-            <div className="text-xl font-bold text-purple-600">{project.manuscripts.length}</div>
-            <div className="text-xs text-gray-500">篇草稿</div>
-          </div>
-        </div>
+        {[
+          { icon: BookOpen, count: project.papers.length, label: "篇文献", color: "blue", bg: "bg-blue-50", text: "text-blue-600" },
+          { icon: FlaskConical, count: project.experiments.length, label: "个实验", color: "green", bg: "bg-green-50", text: "text-green-600" },
+          { icon: Lightbulb, count: project.hypotheses.length, label: "个假设", color: "amber", bg: "bg-amber-50", text: "text-amber-600" },
+          { icon: FileText, count: project.manuscripts.length, label: "篇草稿", color: "purple", bg: "bg-purple-50", text: "text-purple-600" },
+        ].map((stat, i) => (
+          <motion.div
+            key={stat.label}
+            variants={fadeUp}
+            initial="initial"
+            animate="animate"
+            transition={{ duration: 0.3, delay: i * 0.06 }}
+            className="bg-white p-4 rounded-xl border border-gray-200 flex items-center gap-3"
+          >
+            <div className={`w-10 h-10 rounded-lg ${stat.bg} flex items-center justify-center`}>
+              <stat.icon size={20} className={stat.text} />
+            </div>
+            <div>
+              <div className={`text-xl font-bold ${stat.text}`}>{stat.count}</div>
+              <div className="text-xs text-gray-500">{stat.label}</div>
+            </div>
+          </motion.div>
+        ))}
       </div>
 
       {/* Quick actions */}
@@ -310,9 +303,13 @@ export default function ProjectPage({
             <h2 className="text-lg font-semibold">下一步建议</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {insights.map((insight) => (
-              <div
+            {insights.map((insight, i) => (
+              <motion.div
                 key={insight.id}
+                variants={fadeUp}
+                initial="initial"
+                animate="animate"
+                transition={{ duration: 0.3, delay: 0.3 + i * 0.05 }}
                 className={`p-4 rounded-xl border ${
                   insight.type === "warning"
                     ? "bg-amber-50 border-amber-200"
@@ -345,7 +342,7 @@ export default function ProjectPage({
                     )}
                   </div>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
         </section>

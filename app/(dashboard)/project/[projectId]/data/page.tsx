@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import Link from "next/link";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { useProjectStore } from "@/store/project-store";
@@ -358,6 +359,19 @@ export default function DataPage() {
             )}
           </div>
 
+          {/* 相关知识库文章 */}
+          {result.statistical_analysis.recommended_test && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <h3 className="font-medium text-sm mb-3">📚 相关知识库文章</h3>
+              <p className="text-xs text-gray-500 mb-3">
+                根据推荐的统计方法「{result.statistical_analysis.recommended_test}」，以下文章可能对你有帮助：
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <KnowledgeArticleLink method={result.statistical_analysis.recommended_test} />
+              </div>
+            </div>
+          )}
+
           {/* 操作 */}
           <div className="flex gap-3">
             <button
@@ -374,5 +388,41 @@ export default function DataPage() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * Based on the recommended statistical method, suggest relevant knowledge articles.
+ */
+function KnowledgeArticleLink({ method }: { method: string }) {
+  const methodLower = method.toLowerCase();
+  const articles: { id: string; label: string; description: string }[] = [];
+
+  if (methodLower.includes("t-test") || methodLower.includes("t test") || methodLower.includes("student")) {
+    articles.push({ id: "p-value", label: "P 值是什么？", description: "理解 p 值的含义、常见误解和正确使用方法" });
+  }
+  if (methodLower.includes("anova") || methodLower.includes("方差分析") || methodLower.includes("f-test")) {
+    articles.push({ id: "multiple-testing", label: "多重检验校正", description: "Bonferroni、FDR 和为什么不能反复做 t 检验" });
+  }
+  if (methodLower.includes("chi") || methodLower.includes("卡方") || methodLower.includes("chi-square")) {
+    articles.push({ id: "effect-size", label: "效应量（Effect Size）", description: "统计显著 ≠ 生物学意义：如何衡量效应大小" });
+  }
+
+  // Always suggest statistical reporting as a general reference
+  articles.push({ id: "statistical-reporting", label: "统计结果的规范报告", description: "APA 格式、t(F) 值怎么写、p 值的正确呈现" });
+
+  return (
+    <>
+      {articles.map((article) => (
+        <Link
+          key={article.id}
+          href={`/knowledge?article=${article.id}`}
+          className="group block w-full sm:w-auto p-3 bg-blue-50 border border-blue-100 rounded-lg hover:border-blue-300 hover:bg-blue-100/50 transition-all text-left"
+        >
+          <div className="text-xs font-medium text-blue-700 group-hover:text-blue-800">{article.label}</div>
+          <div className="text-[11px] text-blue-500/80 mt-0.5">{article.description}</div>
+        </Link>
+      ))}
+    </>
   );
 }

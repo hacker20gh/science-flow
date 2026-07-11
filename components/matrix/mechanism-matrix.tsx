@@ -1,6 +1,22 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { toPng, toSvg } from "html-to-image";
 import {
   GitBranch,
   Activity,
@@ -10,6 +26,7 @@ import {
   ChevronUp,
   Maximize2,
   Minimize2,
+  GripVertical,
 } from "lucide-react";
 import type {
   MatrixData,
@@ -18,6 +35,71 @@ import type {
   MatrixCell,
 } from "@/lib/matrix/generator";
 import { CellEditor } from "./cell-editor";
+
+/* ---------- Sortable Column Header ---------- */
+
+function SortableColumnHeader({
+  col,
+  hasConflict,
+  ds,
+}: {
+  col: MatrixColumn;
+  hasConflict: boolean;
+  ds: { header: string };
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: col.id,
+  });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    position: "relative",
+  };
+
+  return (
+    <th
+      ref={setNodeRef}
+      style={style}
+      className={`${ds.header} text-center font-semibold min-w-[110px] border-b-2 group ${
+        hasConflict
+          ? "border-b-amber-400 bg-amber-50/80"
+          : "border-b-gray-200 bg-gradient-to-b from-gray-50 to-gray-100"
+      }`}
+    >
+      {/* Drag handle — visible on hover */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="absolute left-0.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600"
+        title="拖拽排序"
+      >
+        <GripVertical size={12} />
+      </button>
+
+      <div className="flex items-center justify-center gap-1">
+        {col.type === "pathway" ? (
+          <GitBranch
+            size={14}
+            className={hasConflict ? "text-amber-600" : "text-purple-500"}
+          />
+        ) : (
+          <Activity size={14} className="text-teal-500" />
+        )}
+        <span className={hasConflict ? "text-amber-800" : "text-gray-700"}>
+          {col.label}
+        </span>
+        {hasConflict && (
+          <AlertTriangle size={11} className="text-amber-500 animate-pulse" />
+        )}
+      </div>
+      <div className="text-[10px] text-gray-400 font-normal">
+        {col.type === "pathway" ? "通路" : "表型"} · {col.count} 篇
+      </div>
+    </th>
+  );
+}
 
 interface MechanismMatrixProps {
   projectId: string;
@@ -52,6 +134,12 @@ export function MechanismMatrix({
   const [showConflicts, setShowConflicts] = useState(true);
   const [data, setData] = useState<MatrixData>(initialData);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  const [visibleRowCount, setVisibleRowCount] = useState(50);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
 
   const ds = DENSITY_STYLES[density];
 
@@ -119,6 +207,56 @@ export function MechanismMatrix({
     if (existingCell) onCellClick?.(row, col, existingCell);
   }
 
+  /* ---------- Column Drag End ---------- */
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = data.columns.findIndex((c) => c.id === active.id);
+    const newIndex = data.columns.findIndex((c) => c.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(data.columns, oldIndex, newIndex);
+    setData((prev) => {
+      const updated = { ...prev, columns: reordered };
+      // fire-and-forget: persist new column order
+      fetch(`/api/projects/${encodeURIComponent(projectId)}/matrix`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: reordered.map((c) => c.id) }),
+      }).catch(() => {});
+      onMatrixUpdate?.(updated);
+      return updated;
+    });
+  }
+
+  /* ---------- PNG / SVG Export ---------- */
+  async function exportPng() {
+    if (!tableRef.current) return;
+    try {
+      const dataUrl = await toPng(tableRef.current, { backgroundColor: "#ffffff" });
+      const link = document.createElement("a");
+      link.download = "mechanism-matrix.png";
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error("PNG export failed:", err);
+    }
+  }
+
+  async function exportSvg() {
+    if (!tableRef.current) return;
+    try {
+      const dataUrl = await toSvg(tableRef.current, { backgroundColor: "#ffffff" });
+      const link = document.createElement("a");
+      link.download = "mechanism-matrix.svg";
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error("SVG export failed:", err);
+    }
+  }
+
   // Check if a column has a conflict
   function isConflictColumn(colId: string) {
     return data.conflicts.some((c) => c.columnId === colId);
@@ -183,7 +321,7 @@ export function MechanismMatrix({
           </div>
         </div>
 
-        {/* 统计 */}
+        {/* 统计 + 导出 */}
         <div className="flex items-center gap-3 text-xs text-gray-400">
           <span className="inline-flex items-center gap-1">
             📄 {data.totalPapers} 篇文献
@@ -200,6 +338,22 @@ export function MechanismMatrix({
               {data.conflicts.length} 个冲突
             </span>
           )}
+          <div className="flex items-center gap-1 border-l border-gray-200 pl-3">
+            <button
+              onClick={exportPng}
+              className="px-2 py-0.5 text-[11px] border border-gray-200 rounded hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              title="导出为 PNG"
+            >
+              导出 PNG
+            </button>
+            <button
+              onClick={exportSvg}
+              className="px-2 py-0.5 text-[11px] border border-gray-200 rounded hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              title="导出为 SVG"
+            >
+              导出 SVG
+            </button>
+          </div>
         </div>
       </div>
 
@@ -240,64 +394,42 @@ export function MechanismMatrix({
       )}
 
       {/* 矩阵表格 */}
-      <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
-        <table className="min-w-full text-xs border-collapse">
-          {/* 表头 */}
-          <thead>
-            <tr>
-              {/* 左上角固定列头 */}
-              <th
-                className={`${ds.header} text-left font-semibold text-gray-700 sticky left-0 z-20 min-w-[200px] border-r border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm">📋</span>
-                  <span>文献 · 实验条件</span>
-                </div>
-                <div className="text-[10px] text-gray-400 font-normal mt-0.5">
-                  {data.rows.length} 行数据
-                </div>
-              </th>
+      <div ref={tableRef} className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
+        <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <table className="min-w-full text-xs border-collapse">
+            {/* 表头 */}
+            <thead>
+              <tr>
+                {/* 左上角固定列头 */}
+                <th
+                  className={`${ds.header} text-left font-semibold text-gray-700 sticky left-0 z-20 min-w-[200px] border-r border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm">📋</span>
+                    <span>文献 · 实验条件</span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 font-normal mt-0.5">
+                    {data.rows.length} 行数据
+                  </div>
+                </th>
 
-              {/* 维度列头 */}
-              {visibleColumns.map((col) => {
-                const hasConflict = isConflictColumn(col.id);
-                return (
-                  <th
-                    key={col.id}
-                    className={`${ds.header} text-center font-semibold min-w-[110px] border-b-2 ${
-                      hasConflict
-                        ? "border-b-amber-400 bg-amber-50/80"
-                        : "border-b-gray-200 bg-gradient-to-b from-gray-50 to-gray-100"
-                    }`}
-                  >
-                    <div className="flex items-center justify-center gap-1">
-                      {col.type === "pathway" ? (
-                        <GitBranch
-                          size={14}
-                          className={hasConflict ? "text-amber-600" : "text-purple-500"}
-                        />
-                      ) : (
-                        <Activity size={14} className="text-teal-500" />
-                      )}
-                      <span className={hasConflict ? "text-amber-800" : "text-gray-700"}>
-                        {col.label}
-                      </span>
-                      {hasConflict && (
-                        <AlertTriangle size={11} className="text-amber-500 animate-pulse" />
-                      )}
-                    </div>
-                    <div className="text-[10px] text-gray-400 font-normal">
-                      {col.type === "pathway" ? "通路" : "表型"} · {col.count} 篇
-                    </div>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
+                {/* 维度列头 — draggable */}
+                <SortableContext items={visibleColumns.map((c) => c.id)} strategy={horizontalListSortingStrategy}>
+                  {visibleColumns.map((col) => (
+                    <SortableColumnHeader
+                      key={col.id}
+                      col={col}
+                      hasConflict={isConflictColumn(col.id)}
+                      ds={ds}
+                    />
+                  ))}
+                </SortableContext>
+              </tr>
+            </thead>
 
-          {/* 表体 */}
+          {/* 表体 — paginated */}
           <tbody>
-            {data.rows.map((row, rowIdx) => {
+            {data.rows.slice(0, visibleRowCount).map((row, rowIdx) => {
               const isHovered = hoveredRow === row.id;
               return (
                 <tr
@@ -399,7 +531,25 @@ export function MechanismMatrix({
             })}
           </tbody>
         </table>
+        </DndContext>
       </div>
+
+      {/* 分页：超过50行时显示 */}
+      {data.rows.length > 50 && (
+        <div className="flex items-center justify-between text-xs text-gray-500 px-1">
+          <span>
+            第 1–{Math.min(visibleRowCount, data.rows.length)} 行，共 {data.rows.length} 行
+          </span>
+          {visibleRowCount < data.rows.length && (
+            <button
+              onClick={() => setVisibleRowCount((prev) => Math.min(prev + 50, data.rows.length))}
+              className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              加载更多（+50 行）
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 底部提示 */}
       <div className="flex items-center justify-between text-[11px] text-gray-400 px-1">

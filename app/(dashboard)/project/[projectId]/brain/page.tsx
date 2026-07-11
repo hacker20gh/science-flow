@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect, useCallback } from "react";
+import { motion } from "framer-motion";
 import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Plus } from "lucide-react";
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
 import { ProcessAssistant } from "@/components/assistant/process-assistant";
@@ -298,7 +299,11 @@ export default function BrainPage() {
       )}
 
       {/* 机制矩阵 */}
-      <section>
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.1 }}
+      >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">机制矩阵</h2>
           <div className="flex gap-2">
@@ -323,10 +328,14 @@ export default function BrainPage() {
           </div>
         </div>
         <MechanismMatrix projectId={projectId} data={matrixData} />
-      </section>
+      </motion.section>
 
       {/* 假设追踪器 */}
-      <section>
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.2 }}
+      >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">
             假设追踪器
@@ -400,16 +409,22 @@ export default function BrainPage() {
         ) : hypotheses.length > 0 ? (
           /* 真实数据：渲染所有假设 */
           <div className="space-y-4">
-            {hypotheses.map((h) => (
-              <HypothesisCard
+            {hypotheses.map((h, i) => (
+              <motion.div
                 key={h.id}
-                hypothesis={h}
-                projectId={projectId}
-                onUpdate={handleUpdateHypothesis}
-                onDelete={handleDeleteHypothesis}
-                onEdit={handleEditHypothesis}
-                totalExperiments={matrixData.totalExperiments}
-              />
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: i * 0.06 }}
+              >
+                <HypothesisCard
+                  hypothesis={h}
+                  projectId={projectId}
+                  onUpdate={handleUpdateHypothesis}
+                  onDelete={handleDeleteHypothesis}
+                  onEdit={handleEditHypothesis}
+                  totalExperiments={matrixData.totalExperiments}
+                />
+              </motion.div>
             ))}
           </div>
         ) : (
@@ -418,15 +433,19 @@ export default function BrainPage() {
             搜索文献并提出假设后，假设追踪器会自动显示
           </div>
         )}
-      </section>
+      </motion.section>
 
       {/* 待办清单 */}
-      <section>
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.3 }}
+      >
         <h2 className="text-lg font-semibold mb-4">
           待办清单
         </h2>
         <TaskBoard projectId={projectId} matrixData={useDemo ? undefined : matrixData} />
-      </section>
+      </motion.section>
       {/* Hypothesis Form Dialog */}
       <HypothesisForm
         isOpen={showForm}
