@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     return createSSEStream(async (emit) => {
       emit({ type: "progress", step: "正在模拟审稿人审阅...", current: 0, total: 3 });
 
-      const review = await simulateReview({ manuscript, journal });
+      const review = await simulateReview({ manuscript, journal }, emit);
 
       // 逐个审稿人 emit 进度
       if (review.reviewers) {

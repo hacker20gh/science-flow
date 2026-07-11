@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
+import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
 
 export interface ManuscriptSection {
   section: string;
@@ -44,14 +45,17 @@ const MANUSCRIPT_TOOL = createToolFromSchema(
   ManuscriptDraftSchema,
 );
 
-export async function generateManuscript(params: {
-  projectName: string;
-  hypothesis: string;
-  matrixSummary: string;
-  papers: Array<{ title: string; authors: string[]; year: number; journal: string }>;
-  experiments: Array<{ name: string; protocol: string; result: string }>;
-  section: string;
-}): Promise<ManuscriptDraft> {
+export async function generateManuscript(
+  params: {
+    projectName: string;
+    hypothesis: string;
+    matrixSummary: string;
+    papers: Array<{ title: string; authors: string[]; year: number; journal: string }>;
+    experiments: Array<{ name: string; protocol: string; result: string }>;
+    section: string;
+  },
+  onToken?: (event: SSEEvent) => void,
+): Promise<ManuscriptDraft> {
   return withLLMRetry(async () => {
     const client = getLLMClient();
     const context = `课题: ${params.projectName}\n假设: ${params.hypothesis}\n矩阵: ${params.matrixSummary}\n\n文献:\n${params.papers.map((p) => `- ${p.authors[0]} et al. (${p.year}) "${p.title}" ${p.journal}`).join("\n")}\n\n实验:\n${params.experiments.map((e) => `${e.name}: ${e.result}`).join("\n")}\n\n需要生成: ${params.section === "all" ? "全部章节" : params.section}`;
@@ -65,25 +69,42 @@ Writing rules:
 - Use (Author, Year) citation format
 - Flag gaps with [TODO: ...]`;
 
-    const response = await client.messages.create({
+    const llmParams = {
       model: MODELS.analysis,
       max_tokens: 16384,
       system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
+      messages: [{ role: "user" as const, content: userMessage }],
       tools: [MANUSCRIPT_TOOL],
-      tool_choice: { type: "tool", name: "generate_manuscript" },
-    });
+      tool_choice: { type: "tool" as const, name: "generate_manuscript" },
+    };
 
-    return await extractStructuredOutput(response, ManuscriptDraftSchema, {
-      label: "manuscript",
-      retryFn: createRetryFunction(client, {
-        model: MODELS.analysis,
-        maxTokens: 16384,
-        system: systemPrompt,
-        userMessage,
-        originalContent: userMessage,
-        schema: ManuscriptDraftSchema,
-      }),
-    });
+    let draft: ManuscriptDraft;
+
+    if (onToken) {
+      // 真流式：逐 token 发送
+      const { toolUseBlocks } = await streamLLMWithToolUse(client, llmParams, onToken);
+      const toolResult = toolUseBlocks.find((t) => t.name === "generate_manuscript");
+      if (toolResult) {
+        draft = ManuscriptDraftSchema.parse(toolResult.input);
+      } else {
+        throw new Error("No tool_use block in streaming response");
+      }
+    } else {
+      // 阻塞式
+      const response = await client.messages.create(llmParams);
+      draft = await extractStructuredOutput(response, ManuscriptDraftSchema, {
+        label: "manuscript",
+        retryFn: createRetryFunction(client, {
+          model: MODELS.analysis,
+          maxTokens: 16384,
+          system: systemPrompt,
+          userMessage,
+          originalContent: userMessage,
+          schema: ManuscriptDraftSchema,
+        }),
+      });
+    }
+
+    return draft;
   }, { label: "manuscript" });
 }

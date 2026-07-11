@@ -17,11 +17,10 @@ export async function POST(req: NextRequest) {
     return createSSEStream(async (emit) => {
       emit({ type: "progress", step: "正在分析失败原因...", current: 0, total: 1 });
 
-      const result = await troubleshootExperiment({
-        experiment,
-        failure,
-        literatureContext,
-      });
+      const result = await troubleshootExperiment(
+        { experiment, failure, literatureContext },
+        emit,
+      );
 
       emit({ type: "progress", step: "诊断完成", current: 1, total: 1 });
       emit({ type: "result", data: result });

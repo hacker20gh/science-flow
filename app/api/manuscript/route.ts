@@ -23,16 +23,18 @@ export async function POST(req: NextRequest) {
       });
 
       // 单次 LLM 调用生成全部章节
-      // tool_use 强制输出结构化 JSON，无法逐章节流式
-      // 但通过 progress 事件让用户知道正在处理
-      const manuscript = await generateManuscript({
-        projectName,
-        hypothesis,
-        matrixSummary: matrixSummary || "",
-        papers: papers || [],
-        experiments: experiments || [],
-        section: section || "all",
-      });
+      // tool_use 强制输出结构化 JSON，通过 onToken 回调实现真流式
+      const manuscript = await generateManuscript(
+        {
+          projectName,
+          hypothesis,
+          matrixSummary: matrixSummary || "",
+          papers: papers || [],
+          experiments: experiments || [],
+          section: section || "all",
+        },
+        emit,
+      );
 
       // 逐章节 emit 进度 + 结果
       const sectionNames = ["abstract", "introduction", "methods", "results", "discussion"] as const;

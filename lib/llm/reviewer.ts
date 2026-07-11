@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
+import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
 
 export interface ReviewerComment {
   section: string;
@@ -58,10 +59,13 @@ const REVIEW_TOOL = createToolFromSchema(
   ReviewSimulationSchema,
 );
 
-export async function simulateReview(params: {
-  manuscript: { abstract?: string; introduction?: string; methods?: string; results?: string; discussion?: string };
-  journal?: string;
-}): Promise<ReviewSimulation> {
+export async function simulateReview(
+  params: {
+    manuscript: { abstract?: string; introduction?: string; methods?: string; results?: string; discussion?: string };
+    journal?: string;
+  },
+  onToken?: (event: SSEEvent) => void,
+): Promise<ReviewSimulation> {
   return withLLMRetry(async () => {
     const client = getLLMClient();
     const sections = Object.entries(params.manuscript)
@@ -82,25 +86,42 @@ Rules:
 - When pointing out issues, you MUST quote specific paragraphs or sentences from the manuscript
 - Do not give vague suggestions. Each suggestion must be concrete and actionable`;
 
-    const response = await client.messages.create({
+    const llmParams = {
       model: MODELS.analysis,
       max_tokens: 8192,
       system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
+      messages: [{ role: "user" as const, content: userMessage }],
       tools: [REVIEW_TOOL],
-      tool_choice: { type: "tool", name: "generate_review" },
-    });
+      tool_choice: { type: "tool" as const, name: "generate_review" },
+    };
 
-    return await extractStructuredOutput(response, ReviewSimulationSchema, {
-      label: "reviewer",
-      retryFn: createRetryFunction(client, {
-        model: MODELS.analysis,
-        maxTokens: 8192,
-        system: systemPrompt,
-        userMessage,
-        originalContent: userMessage,
-        schema: ReviewSimulationSchema,
-      }),
-    });
+    let review: ReviewSimulation;
+
+    if (onToken) {
+      // 真流式：逐 token 发送
+      const { toolUseBlocks } = await streamLLMWithToolUse(client, llmParams, onToken);
+      const toolResult = toolUseBlocks.find((t) => t.name === "generate_review");
+      if (toolResult) {
+        review = ReviewSimulationSchema.parse(toolResult.input);
+      } else {
+        throw new Error("No tool_use block in streaming response");
+      }
+    } else {
+      // 阻塞式
+      const response = await client.messages.create(llmParams);
+      review = await extractStructuredOutput(response, ReviewSimulationSchema, {
+        label: "reviewer",
+        retryFn: createRetryFunction(client, {
+          model: MODELS.analysis,
+          maxTokens: 8192,
+          system: systemPrompt,
+          userMessage,
+          originalContent: userMessage,
+          schema: ReviewSimulationSchema,
+        }),
+      });
+    }
+
+    return review;
   }, { label: "reviewer" });
 }

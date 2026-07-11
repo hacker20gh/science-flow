@@ -30,11 +30,10 @@ export async function POST(req: NextRequest) {
       total: 2,
     });
 
-    const result = await analyzeData({
-      dataDescription: summary,
-      rawData: csvData,
-      experimentContext,
-    });
+    const result = await analyzeData(
+      { dataDescription: summary, rawData: csvData, experimentContext },
+      emit,
+    );
 
     emit({ type: "result", data: result });
   });

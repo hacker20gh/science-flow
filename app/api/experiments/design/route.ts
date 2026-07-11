@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
         matrixSummary: matrixSummary || "暂无矩阵数据",
         existingExperiments: existingExperiments || [],
         gapOrConflict,
-      });
+      }, emit); // 传入 emit 实现真流式
 
       emit({ type: "progress", step: "实验设计完成", current: 1, total: 1 });
       emit({ type: "result", data: design });
