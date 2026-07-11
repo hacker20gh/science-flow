@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { PapersSkeleton } from "@/components/skeletons";
 import { toast } from "sonner";
+import { exportToBibtex, exportToRis, downloadFile } from "@/lib/export";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -176,6 +177,29 @@ export default function PapersPage() {
 
   function clearSelection() {
     setSelected(new Set());
+  }
+
+  function exportSelectedBibtex() {
+    const selectedPapers = papers.filter((p) => selected.has(p.id));
+    if (selectedPapers.length === 0) return;
+    const bibtex = exportToBibtex(selectedPapers);
+    downloadFile(bibtex, "references.bib", "application/x-bibtex");
+    toast.success(`已导出 ${selectedPapers.length} 篇文献的 BibTeX`);
+  }
+
+  function exportAllBibtex() {
+    if (filteredPapers.length === 0) return;
+    const bibtex = exportToBibtex(filteredPapers);
+    downloadFile(bibtex, "references.bib", "application/x-bibtex");
+    toast.success(`已导出 ${filteredPapers.length} 篇文献的 BibTeX`);
+  }
+
+  function exportSelectedRis() {
+    const selectedPapers = papers.filter((p) => selected.has(p.id));
+    if (selectedPapers.length === 0) return;
+    const ris = exportToRis(selectedPapers);
+    downloadFile(ris, "references.ris", "application/x-research-info-systems");
+    toast.success(`已导出 ${selectedPapers.length} 篇文献的 RIS`);
   }
 
   async function batchExtract() {
@@ -376,6 +400,22 @@ export default function PapersPage() {
           </button>
           <button onClick={selectAll} className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50">全选</button>
           <button onClick={clearSelection} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700">取消</button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={exportSelectedBibtex}
+              className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-50 flex items-center gap-1"
+            >
+              <Download size={12} />
+              导出 BibTeX
+            </button>
+            <button
+              onClick={exportSelectedRis}
+              className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-50 flex items-center gap-1"
+            >
+              <Download size={12} />
+              导出 RIS
+            </button>
+          </div>
         </div>
       )}
 
@@ -427,12 +467,20 @@ export default function PapersPage() {
 
       {/* 底部操作 */}
       {!loading && papers.length > 0 && selected.size === 0 && (
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex justify-center items-center gap-4">
           <button
             onClick={selectAll}
             className="text-sm text-blue-600 hover:text-blue-800"
           >
             全选 {filteredPapers.length} 篇文献
+          </button>
+          <span className="text-gray-300">|</span>
+          <button
+            onClick={exportAllBibtex}
+            className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
+          >
+            <Download size={14} />
+            导出全部 BibTeX
           </button>
         </div>
       )}
@@ -532,7 +580,13 @@ function PaperCard({
         />
 
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onToggle}>
-          <h3 className="font-medium text-sm leading-snug">{paper.title}</h3>
+          <Link
+            href={`/project/${projectId}/papers/${paper.id}`}
+            className="font-medium text-sm leading-snug hover:text-blue-600 transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {paper.title}
+          </Link>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-gray-500">
             {paper.authors.length > 0 && (
               <span>{paper.authors.slice(0, 3).join(", ")}{paper.authors.length > 3 ? " et al." : ""}</span>

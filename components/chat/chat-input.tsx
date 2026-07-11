@@ -35,7 +35,7 @@ export function ChatInput({ input, isStreaming, onInputChange, onSend, onStop, a
     if (file && file.type === "application/pdf") {
       onFileSelect?.(file);
     } else if (file) {
-      alert("只支持 PDF 文件");
+      toast.error("只支持 PDF 文件");
     }
   }
 

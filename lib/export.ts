@@ -127,6 +127,68 @@ export function exportMatrixToLatex(matrix: MatrixData): string {
   return latex;
 }
 
+// ===== BibTeX 导出 =====
+
+interface BibTexPaper {
+  title: string;
+  authors: string[];
+  journal?: string | null;
+  year?: number | null;
+  doi?: string | null;
+  pmid?: string | null;
+}
+
+function makeBibtexKey(paper: BibTexPaper): string {
+  const firstAuthor = paper.authors[0] || "unknown";
+  // Extract last name: handle "Last, First", "First Last", or single name
+  const lastName = firstAuthor.includes(",")
+    ? firstAuthor.split(",")[0].trim().replace(/\s+/g, "")
+    : firstAuthor.trim().split(/\s+/).pop()?.replace(/[^a-zA-Z]/g, "") || "unknown";
+  const year = paper.year || "0000";
+  return `${lastName.toLowerCase()}${year}`;
+}
+
+export function exportToBibtex(papers: BibTexPaper[]): string {
+  const entries = papers.map((paper) => {
+    const key = makeBibtexKey(paper);
+    const authorStr = paper.authors.join(" and ");
+    const fields: string[] = [];
+
+    fields.push(`  title = {${paper.title}}`);
+    fields.push(`  author = {${authorStr}}`);
+    if (paper.journal) fields.push(`  journal = {${paper.journal}}`);
+    if (paper.year) fields.push(`  year = {${paper.year}}`);
+    if (paper.doi) fields.push(`  doi = {${paper.doi}}`);
+    if (paper.pmid) fields.push(`  pmid = {${paper.pmid}}`);
+
+    return `@article{${key},\n${fields.join(",\n")}\n}`;
+  });
+
+  return entries.join("\n\n") + "\n";
+}
+
+// ===== RIS 导出 =====
+
+export function exportToRis(papers: BibTexPaper[]): string {
+  const entries = papers.map((paper) => {
+    const lines: string[] = ["TY  - JOUR"];
+
+    lines.push(`TI  - ${paper.title}`);
+    for (const author of paper.authors) {
+      lines.push(`AU  - ${author}`);
+    }
+    if (paper.journal) lines.push(`JO  - ${paper.journal}`);
+    if (paper.year) lines.push(`PY  - ${paper.year}`);
+    if (paper.doi) lines.push(`DO  - ${paper.doi}`);
+    if (paper.pmid) lines.push(`AN  - ${paper.pmid}`);
+
+    lines.push("ER  - ");
+    return lines.join("\n");
+  });
+
+  return entries.join("\n\n") + "\n";
+}
+
 // ===== Word 导出 =====
 
 export async function exportManuscriptToWord(sections: Record<string, string | undefined>): Promise<Blob> {
