@@ -393,7 +393,7 @@ export default function BrainPage() {
             </button>
           </div>
         </div>
-        <MechanismMatrix data={matrixData} />
+        <MechanismMatrix projectId={projectId} data={matrixData} />
       </section>
 
       {/* 假设追踪器 */}

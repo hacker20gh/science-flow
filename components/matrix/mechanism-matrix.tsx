@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { GitBranch, Activity, AlertTriangle } from "lucide-react";
 import type {
   MatrixData,
@@ -8,30 +8,80 @@ import type {
   MatrixColumn,
   MatrixCell,
 } from "@/lib/matrix/generator";
+import { CellEditor } from "./cell-editor";
 
 interface MechanismMatrixProps {
+  projectId: string;
   data: MatrixData;
   onCellClick?: (row: MatrixRow, column: MatrixColumn, cell: MatrixCell) => void;
+  onMatrixUpdate?: (data: MatrixData) => void;
 }
 
-export function MechanismMatrix({ data, onCellClick }: MechanismMatrixProps) {
-  const [selectedCell, setSelectedCell] = useState<{
+export function MechanismMatrix({ projectId, data: initialData, onCellClick, onMatrixUpdate }: MechanismMatrixProps) {
+  const [editingCell, setEditingCell] = useState<{
     row: MatrixRow;
     col: MatrixColumn;
     cell: MatrixCell;
+    anchorRect: DOMRect | null;
   } | null>(null);
 
   const [filterType, setFilterType] = useState<"all" | "pathway" | "phenotype">("all");
+  const [data, setData] = useState<MatrixData>(initialData);
+
+  const handleSaveCell = useCallback(
+    async (updatedProps: Partial<MatrixCell>) => {
+      if (!editingCell) return;
+      const { row, col } = editingCell;
+
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/matrix/cells`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rowId: row.id,
+            columnId: col.id,
+            direction: updatedProps.direction,
+            significance: updatedProps.significance,
+            note: updatedProps.detail,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "保存失败" }));
+          throw new Error(err.error ?? "保存失败");
+        }
+
+        const { cell: savedCell } = await res.json();
+
+        // Update local matrix data
+        setData((prev) => {
+          const updated = { ...prev };
+          updated.rows = prev.rows.map((r) => {
+            if (r.id !== row.id) return r;
+            return { ...r, cells: { ...r.cells, [col.id]: savedCell } };
+          });
+          onMatrixUpdate?.(updated);
+          return updated;
+        });
+      } catch (err) {
+        console.error("Cell save failed:", err);
+      } finally {
+        setEditingCell(null);
+      }
+    },
+    [editingCell, projectId, onMatrixUpdate]
+  );
 
   const visibleColumns =
     filterType === "all"
       ? data.columns
       : data.columns.filter((c) => c.type === filterType);
 
-  function handleCellClick(row: MatrixRow, col: MatrixColumn) {
+  function handleCellClick(row: MatrixRow, col: MatrixColumn, tdEl: HTMLTableCellElement) {
     const cell = row.cells[col.id];
     if (!cell) return;
-    setSelectedCell({ row, col, cell });
+    const rect = tdEl.getBoundingClientRect();
+    setEditingCell({ row, col, cell, anchorRect: rect });
     onCellClick?.(row, col, cell);
   }
 
@@ -142,7 +192,7 @@ export function MechanismMatrix({ data, onCellClick }: MechanismMatrixProps) {
                   return (
                     <td
                       key={col.id}
-                      onClick={() => cell && handleCellClick(row, col)}
+                      onClick={(e) => cell && handleCellClick(row, col, e.currentTarget)}
                       className={`px-3 py-2 text-center ${
                         cell
                           ? "cursor-pointer hover:bg-blue-50"
@@ -182,72 +232,16 @@ export function MechanismMatrix({ data, onCellClick }: MechanismMatrixProps) {
         </table>
       </div>
 
-      {/* 单元格详情弹窗 */}
-      {selectedCell && (
-        <div
-          className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
-          onClick={() => setSelectedCell(null)}
-        >
-          <div
-            className="bg-white rounded-xl shadow-lg max-w-lg w-full mx-4 p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold">
-                {selectedCell.col.label}
-              </h3>
-              <button
-                onClick={() => setSelectedCell(null)}
-                className="text-gray-400 hover:text-gray-600 text-lg"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <div>
-                <span className="text-gray-500">文献：</span>
-                <span className="font-medium">{selectedCell.row.paperTitle}</span>
-              </div>
-              <div>
-                <span className="text-gray-500">实验条件：</span>
-                <span>
-                  {selectedCell.row.drugConc} · {selectedCell.row.cellLine}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">变化方向：</span>
-                <span
-                  className={
-                    selectedCell.cell.direction === "up"
-                      ? "text-green-600 font-medium"
-                      : selectedCell.cell.direction === "down"
-                        ? "text-red-600 font-medium"
-                        : "text-gray-500"
-                  }
-                >
-                  {selectedCell.cell.direction === "up"
-                    ? "↑ 上调"
-                    : selectedCell.cell.direction === "down"
-                      ? "↓ 下调"
-                      : "— 无显著变化"}
-                </span>
-              </div>
-              {selectedCell.cell.detail && (
-                <div>
-                  <span className="text-gray-500">详情：</span>
-                  <span>{selectedCell.cell.detail}</span>
-                </div>
-              )}
-              <div className="border-t border-gray-100 pt-3">
-                <span className="text-gray-500">原文引用：</span>
-                <blockquote className="mt-1 pl-3 border-l-2 border-gray-200 text-gray-600 italic text-xs">
-                  &ldquo;{selectedCell.cell.evidenceQuote}&rdquo;
-                </blockquote>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* 单元格内联编辑器 */}
+      {editingCell && (
+        <CellEditor
+          cell={editingCell.cell}
+          row={editingCell.row}
+          column={editingCell.col}
+          anchorRect={editingCell.anchorRect}
+          onSave={handleSaveCell}
+          onClose={() => setEditingCell(null)}
+        />
       )}
     </div>
   );
