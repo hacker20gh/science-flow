@@ -320,7 +320,7 @@ export default function ProjectPaperSearchPage() {
         </div>
         <div className="flex items-center gap-2">
           <a
-            href="brain"
+            href={`/project/${projectId}/brain`}
             className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1.5"
           >
             <Brain size={14} />
@@ -539,7 +539,7 @@ export default function ProjectPaperSearchPage() {
 
           <div className="mt-6 flex gap-3">
             <a
-              href="brain"
+              href={`/project/${projectId}/brain`}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1.5"
             >
               <Brain size={16} />

@@ -4,6 +4,16 @@ import { useState, useRef, useEffect } from "react";
 import { CheckCircle, AlertTriangle, Pencil, Trash2, ChevronDown } from "lucide-react";
 import { HypothesisStatusBadge, STATUS_CONFIG } from "./hypothesis-status-badge";
 import { calculateHypothesisStrength } from "@/lib/assistant/process-assistant";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface HypothesisCardProps {
   hypothesis: {
@@ -29,6 +39,7 @@ export function HypothesisCard({
   onEdit,
 }: HypothesisCardProps) {
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const evidence = (hypothesis.evidence as {
@@ -65,12 +76,16 @@ export function HypothesisCard({
   };
 
   const handleDelete = () => {
-    if (window.confirm(`确定删除假设「${hypothesis.statement.slice(0, 40)}...」？`)) {
-      onDelete(hypothesis.id);
-    }
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = () => {
+    setShowDeleteConfirm(false);
+    onDelete(hypothesis.id);
   };
 
   return (
+    <>
     <div className="bg-white border border-gray-200 rounded-xl p-6">
       <div className="flex items-start justify-between">
         <div className="flex-1">
@@ -208,5 +223,23 @@ export function HypothesisCard({
         </div>
       </div>
     </div>
+
+    <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除假设</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除假设「{hypothesis.statement.slice(0, 40)}{hypothesis.statement.length > 40 ? "..." : ""}」？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+            删除
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

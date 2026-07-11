@@ -107,7 +107,7 @@ export default function ExperimentsPage() {
           </p>
         </div>
         <a
-          href="experiments/troubleshoot"
+          href={`/project/${projectId}/experiments/troubleshoot`}
           className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
         >
           🔬 实验排障

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { toast } from "sonner";
 
 interface ChatInputProps {
   input: string;
@@ -18,7 +19,7 @@ export function ChatInput({ input, isStreaming, onInputChange, onSend, onStop, a
     const file = e.target.files?.[0] ?? null;
     if (file) {
       if (file.type !== "application/pdf") {
-        alert("只支持 PDF 文件");
+        toast.error("只支持 PDF 文件");
         return;
       }
       onFileSelect?.(file);
