@@ -18,6 +18,11 @@ interface ChatRequest {
     hypotheses: string[];
   };
   projectId?: string;
+  attachment?: {
+    name: string;
+    data: string; // base64
+    type: string; // MIME type
+  };
 }
 
 // 最多执行 N 轮工具调用，防止无限循环
@@ -25,10 +30,24 @@ const MAX_TOOL_ROUNDS = 5;
 
 export async function POST(req: NextRequest) {
   const body: ChatRequest = await req.json();
-  const { messages, projectContext, projectId } = body;
+  const { messages, projectContext, projectId, attachment } = body;
 
   if (!messages || messages.length === 0) {
     return new Response(JSON.stringify({ error: "messages required" }), { status: 400 });
+  }
+
+  // Parse PDF attachment if present
+  let attachmentContext = "";
+  if (attachment?.data && attachment?.type === "application/pdf") {
+    try {
+      const pdfParse = (await import("pdf-parse-new")).default;
+      const buffer = Buffer.from(attachment.data, "base64");
+      const pdfData = await pdfParse(buffer);
+      attachmentContext = `\n\n## 用户上传的PDF文件: ${attachment.name}\n\n${pdfData.text.slice(0, 10000)}`;
+    } catch (e) {
+      console.warn("[chat] PDF parse failed:", e);
+      attachmentContext = `\n\n## 用户上传了文件: ${attachment.name}（PDF 解析失败）`;
+    }
   }
 
   const session = await auth().catch(() => null);
@@ -45,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const systemPrompt = buildSystemPrompt(richContext || undefined, projectContext);
+  const systemPrompt = buildSystemPrompt(richContext || undefined, projectContext) + attachmentContext;
 
   // Token 预算管理
   const MESSAGE_BUDGET = 50_000;

@@ -16,6 +16,8 @@ interface MessageListProps {
   onScroll: () => void;
   onScrollToBottom: () => void;
   onSendMessage: (text: string) => void;
+  onRegenerate?: () => void;
+  onEdit?: (index: number, newContent: string) => void;
 }
 
 export function MessageList({
@@ -32,6 +34,8 @@ export function MessageList({
   onScroll,
   onScrollToBottom,
   onSendMessage,
+  onRegenerate,
+  onEdit,
 }: MessageListProps) {
   const displayMessages = searchQuery ? filteredMessages : messages;
 
@@ -63,6 +67,8 @@ export function MessageList({
             isLast={i === messages.length - 1}
             isStreaming={isStreaming}
             searchQuery={searchQuery}
+            onRegenerate={onRegenerate}
+            onEdit={onEdit}
           />
         ))}
 

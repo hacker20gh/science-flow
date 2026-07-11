@@ -25,6 +25,7 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
   const [showSearch, setShowSearch] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [pendingToolResults, setPendingToolResults] = useState<ToolResultData[]>([]);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -99,7 +100,7 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
   }, [panelWidth]);
 
   // 发送消息
-  async function sendMessage(text?: string) {
+  async function sendMessage(text?: string, fileData?: { name: string; data: string; type: string } | null) {
     const content = (text || input).trim();
     if (!content || isStreaming) return;
 
@@ -110,6 +111,9 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
     setIsStreaming(true);
     setPendingToolResults([]);
 
+    // Clear attached file after sending
+    if (fileData) setAttachedFile(null);
+
     const abortController = new AbortController();
     abortRef.current = abortController;
 
@@ -117,7 +121,7 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages, projectContext, projectId }),
+        body: JSON.stringify({ messages: newMessages, projectContext, projectId, attachment: fileData || undefined }),
         signal: abortController.signal,
       });
 
@@ -211,6 +215,34 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
     }
   }
 
+  // 重新生成最后一条助手回复
+  function handleRegenerate() {
+    if (isStreaming) return;
+    // Find the last user message
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx === -1) return;
+    const userContent = messages[lastUserIdx].content;
+    // Remove everything after (and including) the last user message, then resend
+    const truncated = messages.slice(0, lastUserIdx);
+    setMessages(truncated);
+    setTimeout(() => sendMessage(userContent), 100);
+  }
+
+  // 编辑消息并重新发送
+  function handleEditMessage(index: number, newContent: string) {
+    if (isStreaming) return;
+    // Keep messages up to (but not including) the edited message, then resend with new content
+    const truncated = messages.slice(0, index);
+    setMessages(truncated);
+    setTimeout(() => sendMessage(newContent), 100);
+  }
+
   // 搜索过滤
   const filteredMessages = useMemo(() => {
     if (!searchQuery.trim()) return messages;
@@ -295,6 +327,8 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
         onScroll={handleScroll}
         onScrollToBottom={scrollToBottom}
         onSendMessage={(text) => sendMessage(text)}
+        onRegenerate={handleRegenerate}
+        onEdit={handleEditMessage}
       />
 
       {/* Input */}
@@ -302,8 +336,20 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
         input={input}
         isStreaming={isStreaming}
         onInputChange={setInput}
-        onSend={() => sendMessage()}
+        onSend={async () => {
+          let fileData: { name: string; data: string; type: string } | null = null;
+          if (attachedFile) {
+            const buffer = await attachedFile.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = "";
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            fileData = { name: attachedFile.name, data: btoa(binary), type: attachedFile.type };
+          }
+          sendMessage(undefined, fileData);
+        }}
         onStop={stopStreaming}
+        attachedFile={attachedFile}
+        onFileSelect={setAttachedFile}
       />
 
       {/* Markdown 样式 */}
