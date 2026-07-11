@@ -70,6 +70,8 @@ export async function POST(req: NextRequest) {
         }));
 
         let toolRound = 0;
+        // Collect all tool calls across rounds for persistence
+        const collectedToolCalls: Array<{ name: string; input: Record<string, unknown>; output: string }> = [];
 
         // 工具调用循环
         while (toolRound < MAX_TOOL_ROUNDS) {
@@ -138,6 +140,11 @@ export async function POST(req: NextRequest) {
 
             for (let i = 0; i < toolCalls.length; i++) {
               emit({ type: "tool_result", tool: toolCalls[i].name, result: JSON.parse(toolResults[i].result), status: "done" });
+              collectedToolCalls.push({
+                name: toolCalls[i].name,
+                input: toolCalls[i].input,
+                output: toolResults[i].result,
+              });
             }
 
             const assistantMessage = { role: "assistant" as const, content: [
@@ -166,9 +173,14 @@ export async function POST(req: NextRequest) {
 
         // 保存消息到 DB
         if (projectId && userId && fullAssistantText) {
-          saveMessages(projectId, userId, messages[messages.length - 1]?.content, fullAssistantText).catch(
-            (e) => console.warn("[chat] Failed to save messages:", e)
-          );
+          saveMessages(
+            projectId,
+            userId,
+            messages[messages.length - 1]?.content,
+            fullAssistantText,
+            collectedToolCalls.length > 0 ? collectedToolCalls : undefined,
+            MODELS.chat
+          ).catch((e) => console.warn("[chat] Failed to save messages:", e));
         }
       } catch (error) {
         console.error("Chat error:", error);
@@ -191,13 +203,28 @@ async function saveMessages(
   projectId: string,
   userId: string,
   userContent: string | undefined,
-  assistantContent: string
+  assistantContent: string,
+  toolCalls?: Array<{ name: string; input: Record<string, unknown>; output: string }>,
+  modelName?: string
 ) {
   if (!prisma) return;
   try {
-    const data: Array<{ projectId: string; userId: string; role: string; content: string }> = [];
-    if (userContent) data.push({ projectId, userId, role: "user", content: userContent });
-    data.push({ projectId, userId, role: "assistant", content: assistantContent });
+    const userData = userContent
+      ? { projectId, userId, role: "user" as string, content: userContent }
+      : null;
+    const assistantData: Record<string, unknown> = {
+      projectId,
+      userId,
+      role: "assistant",
+      content: assistantContent,
+    };
+    if (toolCalls && toolCalls.length > 0) {
+      assistantData.metadata = {
+        tools: toolCalls,
+        model: modelName,
+      };
+    }
+    const data = userData ? [userData, assistantData] : [assistantData];
     await prisma.chatMessage.createMany({ data });
   } catch (e) {
     console.error("[chat] saveMessages error:", e);
