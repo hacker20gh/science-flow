@@ -5,6 +5,7 @@
  */
 
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { ExperimentResult } from "@/lib/llm/extraction";
 import type { MatrixData } from "@/lib/matrix/generator";
 import { generateMatrix } from "@/lib/matrix/generator";
@@ -75,11 +76,13 @@ interface ProjectState {
 
 // ===== Store =====
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
-  projectId: null,
-  papers: [],
-  matrix: null,
-  timeline: [],
+export const useProjectStore = create<ProjectState>()(
+  persist(
+    (set, get) => ({
+      projectId: null,
+      papers: [],
+      matrix: null,
+      timeline: [],
 
   // ===== 项目操作 =====
 
@@ -154,7 +157,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 有 projectId 时清空 DB 中的矩阵
       if (projectId) {
         fetch(`/api/projects/${projectId}/matrix`, { method: "DELETE" }).catch(
-          () => {}
+          (err) => {
+            console.error("[ProjectStore] Failed to delete matrix from DB:", err);
+          }
         );
       }
       return;
@@ -177,7 +182,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: matrix }),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error("[ProjectStore] Failed to persist matrix:", err);
+        // Note: cannot use toast here (outside React component). UI layer should handle.
+      });
     }
   },
 
@@ -199,4 +207,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loadDemoTimeline: () => {
     set({ timeline: getDemoEvents() });
   },
-}));
+}),
+    {
+      name: "sciflow-project-store",
+      // 只持久化 papers、matrix、timeline，不持久化 projectId（来自 URL）
+      partialize: (state) => ({
+        papers: state.papers,
+        matrix: state.matrix,
+        timeline: state.timeline,
+      }),
+    }
+  )
+);

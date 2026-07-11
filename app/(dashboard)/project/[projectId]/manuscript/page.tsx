@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useProjectStore } from "@/store/project-store";
 import { exportManuscriptToLatex, exportManuscriptToWord, downloadFile } from "@/lib/export";
-import { consumeSSEStream } from "@/lib/llm/streaming";
+import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import type { ManuscriptDraft } from "@/lib/llm/manuscript";
 import type { ReviewSimulation } from "@/lib/llm/reviewer";
 import CitationPanel from "@/components/manuscript/citation-panel";
@@ -44,7 +44,9 @@ export default function ManuscriptPage() {
           setHypothesis(d.project.hypotheses?.[0]?.statement || "");
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[Manuscript] Failed to load project info:", err);
+      });
   }, [projectId]);
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -59,9 +61,118 @@ export default function ManuscriptPage() {
   const [editContent, setEditContent] = useState("");
   const [showCitationPanel, setShowCitationPanel] = useState(true);
 
+  // Auto-save refs
+  const manuscriptIdRef = useRef<string | null>(null);
+  const latestDraftRef = useRef<ManuscriptDraft | null>(null);
+  const isRestoringRef = useRef(false);
+  const restoredRef = useRef(false);
+  const skippingFirstAutoSaveRef = useRef(true);
+  const [isRestoring, setIsRestoring] = useState(true);
+
   const extractedPapers = papers.filter(
     (p) => p.extractionStatus === "done" && p.experiments.length > 0
   );
+
+  // --- Auto-save logic ---
+
+  const saveDraft = useCallback(
+    async (draftToSave: ManuscriptDraft) => {
+      if (isRestoringRef.current) return;
+      const sections: Record<string, string> = {};
+      const meta: Record<string, unknown> = {};
+      for (const key of ["abstract", "introduction", "methods", "results", "discussion"] as const) {
+        const s = draftToSave[key as keyof ManuscriptDraft];
+        if (s) {
+          sections[key] = s.content;
+          meta[key] = { word_count: s.word_count, citations: s.citations, notes: s.notes };
+        }
+      }
+      try {
+        const url = `/api/projects/${projectId}/manuscripts`;
+        const isUpdate = !!manuscriptIdRef.current;
+        const res = await fetch(url, {
+          method: isUpdate ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            isUpdate
+              ? { manuscriptId: manuscriptIdRef.current, ...sections, references: meta }
+              : { ...sections, references: meta }
+          ),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.manuscript?.id) manuscriptIdRef.current = data.manuscript.id;
+        }
+      } catch {
+        // Silent fail for auto-save
+      }
+    },
+    [projectId]
+  );
+
+  const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  latestDraftRef.current = draft;
+
+  // Auto-save on draft change (debounced)
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    if (skippingFirstAutoSaveRef.current) {
+      skippingFirstAutoSaveRef.current = false;
+      return;
+    }
+    if (debouncedSaveRef.current) clearTimeout(debouncedSaveRef.current);
+    debouncedSaveRef.current = setTimeout(() => {
+      if (latestDraftRef.current) saveDraft(latestDraftRef.current);
+    }, 2000);
+    return () => {
+      if (debouncedSaveRef.current) clearTimeout(debouncedSaveRef.current);
+    };
+  }, [draft, saveDraft]);
+
+  // Restore draft from DB on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/manuscripts`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const ms = data.manuscripts;
+        if (!ms?.length) return;
+        const latest = ms[0];
+        manuscriptIdRef.current = latest.id;
+        isRestoringRef.current = true;
+        const restored: ManuscriptDraft = {} as ManuscriptDraft;
+        let meta: Record<string, Record<string, unknown>> = {};
+        try { meta = latest.references ? JSON.parse(JSON.stringify(latest.references)) : {}; } catch { /* ignore */ }
+        for (const key of ["abstract", "introduction", "methods", "results", "discussion"] as const) {
+          const content = latest[key] as string | null;
+          if (content) {
+            const m = (meta[key] || {}) as Record<string, unknown>;
+            (restored as any)[key] = {
+              section: key,
+              content,
+              word_count: (m.word_count as number) || content.split(/\s+/).filter(Boolean).length,
+              citations: (m.citations as string[]) || [],
+              notes: (m.notes as string[]) || [],
+            };
+          }
+        }
+        if (Object.keys(restored).length > 0) {
+          setDraft(restored as ManuscriptDraft);
+          setActiveSection(restored.abstract ? "abstract" : Object.keys(restored)[0]);
+        }
+      } catch { /* ignore */ }
+      finally {
+        if (!cancelled) {
+          isRestoringRef.current = false;
+          restoredRef.current = true;
+          setIsRestoring(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   async function handleGenerate(section: string) {
     setIsGenerating(true);
@@ -115,12 +226,15 @@ export default function ManuscriptPage() {
         const newDraft = data as ManuscriptDraft;
         if (section !== "all" && draft) {
           // Only update the target section, keep others unchanged
-          setDraft({
+          const merged = {
             ...draft,
             [section]: newDraft[section as keyof ManuscriptDraft],
-          });
+          };
+          setDraft(merged);
+          saveDraft(merged);
         } else {
           setDraft(newDraft);
+          saveDraft(newDraft);
         }
         setActiveSection(section === "all" ? "abstract" : section);
         setIsGenerating(false);
@@ -290,6 +404,14 @@ export default function ManuscriptPage() {
         <p>📊 机制矩阵：{matrix ? `${matrix.columns.length} 个维度` : "暂无"}</p>
       </div>
 
+      {/* Restoring from DB */}
+      {isRestoring && (
+        <div className="text-center py-12 space-y-3">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-600" />
+          <p className="text-sm text-gray-500">正在恢复草稿...</p>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
           ⚠️ {error}
@@ -297,7 +419,7 @@ export default function ManuscriptPage() {
       )}
 
       {/* 生成按钮 */}
-      {!draft && !isGenerating && (
+      {!draft && !isGenerating && !isRestoring && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {SECTIONS.map((s) => (

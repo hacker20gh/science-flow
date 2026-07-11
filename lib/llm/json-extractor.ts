@@ -196,6 +196,7 @@ export function createRetryFunction(
     userMessage: string;
     originalContent: string | unknown[];
     schema?: z.ZodSchema;
+    feature?: string;
   }
 ): () => Promise<unknown> {
   return async () => {
@@ -222,12 +223,14 @@ export function createRetryFunction(
       content: `Return ONLY a valid JSON object matching the required schema. No text before or after. No markdown code blocks. No explanations.${exampleJSON}`,
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response = await client.messages.create({
       model: params.model,
       max_tokens: params.maxTokens,
       system: params.system + "\n\nIMPORTANT: Return ONLY a valid JSON object. No text before or after. No markdown code blocks. The JSON MUST match the schema exactly.",
       messages,
-    });
+      ...(params.feature ? { _sciflowFeature: params.feature } : {}),
+    } as any) as Message;
     return response;
   };
 }

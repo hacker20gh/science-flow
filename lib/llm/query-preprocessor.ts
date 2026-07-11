@@ -19,7 +19,24 @@ export interface ProcessedQuery {
   meshTerms: string[];
   searchIntent: string;
   suggestedRefinements: string[];
+  /** 长文本拆分后的子查询（每个子查询覆盖一个独立的研究方面） */
+  subQueries?: SubQuery[];
 }
+
+export interface SubQuery {
+  /** 子查询的简短标签，如 "耐药机制"、"PD-1 联合治疗" */
+  label: string;
+  pubmedQuery: string;
+  s2Query: string;
+  openAlexQuery: string;
+}
+
+const SubQuerySchema = z.object({
+  label: z.string(),
+  pubmedQuery: z.string(),
+  s2Query: z.string(),
+  openAlexQuery: z.string(),
+});
 
 const ProcessedQuerySchema = z.object({
   optimizedQuery: z.string(),
@@ -29,11 +46,23 @@ const ProcessedQuerySchema = z.object({
   meshTerms: z.array(z.string()),
   searchIntent: z.string(),
   suggestedRefinements: z.array(z.string()),
+  subQueries: z.array(SubQuerySchema).optional(),
 });
 
-// 10 分钟 TTL 缓存
+// 10 分钟 TTL 缓存，带自动清理
 const queryCache = new Map<string, { result: ProcessedQuery; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
+
+// 每 5 分钟清理过期缓存（HMR-safe 防止重复注册）
+const gQuery = globalThis as unknown as { __queryCacheCleanup?: ReturnType<typeof setInterval> };
+if (!gQuery.__queryCacheCleanup) {
+  gQuery.__queryCacheCleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of queryCache) {
+      if (now - entry.ts >= CACHE_TTL) queryCache.delete(key);
+    }
+  }, 5 * 60 * 1000);
+}
 
 const PREPROCESS_PROMPT = `You are a biomedical literature search expert. Convert the user's research query into optimized search strategies for PubMed, Semantic Scholar, and OpenAlex.
 
@@ -44,6 +73,20 @@ RULES:
 - openAlexQuery: natural language terms with concepts.
 - meshTerms: relevant MeSH descriptors in English.
 - searchIntent / suggestedRefinements: use the same language as the input.
+
+SUB-QUERY SPLITTING (IMPORTANT):
+- If the input is a long paragraph, passage, or contains MULTIPLE distinct research aspects/questions, split it into 2-3 focused sub-queries.
+- Each sub-query should cover ONE distinct aspect (e.g., "drug resistance mechanism", "PD-1 combination therapy", "immune cell infiltration").
+- Each sub-query has its own label (short Chinese description), pubmedQuery, s2Query, openAlexQuery.
+- If the input is short or focused on a single topic, subQueries should be an empty array [].
+- The top-level pubmedQuery/s2Query/openAlexQuery should still be a COMBINED query covering the main theme.
+
+Example: Input about "sorafenib resistance in HCC via tumor microenvironment and immune infiltration, also PD-1 combination"
+→ subQueries: [
+    { label: "sorafenib 耐药机制", pubmedQuery: "...", s2Query: "...", openAlexQuery: "..." },
+    { label: "肿瘤微环境与免疫浸润", pubmedQuery: "...", s2Query: "...", openAlexQuery: "..." },
+    { label: "PD-1 联合治疗", pubmedQuery: "...", s2Query: "...", openAlexQuery: "..." }
+  ]
 
 Return ONLY a valid JSON object. No markdown, no explanation.`;
 
@@ -58,12 +101,14 @@ export async function preprocessQuery(userInput: string): Promise<ProcessedQuery
   try {
     const result = await withLLMRetry(async () => {
       const client = getLLMClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await client.messages.create({
         model: MODELS.extraction,
-        max_tokens: 1024,
+        max_tokens: 2048,
         system: PREPROCESS_PROMPT,
         messages: [{ role: "user", content: userInput }],
-      });
+        _sciflowFeature: "preprocess",
+      } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
 
       return await extractStructuredOutput(response, ProcessedQuerySchema, {
         label: "query-preprocess",
@@ -74,6 +119,7 @@ export async function preprocessQuery(userInput: string): Promise<ProcessedQuery
           userMessage: userInput,
           originalContent: userInput,
           schema: ProcessedQuerySchema,
+          feature: "preprocess",
         }),
       });
     }, { label: "query-preprocess", maxRetries: 1 });
@@ -112,6 +158,25 @@ function fallbackProcess(userInput: string): ProcessedQuery {
     meshTerms: [],
     searchIntent: userInput,
     suggestedRefinements: [],
+  };
+}
+
+/**
+ * 快速模式：跳过 LLM 预处理，直接用原始查询
+ * 中文输入走字典翻译，英文直接透传
+ */
+export function fastPreprocess(userInput: string): ProcessedQuery {
+  const isChinese = /[一-龥]/.test(userInput);
+  const translated = isChinese ? simpleChineseTranslate(userInput) : userInput;
+
+  return {
+    optimizedQuery: translated,
+    pubmedQuery: translated,
+    s2Query: translated,
+    openAlexQuery: translated,
+    meshTerms: [],
+    searchIntent: userInput,
+    suggestedRefinements: isChinese ? ["⚡ 快速模式：使用智能搜索可获得更精准的 MeSH 词查询"] : [],
   };
 }
 

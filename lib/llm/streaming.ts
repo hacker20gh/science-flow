@@ -1,18 +1,17 @@
 /**
- * 通用 SSE 流式工具
+ * 通用 SSE 流式工具（服务端专用）
  *
  * 封装 ReadableStream + SSE 格式，统一事件类型。
  * 供实验设计、论文组装、审稿模拟等重型 LLM 任务使用。
+ *
+ * 客户端 SSE 消费函数（consumeSSEStream）在 sse-consumer.ts 中。
  */
 
-// ===== SSE 事件类型 =====
+import { trackTokenUsage } from "@/lib/token-tracker";
+import { getIsRetryMode } from "./client";
+import type { SSEEvent } from "./sse-consumer";
 
-export type SSEEvent =
-  | { type: "text"; text: string }                    // 文本增量
-  | { type: "progress"; step: string; current: number; total: number } // 步骤进度
-  | { type: "result"; data: unknown }                 // 结构化结果
-  | { type: "error"; message: string }                // 错误
-  | { type: "done" };                                 // 完成
+export type { SSEEvent };
 
 // ===== 创建 SSE Response =====
 
@@ -62,20 +61,47 @@ export function createSSEStream(
  *
  * 将 LLM 的文本增量通过 emit 实时发送。
  * 返回完整的文本。
+ * 自动追踪 token 用量。
  */
 export async function streamLLMResponse(
   client: Awaited<ReturnType<typeof import("./client").getLLMClient>>,
   params: Parameters<ReturnType<typeof import("./client").getLLMClient>["messages"]["create"]>[0],
-  emit: (event: SSEEvent) => void
+  emit: (event: SSEEvent) => void,
+  feature?: string
 ): Promise<string> {
   const response = await client.messages.create({ ...params, stream: true });
 
   let fullText = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedTokens = 0;
+
   for await (const event of response) {
-    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+    if (event.type === "message_start") {
+      const usage = event.message?.usage;
+      if (usage) {
+        inputTokens = usage.input_tokens || 0;
+        cachedTokens = usage.cache_read_input_tokens || 0;
+      }
+    } else if (event.type === "message_delta") {
+      const usage = event.usage;
+      if (usage) outputTokens = usage.output_tokens || 0;
+    } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
       fullText += event.delta.text;
       emit({ type: "text", text: event.delta.text });
     }
+  }
+
+  // 追踪 token 用量
+  if (feature && (inputTokens > 0 || outputTokens > 0)) {
+    trackTokenUsage({
+      feature,
+      model: (params?.model as string) || "unknown",
+      inputTokens,
+      outputTokens,
+      cachedTokens,
+      isRetry: getIsRetryMode(),
+    });
   }
 
   return fullText;
@@ -147,70 +173,4 @@ export async function streamLLMWithToolUse(
   }
 
   return { fullText, toolUseBlocks, usage: { inputTokens, outputTokens, cachedTokens } };
-}
-
-// ===== 前端 SSE 消费者工具 =====
-
-export interface SSEConsumerOptions {
-  onText?: (text: string) => void;
-  onProgress?: (step: string, current: number, total: number) => void;
-  onResult?: (data: unknown) => void;
-  onError?: (message: string) => void;
-  onDone?: () => void;
-  signal?: AbortSignal;
-}
-
-/**
- * 消费 SSE 流（前端使用）
- *
- * 自动处理 chunk 边界问题（buffer 累积模式）。
- */
-export async function consumeSSEStream(
-  response: Response,
-  options: SSEConsumerOptions
-): Promise<void> {
-  if (!response.body) throw new Error("Response body is null");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const event: SSEEvent = JSON.parse(line.slice(6));
-          switch (event.type) {
-            case "text":
-              options.onText?.(event.text);
-              break;
-            case "progress":
-              options.onProgress?.(event.step, event.current, event.total);
-              break;
-            case "result":
-              options.onResult?.(event.data);
-              break;
-            case "error":
-              options.onError?.(event.message);
-              break;
-            case "done":
-              options.onDone?.();
-              break;
-          }
-        } catch {
-          // 忽略畸形 JSON
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
 }

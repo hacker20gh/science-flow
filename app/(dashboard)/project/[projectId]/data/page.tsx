@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { useProjectStore } from "@/store/project-store";
 import { ChartRenderer } from "@/components/charts/chart-renderer";
-import { consumeSSEStream } from "@/lib/llm/streaming";
+import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import type { AnalysisResult } from "@/lib/llm/analysis";
 
 export default function DataPage() {
+  const { projectId } = useParams<{ projectId: string }>();
   const { addEvent } = useProjectStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -44,6 +46,21 @@ export default function DataPage() {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [progressMessage, setProgressMessage] = useState("");
+
+  // Restore analysis results from DB on mount
+  useEffect(() => {
+    fetch(`/api/projects/${projectId}/data/analysis`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.analysis) {
+          setResult(data.analysis as AnalysisResult);
+          if (data.fileName) setFileName(data.fileName);
+        }
+      })
+      .catch((err) => {
+        console.error("[Data] Failed to restore analysis from DB:", err);
+      }); // silent — no stored analysis is fine
+  }, [projectId]);
 
   const processFile = useCallback((file: File) => {
     setFileName(file.name);
@@ -132,6 +149,18 @@ export default function DataPage() {
             "数据分析完成",
             `完成 ${fileName} 的统计分析：${analysisResult.statistical_analysis.recommended_test}`
           );
+          // Persist to DB (fire-and-forget)
+          fetch(`/api/projects/${projectId}/data/analysis`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              analysis: analysisResult,
+              fileName,
+              csvData: csvData.slice(0, 10000),
+            }),
+          }).catch((err) => {
+            console.error("[Data] Failed to persist analysis to DB:", err);
+          }); // non-blocking
         },
         onError: (msg) => {
           setError(msg);

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Download, Loader2, Check, Upload, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useRef, useMemo } from "react";
+import { Download, Loader2, Check, Upload, ExternalLink, ChevronDown, ChevronUp, Search, Filter } from "lucide-react";
 
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   pubmed: { label: "PubMed", color: "bg-green-50 text-green-600" },
@@ -13,6 +13,7 @@ const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
 export interface Paper {
   pmid: string | null;
   doi: string | null;
+  s2Id?: string | null;
   title: string;
   authors: string[];
   journal: string;
@@ -30,9 +31,16 @@ interface SearchResultsProps {
   papers: Paper[];
   onSelect: (papers: Paper[]) => void;
   projectId?: string;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  refinements?: string[];
+  onRefinementClick?: (refinement: string) => void;
+  onDiscoverRelated?: (selectedKeys: Set<string>) => void;
+  isDiscovering?: boolean;
 }
 
-export function SearchResults({ papers, onSelect, projectId }: SearchResultsProps) {
+export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore, isLoadingMore, refinements, onRefinementClick, onDiscoverRelated, isDiscovering }: SearchResultsProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
@@ -41,6 +49,30 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
   const [expandedAbstract, setExpandedAbstract] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingUploadPaper, setPendingUploadPaper] = useState<Paper | null>(null);
+
+  // 客户端筛选状态
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterText, setFilterText] = useState("");
+  const [filterSource, setFilterSource] = useState<string | null>(null);
+  const [filterOaOnly, setFilterOaOnly] = useState(false);
+  const [filterMinCitations, setFilterMinCitations] = useState<number>(0);
+
+  // 客户端过滤
+  const filteredPapers = useMemo(() => {
+    return papers.filter((p) => {
+      if (filterText) {
+        const q = filterText.toLowerCase();
+        const matchTitle = p.title.toLowerCase().includes(q);
+        const matchAbstract = p.abstract?.toLowerCase().includes(q);
+        const matchAuthors = p.authors?.some((a) => a.toLowerCase().includes(q));
+        if (!matchTitle && !matchAbstract && !matchAuthors) return false;
+      }
+      if (filterSource && !p.sources?.includes(filterSource)) return false;
+      if (filterOaOnly && !p.isOpenAccess) return false;
+      if (filterMinCitations > 0 && (p.citationCount || 0) < filterMinCitations) return false;
+      return true;
+    });
+  }, [papers, filterText, filterSource, filterOaOnly, filterMinCitations]);
 
   function toggle(paper: Paper) {
     const key = paperKey(paper);
@@ -53,7 +85,7 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
   }
 
   function selectAll() {
-    setSelected(new Set(papers.map(paperKey)));
+    setSelected(new Set(filteredPapers.map(paperKey)));
   }
 
   function handleConfirm() {
@@ -135,6 +167,8 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
 
   if (papers.length === 0) return null;
 
+  const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0].filter(Boolean).length;
+
   return (
     <div className="space-y-4">
       {/* 隐藏的文件选择器 */}
@@ -146,9 +180,112 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
         className="hidden"
       />
 
+      {/* 搜索建议 pills */}
+      {refinements && refinements.length > 0 && onRefinementClick && (
+        <div className="flex flex-wrap gap-2">
+          <span className="text-xs text-gray-500 self-center">💡 建议：</span>
+          {refinements.map((ref, i) => (
+            <button
+              key={i}
+              onClick={() => onRefinementClick(ref)}
+              className="text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 transition-colors"
+            >
+              {ref}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 筛选工具栏 */}
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              placeholder="在结果中筛选（标题、作者、摘要）..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs border rounded transition-colors ${
+              showFilters || activeFilterCount > 0
+                ? "bg-blue-50 border-blue-300 text-blue-700"
+                : "border-gray-200 text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            <Filter size={12} />
+            筛选{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </button>
+        </div>
+
+        {showFilters && (
+          <div className="flex items-center gap-3 flex-wrap pt-1 border-t border-gray-200">
+            {/* 来源筛选 */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-gray-500">来源：</span>
+              {Object.entries(SOURCE_LABELS).map(([key, info]) => (
+                <button
+                  key={key}
+                  onClick={() => setFilterSource(filterSource === key ? null : key)}
+                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                    filterSource === key
+                      ? "bg-blue-50 border-blue-300 text-blue-700"
+                      : "border-gray-200 text-gray-500 hover:border-gray-300"
+                  }`}
+                >
+                  {info.label}
+                </button>
+              ))}
+            </div>
+
+            {/* OA 筛选 */}
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filterOaOnly}
+                onChange={(e) => setFilterOaOnly(e.target.checked)}
+                className="rounded w-3 h-3"
+              />
+              仅 OA
+            </label>
+
+            {/* 最低引用 */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-gray-500">最低引用：</span>
+              <select
+                value={filterMinCitations}
+                onChange={(e) => setFilterMinCitations(Number(e.target.value))}
+                className="text-xs border border-gray-200 rounded px-1.5 py-0.5"
+              >
+                <option value={0}>不限</option>
+                <option value={10}>≥10</option>
+                <option value={50}>≥50</option>
+                <option value={100}>≥100</option>
+              </select>
+            </div>
+
+            {/* 清除筛选 */}
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => { setFilterText(""); setFilterSource(null); setFilterOaOnly(false); setFilterMinCitations(0); }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                清除筛选
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-500">
-          找到 {papers.length} 篇文献，已选 {selected.size} 篇
+          找到 {papers.length} 篇文献
+          {filteredPapers.length !== papers.length && ` (筛选后 ${filteredPapers.length} 篇)`}
+          ，已选 {selected.size} 篇
         </div>
         <div className="flex gap-2">
           <button
@@ -157,6 +294,18 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
           >
             全选
           </button>
+          {onDiscoverRelated && (
+            <button
+              onClick={() => onDiscoverRelated(selected)}
+              disabled={selected.size === 0 || isDiscovering}
+              className="px-3 py-1 text-sm border border-purple-300 text-purple-700 rounded hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              {isDiscovering ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : null}
+              🔗 发现相关论文
+            </button>
+          )}
           <button
             onClick={handleConfirm}
             disabled={selected.size === 0}
@@ -168,7 +317,7 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
       </div>
 
       <div className="space-y-3">
-        {papers.map((paper) => {
+        {filteredPapers.map((paper) => {
           const key = paperKey(paper);
           const isSelected = selected.has(key);
 
@@ -349,6 +498,26 @@ export function SearchResults({ papers, onSelect, projectId }: SearchResultsProp
           );
         })}
       </div>
+
+      {/* 加载更多 */}
+      {hasMore && onLoadMore && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+            className="px-6 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2 transition-colors"
+          >
+            {isLoadingMore ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                加载中...
+              </>
+            ) : (
+              "加载更多文献"
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

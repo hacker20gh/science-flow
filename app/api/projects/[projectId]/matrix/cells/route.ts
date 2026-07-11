@@ -56,7 +56,7 @@ export async function PATCH(
     // Save back
     await prisma.mechanismMatrix.update({
       where: { projectId },
-      data: { data: matrixData as unknown as Record<string, unknown> },
+      data: { data: JSON.parse(JSON.stringify(matrixData)) },
     });
 
     // Return the updated cell

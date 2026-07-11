@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { getLLMClient, MODELS, withLLMRetry } from "./client";
+import { getLLMClient, MODELS, withLLMRetry, getIsRetryMode } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
 import { trackTokenUsage } from "@/lib/token-tracker";
@@ -97,6 +97,7 @@ Output: {"severity":"moderate","likely_causes":[{"cause":"Background interferenc
 
     if (onToken) {
       // 真流式：逐 token 发送
+      const streamStart = Date.now();
       const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, onToken);
       trackTokenUsage({
         feature: "troubleshoot",
@@ -104,6 +105,8 @@ Output: {"severity":"moderate","likely_causes":[{"cause":"Background interferenc
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         cachedTokens: usage.cachedTokens,
+        durationMs: Date.now() - streamStart,
+        isRetry: getIsRetryMode(),
       });
       const toolResult = toolUseBlocks.find((t) => t.name === "diagnose_experiment");
       if (toolResult) {

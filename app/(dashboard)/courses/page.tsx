@@ -973,7 +973,8 @@ export default function CoursesPage() {
         }
         setProgress(map);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("[Courses] Failed to load progress:", err);
         /* graceful: stay with empty progress */
       });
   }, []);

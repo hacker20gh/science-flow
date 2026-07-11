@@ -89,11 +89,13 @@ ${enrichedCards.map((c, i) => `${i + 1}. [${c.priority}] ${c.title}: ${c.message
 - 每条消息不超过 100 字
 - 返回 JSON 数组，每个元素 { "id": 对应卡片 id, "message": "个性化消息" }`;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const response = await client.messages.create({
           model: MODELS.extraction, // Haiku — 便宜快速
           max_tokens: 1024,
           messages: [{ role: "user", content: prompt }],
-        });
+          _sciflowFeature: "preprocess",
+        } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
 
         const text = response.content
           .filter((b) => b.type === "text")

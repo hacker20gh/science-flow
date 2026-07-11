@@ -6,15 +6,16 @@
  * API Routes 直接使用 lib/db-server.ts
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _prisma: any = null;
-let _loading: Promise<any> | null = null;
+import type { PrismaClient } from "@prisma/client";
+
+let _prisma: PrismaClient | null = null;
+let _loading: Promise<PrismaClient | null> | null = null;
 
 /**
  * 获取 Prisma 客户端（异步，Edge Runtime 兼容）
  * 在 Edge Runtime 中调用会返回 null
  */
-export async function getPrisma() {
+export async function getPrisma(): Promise<PrismaClient | null> {
   if (_prisma) return _prisma;
   if (!process.env.DATABASE_URL) return null;
 

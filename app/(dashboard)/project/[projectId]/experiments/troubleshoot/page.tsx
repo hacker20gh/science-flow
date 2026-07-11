@@ -1,15 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { TroubleshootForm, DiagnosisResult } from "@/components/experiment/troubleshoot";
-import { consumeSSEStream } from "@/lib/llm/streaming";
+import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import type { TroubleshootResult } from "@/lib/llm/troubleshoot";
 
 export default function TroubleshootPage() {
+  const { projectId } = useParams<{ projectId: string }>();
   const [view, setView] = useState<"form" | "diagnosing" | "result">("form");
   const [result, setResult] = useState<TroubleshootResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progressMessage, setProgressMessage] = useState("");
+
+  // Restore existing troubleshoot result on page load
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`/api/projects/${projectId}/experiments?type=troubleshoot`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.experiment?.troubleshoot) {
+          setResult(data.experiment.troubleshoot as TroubleshootResult);
+          setView("result");
+        }
+      })
+      .catch((err) => {
+        console.error("[Troubleshoot] Failed to restore results:", err);
+      }); // silently ignore restore failures
+  }, [projectId]);
+
+  // Save troubleshoot result to DB
+  const saveToDb = useCallback(
+    (experimentName: string, troubleshoot: TroubleshootResult) => {
+      fetch(`/api/projects/${projectId}/experiments`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ experimentName, troubleshoot }),
+      }).catch((err) => console.error("Failed to save troubleshoot result:", err));
+    },
+    [projectId]
+  );
 
   async function handleSubmit(data: {
     experiment: {
@@ -51,8 +81,10 @@ export default function TroubleshootPage() {
         setProgressMessage(step || "正在分析...");
       },
       onResult: (data_) => {
-        setResult(data_ as TroubleshootResult);
+        const troubleshootData = data_ as TroubleshootResult;
+        setResult(troubleshootData);
         setView("result");
+        saveToDb(data.experiment.name, troubleshootData);
       },
       onError: (message) => {
         setError(message);

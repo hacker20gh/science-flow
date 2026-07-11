@@ -7,7 +7,7 @@ import { ExperimentDesignCard } from "@/components/experiment/design-card";
 import { ProcessAssistant } from "@/components/assistant/process-assistant";
 import { analyzeProjectState } from "@/lib/assistant/process-assistant";
 import { useProjectStore } from "@/store/project-store";
-import { consumeSSEStream } from "@/lib/llm/streaming";
+import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import type { ExperimentDesign } from "@/lib/llm/experiment-design";
 
 type ExperimentStatus = "designed" | "running" | "completed" | "failed";

@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { getLLMClient, MODELS, withLLMRetry } from "./client";
+import { getLLMClient, MODELS, withLLMRetry, getIsRetryMode } from "./client";
 import { calculateSampleSize } from "@/lib/power-analysis";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
@@ -130,6 +130,7 @@ Output: {"name":"NF-κB inhibition by Drug X in RAW264.7","hypothesis":"...","ra
 
     if (onToken) {
       // 真流式：逐 token 发送
+      const streamStart = Date.now();
       const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, onToken);
       trackTokenUsage({
         feature: "design",
@@ -137,6 +138,8 @@ Output: {"name":"NF-κB inhibition by Drug X in RAW264.7","hypothesis":"...","ra
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         cachedTokens: usage.cachedTokens,
+        durationMs: Date.now() - streamStart,
+        isRetry: getIsRetryMode(),
       });
       const toolResult = toolUseBlocks.find((t) => t.name === "design_experiment");
       if (toolResult) {

@@ -34,7 +34,9 @@ export function ProjectShell({ projectId, children }: ProjectShellProps) {
           });
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[ProjectShell] Failed to load project info:", err);
+      });
   }, [projectId]);
 
   const projectContext = {

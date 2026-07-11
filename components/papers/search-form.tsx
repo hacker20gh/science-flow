@@ -15,6 +15,7 @@ export interface SearchOptions {
   sortBy: "relevance" | "citation" | "date" | "impact";
   articleTypes: string[];
   onlyOpenAccess: boolean;
+  fastMode: boolean;
 }
 
 const ARTICLE_TYPES = [
@@ -66,6 +67,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
   const [sortBy, setSortBy] = useState<SearchOptions["sortBy"]>("relevance");
   const [maxResults, setMaxResults] = useState(20);
   const [onlyOpenAccess, setOnlyOpenAccess] = useState(false);
+  const [fastMode, setFastMode] = useState(false);
 
   function toggleArticleType(type: string) {
     setArticleTypes((prev) => {
@@ -105,6 +107,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
       sortBy,
       articleTypes: Array.from(articleTypes),
       onlyOpenAccess,
+      fastMode,
     });
   }
 
@@ -316,17 +319,28 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
             </div>
           </div>
 
-          {/* 行3：OA偏好 + 返回数量 */}
-          <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={onlyOpenAccess}
-                onChange={(e) => setOnlyOpenAccess(e.target.checked)}
-                className="rounded"
-              />
-              优先显示有 Open Access 全文的
-            </label>
+          {/* 行3：OA偏好 + 快速搜索 + 返回数量 */}
+          <div className="flex items-center justify-between pt-2 border-t border-gray-100 flex-wrap gap-3">
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={onlyOpenAccess}
+                  onChange={(e) => setOnlyOpenAccess(e.target.checked)}
+                  className="rounded"
+                />
+                优先显示有 Open Access 全文的
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer" title="跳过 LLM 查询优化，直接搜索原始关键词">
+                <input
+                  type="checkbox"
+                  checked={fastMode}
+                  onChange={(e) => setFastMode(e.target.checked)}
+                  className="rounded"
+                />
+                ⚡ 快速搜索
+              </label>
+            </div>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-gray-600">返回数量</span>
               <select

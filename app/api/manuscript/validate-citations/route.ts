@@ -8,6 +8,10 @@ import {
 } from "@/lib/manuscript/citation-parser";
 
 export async function POST(req: NextRequest) {
+  if (!prisma) {
+    return NextResponse.json({ error: "Database not available" }, { status: 503 });
+  }
+
   try {
     const body = await req.json();
     const { projectId, text } = body;

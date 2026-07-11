@@ -46,3 +46,14 @@ uploads/
 .playwright-mcp/
 .prisma/
 .superpowers
+
+# Sentry
+sentry.properties
+
+# temp debug files
+token-panel-check.png
+token-panel-expanded.png
+token-tracking-audit.md
+
+# test data
+test/data/

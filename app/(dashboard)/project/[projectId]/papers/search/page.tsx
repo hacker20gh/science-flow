@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import { consumeSSEStream } from "@/lib/llm/streaming";
+import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import { useParams, useRouter } from "next/navigation";
 import { SearchForm, type SearchOptions } from "@/components/papers/search-form";
 import { SearchResults, type Paper } from "@/components/papers/search-results";
@@ -19,6 +19,8 @@ interface QueryInfo {
   meshTerms: string[];
   intent: string;
   refinements: string[];
+  fastMode?: boolean;
+  subQueries?: string[];
 }
 
 interface SearchResponse {
@@ -76,6 +78,8 @@ export default function ProjectPaperSearchPage() {
   const [selectedPapers, setSelectedPapers] = useState<Paper[]>([]);
   const [saveStatus, setSaveStatus] = useState<Record<string, "saving" | "saved" | "error">>({});
   const [isFromCache, setIsFromCache] = useState(false);
+  const [cachedQuery, setCachedQuery] = useState<string | null>(null);
+  const [cachedParams, setCachedParams] = useState<SearchOptions | null>(null);
   const [showQueryDetails, setShowQueryDetails] = useState(false);
   const [historySearchQuery, setHistorySearchQuery] = useState("");
 
@@ -83,6 +87,10 @@ export default function ProjectPaperSearchPage() {
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [showAllHistory, setShowAllHistory] = useState(false);
+
+  // 引用网络发现
+  const [citationNetworkResults, setCitationNetworkResults] = useState<{ total: number; papers: Paper[] } | null>(null);
+  const [isDiscovering, setIsDiscovering] = useState(false);
 
   // 提取进度详情
   const [extractionDetails, setExtractionDetails] = useState<Array<{
@@ -142,6 +150,8 @@ export default function ProjectPaperSearchPage() {
         sources: { pubmed: 0, semanticScholar: 0, openAlex: 0 },
       });
       setIsFromCache(true);
+      setCachedQuery(item.query);
+      setCachedParams(item.searchParams as SearchOptions | null);
       setView("search");
     } else {
       // 无快照 → 正常搜索
@@ -153,6 +163,7 @@ export default function ProjectPaperSearchPage() {
         sortBy: "relevance",
         articleTypes: ["journal-article", "review"],
         onlyOpenAccess: false,
+        fastMode: false,
       });
     }
   }
@@ -162,6 +173,8 @@ export default function ProjectPaperSearchPage() {
     setError(null);
     setResults(null);
     setIsFromCache(false);
+    setCachedQuery(null);
+    setCachedParams(null);
     setView("search");
 
     try {
@@ -178,6 +191,58 @@ export default function ProjectPaperSearchPage() {
       setError(err instanceof Error ? err.message : "搜索失败");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  function handleRefinementClick(refinement: string) {
+    // 从搜索历史中获取上次的搜索参数，或使用默认值
+    const lastParams = searchHistory[0]?.searchParams as SearchOptions | undefined;
+    handleSearch(refinement, lastParams || {
+      maxResults: 20,
+      minYear: null,
+      maxYear: null,
+      minCitationCount: null,
+      sortBy: "relevance",
+      articleTypes: ["journal-article", "review"],
+      onlyOpenAccess: false,
+      fastMode: false,
+    });
+  }
+
+  async function handleDiscoverRelated(selectedKeys: Set<string>) {
+    // 从当前结果中找到选中论文的 S2 IDs
+    if (!results) return;
+    const selectedPapersList = results.papers.filter((p) => {
+      const key = p.doi || p.pmid || p.title;
+      return selectedKeys.has(key);
+    });
+
+    // 需要有 S2 paperId 才能查引用网络
+    const paperIds = selectedPapersList
+      .map((p) => p.s2Id)
+      .filter((id): id is string => !!id);
+
+    if (paperIds.length === 0) {
+      setError("选中的论文没有 Semantic Scholar ID，无法查询引用网络。请尝试用英文关键词搜索以获取 S2 数据。");
+      return;
+    }
+
+    setIsDiscovering(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/papers/citation-network", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paperIds, maxResults: 30 }),
+      });
+      if (!res.ok) throw new Error("引用网络查询失败");
+      const data = await res.json();
+      setCitationNetworkResults(data);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "引用网络查询失败");
+    } finally {
+      setIsDiscovering(false);
     }
   }
 
@@ -330,6 +395,9 @@ export default function ProjectPaperSearchPage() {
     toast.success("提取结果已保存", {
       description: "前往知识面板查看机制矩阵",
     });
+    // 通知 Brain 页面有新的提取结果
+    window.dispatchEvent(new CustomEvent("extraction-done", { detail: { projectId } }));
+    localStorage.setItem(`extraction-done-${projectId}`, String(Date.now()));
   }
 
   const totalExperiments = extractionDetails.reduce((sum, d) => sum + d.experiments, 0);
@@ -454,6 +522,9 @@ export default function ProjectPaperSearchPage() {
               <span className="text-xs text-gray-400">{results.queryInfo.intent}</span>
             </div>
             <div className="flex items-center gap-3">
+              {results.queryInfo.fastMode && (
+                <span className="text-xs px-2 py-0.5 bg-green-50 text-green-600 rounded">⚡ 快速</span>
+              )}
               {isFromCache && (
                 <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-600 rounded">缓存</span>
               )}
@@ -496,6 +567,20 @@ export default function ProjectPaperSearchPage() {
                 </div>
               )}
 
+              {/* 子查询拆分 */}
+              {results.queryInfo.subQueries && results.queryInfo.subQueries.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-gray-500">🔍 拆分为 {results.queryInfo.subQueries.length} 个子查询</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {results.queryInfo.subQueries.map((label, i) => (
+                      <span key={i} className="text-xs px-2.5 py-1 bg-purple-50 text-purple-700 rounded-full border border-purple-200">
+                        {i + 1}. {label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 优化建议 */}
               {results.queryInfo.refinements.length > 0 && (
                 <div>
@@ -515,13 +600,14 @@ export default function ProjectPaperSearchPage() {
         <div className="mt-4">
           <div className="text-xs text-gray-400 mb-3">
             合计 {results.total} 篇（已去重）
-            {isFromCache && (
+            {isFromCache && cachedQuery && (
               <button
                 onClick={() => {
-                  const lastHistory = searchHistory[0];
-                  if (lastHistory?.searchParams) {
-                    handleSearch(lastHistory.query, lastHistory.searchParams as SearchOptions);
-                  }
+                  handleSearch(cachedQuery, cachedParams || {
+                    maxResults: 20, minYear: null, maxYear: null, minCitationCount: null,
+                    sortBy: "relevance", articleTypes: ["journal-article", "review"],
+                    onlyOpenAccess: false, fastMode: false,
+                  });
                 }}
                 className="ml-3 text-blue-500 hover:text-blue-700"
               >
@@ -529,7 +615,37 @@ export default function ProjectPaperSearchPage() {
               </button>
             )}
           </div>
-          <SearchResults papers={results.papers} onSelect={handleSelect} projectId={projectId} />
+          <SearchResults
+            papers={results.papers}
+            onSelect={handleSelect}
+            projectId={projectId}
+            refinements={results.queryInfo?.refinements}
+            onRefinementClick={handleRefinementClick}
+            onDiscoverRelated={handleDiscoverRelated}
+            isDiscovering={isDiscovering}
+          />
+        </div>
+      )}
+
+      {/* 引用网络发现结果 */}
+      {citationNetworkResults && view === "search" && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm text-gray-600">
+              🔗 引用网络发现 — 从选中论文的引用关系中找到 {citationNetworkResults.total} 篇相关论文
+            </div>
+            <button
+              onClick={() => setCitationNetworkResults(null)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              关闭
+            </button>
+          </div>
+          <SearchResults
+            papers={citationNetworkResults.papers}
+            onSelect={handleSelect}
+            projectId={projectId}
+          />
         </div>
       )}
 

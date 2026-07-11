@@ -6,8 +6,10 @@
  */
 
 import { z } from "zod";
-import { getLLMClient, MODELS, withLLMRetry } from "./client";
+import { getLLMClient, MODELS, withLLMRetry, getIsRetryMode } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
+import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
+import { trackTokenUsage } from "@/lib/token-tracker";
 
 // ===== Zod Schema =====
 
@@ -185,7 +187,7 @@ function extractSections(text: string): SectionInfo[] {
 export async function extractFromText(
   text: string,
   title: string,
-  options?: { maxTokens?: number }
+  options?: { maxTokens?: number; onToken?: (event: SSEEvent) => void }
 ): Promise<ExtractionResult> {
   return withLLMRetry(async () => {
     const client = getLLMClient();
@@ -193,19 +195,41 @@ export async function extractFromText(
 
     const userMessage = `Extract all experimental findings from this paper:\n\nTitle: ${title}\n\nContent:\n${text}`;
 
-    const response = await client.messages.create({
+    const llmParams = {
       model: MODELS.extraction,
       max_tokens: maxTokens,
       system: CORE_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
+      messages: [{ role: "user" as const, content: userMessage }],
       tools: [EXTRACTION_TOOL],
-      tool_choice: { type: "tool", name: "extract_paper_data" },
-    });
+      tool_choice: { type: "tool" as const, name: "extract_paper_data" },
+    };
+
+    if (options?.onToken) {
+      // 流式路径：手动追踪 token
+      const streamStart = Date.now();
+      const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, options.onToken);
+      trackTokenUsage({
+        feature: "extraction",
+        model: MODELS.extraction,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cachedTokens: usage.cachedTokens,
+        durationMs: Date.now() - streamStart,
+        isRetry: getIsRetryMode(),
+      });
+      const toolResult = toolUseBlocks.find((t) => t.name === "extract_paper_data");
+      if (toolResult) {
+        return ExtractionResultSchema.parse(toolResult.input);
+      }
+      throw new Error("No tool_use block in streaming response");
+    }
+
+    // 阻塞式路径：monkey-patch 自动追踪
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await client.messages.create({
+      ...llmParams,
+      _sciflowFeature: "extraction",
+    } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
 
     return await extractStructuredOutput(response, ExtractionResultSchema, {
       label: "extraction",
@@ -216,6 +240,7 @@ export async function extractFromText(
         userMessage,
         originalContent: userMessage,
         schema: ExtractionResultSchema,
+        feature: "extraction",
       }),
     });
   }, { label: "extraction" });

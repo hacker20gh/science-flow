@@ -122,7 +122,7 @@ export async function enrichWithOa(
 ): Promise<UnifiedPaper[]> {
   const needOa = papers.filter((p) => p.doi && !p.oaPdfUrl);
 
-  await parallelLimit(needOa.slice(0, 20), 5, async (paper) => {
+  await parallelLimit(needOa.slice(0, 50), 5, async (paper) => {
     try {
       const oa = await findOaPdf(paper.doi!);
       paper.isOpenAccess = oa.isOpenAccess;
@@ -150,7 +150,7 @@ export async function enrichWithBioRxiv(
   const candidates = papers.filter((p) => p.doi && !p.oaPdfUrl);
 
   // 批量检查（限制数量避免请求过多）
-  const doisToCheck = candidates.slice(0, 15).map((p) => p.doi!);
+  const doisToCheck = candidates.slice(0, 50).map((p) => p.doi!);
   if (doisToCheck.length === 0) return papers;
 
   let biorxivMap: Map<string, { pdfUrl: string; category: string }>;
@@ -166,7 +166,7 @@ export async function enrichWithBioRxiv(
   }
 
   // 补充 bioRxiv PDF 链接
-  for (const paper of candidates.slice(0, 15)) {
+  for (const paper of candidates.slice(0, 50)) {
     const info = biorxivMap.get(paper.doi!);
     if (info) {
       paper.oaPdfUrl = info.pdfUrl;
@@ -282,7 +282,8 @@ function fromOpenAlex(p: OpenAlexPaper): UnifiedPaper {
   };
 }
 
-function deduplicate(papers: UnifiedPaper[]): UnifiedPaper[] {
+/** 去重 + 合并（基于 DOI → PMID → 标题三级 key） */
+export function deduplicate(papers: UnifiedPaper[]): UnifiedPaper[] {
   const byKey = new Map<string, UnifiedPaper>();
   const result: UnifiedPaper[] = [];
 
@@ -332,12 +333,30 @@ function mergePaper(target: UnifiedPaper, source: UnifiedPaper): void {
   if (!target.abstract && source.abstract) target.abstract = source.abstract;
   if (!target.tldr && source.tldr) target.tldr = source.tldr;
   if (!target.oaPdfUrl && source.oaPdfUrl) target.oaPdfUrl = source.oaPdfUrl;
-  if (source.citationCount > target.citationCount) {
+  if (!target.oaUrl && source.oaUrl) target.oaUrl = source.oaUrl;
+
+  // 引用数回填：取两者中较大值（忽略 0，避免 PubMed 的 0 覆盖 S2 的真实值）
+  const effectiveSource = source.citationCount || 0;
+  const effectiveTarget = target.citationCount || 0;
+  if (effectiveSource > effectiveTarget) {
     target.citationCount = source.citationCount;
   }
+
   if (source.influenceScore && source.influenceScore > (target.influenceScore ?? 0)) {
     target.influenceScore = source.influenceScore;
   }
+
+  // OA 状态合并：优先保留非 unknown 的值
+  if (
+    target.oaStatus === "unknown" &&
+    source.oaStatus &&
+    source.oaStatus !== "unknown"
+  ) {
+    target.oaStatus = source.oaStatus;
+  }
+
+  if (source.isOpenAccess) target.isOpenAccess = true;
+
   if (!target.sources.includes(source.sources[0])) {
     target.sources.push(...source.sources);
   }

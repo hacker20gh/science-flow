@@ -53,6 +53,7 @@ export async function searchOpenAlex(
       "doi",
       "cited_by_count",
       "open_access",
+      "best_oa_location",
       "concepts",
     ].join(","),
   });
@@ -85,8 +86,11 @@ function mapOpenAlexPaper(raw: any): OpenAlexPaper {
   const journal =
     raw.primary_location?.source?.display_name || "";
 
-  // OA 信息
+  // OA 信息 — 优先取 PDF URL，降级到落地页
   const oa = raw.open_access || {};
+  const bestOaLocation = raw.best_oa_location || raw.primary_location || {};
+  const oaPdfUrl = bestOaLocation.url_for_pdf || (oa.is_oa ? oa.oa_url : null);
+  const oaUrl = bestOaLocation.landing_page_url || oa.oa_url || null;
 
   // 学科领域
   const concepts = (raw.concepts || [])
@@ -105,8 +109,8 @@ function mapOpenAlexPaper(raw: any): OpenAlexPaper {
     doi: raw.doi?.replace("https://doi.org/", "") || null,
     citationCount: raw.cited_by_count || 0,
     isOpenAccess: oa.is_oa || false,
-    oaUrl: oa.oa_url || null,
-    oaPdfUrl: oa.is_oa ? oa.oa_url : null,
+    oaUrl,
+    oaPdfUrl,
     openAccessStatus: oa.oa_status || "closed",
     concept: concepts,
     type: raw.type || "article",

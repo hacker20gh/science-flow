@@ -72,7 +72,9 @@ export default function ProjectPage({
       .then((data) => {
         if (data.events) setTimelineEvents(data.events.slice(0, 10));
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[Timeline] Failed to load timeline events:", err);
+      });
   }, [projectId]);
 
   // Compute insights from project data

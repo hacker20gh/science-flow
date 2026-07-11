@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getLLMClient, MODELS, withLLMRetry } from "@/lib/llm/client";
+import { getLLMClient, MODELS, withLLMRetry, getIsRetryMode } from "@/lib/llm/client";
 import { buildRichContext, manageMessageBudget } from "@/lib/llm/context-builder";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
@@ -122,6 +122,7 @@ export async function POST(req: NextRequest) {
         // 工具调用循环
         while (toolRound < MAX_TOOL_ROUNDS) {
           // 流式调用 LLM（同时处理 text 和 thinking 事件，兼容不同模型）
+          const streamStart = Date.now();
           const streamResponse = await client.messages.create({
             model: MODELS.chat,
             max_tokens: 4096,
@@ -177,6 +178,8 @@ export async function POST(req: NextRequest) {
               inputTokens: chatInputTokens,
               outputTokens: chatOutputTokens,
               cachedTokens: chatCachedTokens,
+              durationMs: Date.now() - streamStart,
+              isRetry: getIsRetryMode(),
             });
           }
 
@@ -307,7 +310,7 @@ async function saveMessages(
         model: modelName,
       };
     }
-    const data = userData ? [userData, assistantData] : [assistantData];
+    const data = (userData ? [userData, assistantData] : [assistantData]) as Array<{ projectId: string; userId: string; conversationId?: string; role: string; content: string; metadata?: object }>;
     await prisma.chatMessage.createMany({ data });
   } catch (e) {
     console.error("[chat] saveMessages error:", e);

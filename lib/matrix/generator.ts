@@ -33,6 +33,7 @@ export interface MatrixRow {
   paperId: string;
   drugConc: string; // 药物+浓度
   cellLine: string;
+  species: string;
   year?: number;
   cells: Record<string, MatrixCell>;
 }
@@ -209,6 +210,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         paperId: input.paperId,
         drugConc,
         cellLine,
+        species: exp.model.species || "",
         year: input.year,
         cells,
       });
@@ -428,6 +430,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
       paperId: ext.paperId,
       drugConc,
       cellLine,
+      species: ext.species || "",
       year: ext.paper.year ?? undefined,
       cells,
     });

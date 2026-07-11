@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { consumeSSEStream, type SSEConsumerOptions } from "@/lib/llm/streaming";
+import { consumeSSEStream, type SSEConsumerOptions } from "@/lib/llm/sse-consumer";
 
 interface StreamingProgressProps {
   response?: Response | null;

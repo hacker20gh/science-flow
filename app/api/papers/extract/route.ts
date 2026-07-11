@@ -98,7 +98,9 @@ export async function POST(req: NextRequest) {
                 prisma.paper.update({
                   where: { id: dbPaper.id },
                   data: { fullText: pdfData.text },
-                }).catch(() => {});
+                }).catch((err: unknown) => {
+                  console.error(`[Extract] Failed to save fullText for ${dbPaper.id}:`, err);
+                });
               } else {
                 console.warn(`[Extract] PDF 文本过短: ${pdfData.text?.length || 0} 字符`);
               }

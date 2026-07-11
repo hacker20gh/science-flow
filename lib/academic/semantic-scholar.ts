@@ -2,10 +2,18 @@
  * Semantic Scholar API 客户端
  *
  * 文档：https://api.semanticscholar.org/api-docs/
- * 免费，无需 API Key（注册可提高速率限制：100 req/5min）
+ * 免费，无需 API Key（注册可提高速率限制：100 req/5min → 1 req/sec）
+ * 注册地址：https://www.semanticscholar.org/product/api#api-key
  */
 
 const BASE_URL = "https://api.semanticscholar.org/graph/v1";
+const S2_API_KEY = process.env.S2_API_KEY;
+
+function s2Headers(): HeadersInit {
+  const headers: HeadersInit = {};
+  if (S2_API_KEY) headers["x-api-key"] = S2_API_KEY;
+  return headers;
+}
 
 export interface S2Paper {
   paperId: string;
@@ -70,12 +78,12 @@ export async function searchSemanticScholar(
   if (minYear) params.set("year", `${minYear}-${maxYear || new Date().getFullYear()}`);
   if (minCitationCount) params.set("minCitationCount", String(minCitationCount));
 
-  const res = await fetch(`${BASE_URL}/paper/search?${params}`);
+  const res = await fetch(`${BASE_URL}/paper/search?${params}`, { headers: s2Headers() });
   if (!res.ok) {
     if (res.status === 429) {
       // 限流，等待后重试
       await sleep(5000);
-      const retry = await fetch(`${BASE_URL}/paper/search?${params}`);
+      const retry = await fetch(`${BASE_URL}/paper/search?${params}`, { headers: s2Headers() });
       if (!retry.ok) throw new Error(`S2 search failed after retry: ${retry.status}`);
       const retryData = await retry.json();
       return (retryData.data || []).map(mapS2Paper);
@@ -97,7 +105,7 @@ export async function getPaperById(
   const identifier = idType === "DOI" ? `DOI:${id}` :
                      idType === "PMID" ? `PMID:${id}` : id;
 
-  const res = await fetch(`${BASE_URL}/paper/${identifier}?fields=${FIELDS}`);
+  const res = await fetch(`${BASE_URL}/paper/${identifier}?fields=${FIELDS}`, { headers: s2Headers() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`S2 getPaper failed: ${res.status}`);
 
@@ -113,7 +121,8 @@ export async function getCitations(
   maxResults: number = 10
 ): Promise<S2Paper[]> {
   const res = await fetch(
-    `${BASE_URL}/paper/${paperId}/citations?fields=${FIELDS}&limit=${maxResults}`
+    `${BASE_URL}/paper/${paperId}/citations?fields=${FIELDS}&limit=${maxResults}`,
+    { headers: s2Headers() }
   );
   if (!res.ok) throw new Error(`S2 citations failed: ${res.status}`);
 
@@ -131,7 +140,8 @@ export async function getReferences(
   maxResults: number = 10
 ): Promise<S2Paper[]> {
   const res = await fetch(
-    `${BASE_URL}/paper/${paperId}/references?fields=${FIELDS}&limit=${maxResults}`
+    `${BASE_URL}/paper/${paperId}/references?fields=${FIELDS}&limit=${maxResults}`,
+    { headers: s2Headers() }
   );
   if (!res.ok) throw new Error(`S2 references failed: ${res.status}`);
 

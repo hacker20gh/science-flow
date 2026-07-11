@@ -8,7 +8,7 @@ import {
   ExternalLink, Trash2, RefreshCw, Loader2, Download, Filter, ArrowUpDown,
 } from "lucide-react";
 import { PapersSkeleton } from "@/components/skeletons";
-import { consumeSSEStream } from "@/lib/llm/streaming";
+import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import { toast } from "sonner";
 import { exportToBibtex, exportToRis, downloadFile } from "@/lib/export";
 import {
@@ -586,6 +586,9 @@ function PaperCard({
       });
 
       toast.success("提取完成", { description: `提取到 ${exps.length} 个实验数据` });
+      // 通知 Brain 页面有新的提取结果
+      window.dispatchEvent(new CustomEvent("extraction-done", { detail: { projectId } }));
+      localStorage.setItem(`extraction-done-${projectId}`, String(Date.now()));
       const updatedRes = await fetch(`/api/projects/${projectId}/papers`);
       if (updatedRes.ok) {
         const updatedData = await updatedRes.json();

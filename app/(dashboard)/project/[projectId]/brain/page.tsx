@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Plus } from "lucide-react";
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
@@ -33,6 +34,10 @@ export default function BrainPage() {
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([]);
   const [dbMatrix, setDbMatrix] = useState<MatrixData | null>(null);
   const [matrixLoading, setMatrixLoading] = useState(true);
+  const [rebuilding, setRebuilding] = useState(false);
+  const lastBuildCountRef = useRef(0);
+  const [hasNewExtractions, setHasNewExtractions] = useState(false);
+  const rebuildGuardRef = useRef(false);
   const [dbExtractions, setDbExtractions] = useState<DBExtraction[] | null>(null);
 
   // Hypothesis CRUD state
@@ -47,7 +52,9 @@ export default function BrainPage() {
       .then((data) => {
         if (data.hypotheses) setHypotheses(data.hypotheses);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[Brain] Failed to load hypotheses:", err);
+      });
   }, [projectId]);
 
   const handleCreateHypothesis = useCallback(
@@ -122,15 +129,54 @@ export default function BrainPage() {
     [formMode, editingHypothesis, handleCreateHypothesis, handleUpdateHypothesis]
   );
 
+  // 重建矩阵
+  const rebuildMatrix = useCallback(async () => {
+    if (!projectId || rebuildGuardRef.current) return;
+    rebuildGuardRef.current = true;
+    setRebuilding(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/extractions`);
+      if (!res.ok) throw new Error(`Extractions API returned ${res.status}`);
+      const data = await res.json();
+      const extractions = data.extractions as DBExtraction[];
+      if (extractions && extractions.length > 0) {
+        const generated = generateMatrixFromDB(extractions);
+        setDbMatrix(generated);
+        lastBuildCountRef.current = extractions.length;
+        setHasNewExtractions(false);
+        // 持久化
+        await fetch(`/api/projects/${projectId}/matrix`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: generated }),
+        });
+      }
+    } catch (e) {
+      console.error("Failed to rebuild matrix:", e);
+    } finally {
+      rebuildGuardRef.current = false;
+      setRebuilding(false);
+    }
+  }, [projectId]);
+
   // 从 DB 获取真实提取数据（直接用于矩阵生成）
   useEffect(() => {
     if (!projectId) return;
     fetch(`/api/projects/${projectId}/extractions`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.extractions) setDbExtractions(data.extractions);
+        if (data.extractions) {
+          setDbExtractions(data.extractions);
+          // 检测是否有新的提取结果（与上次构建矩阵时的提取数量比较）
+          if (lastBuildCountRef.current > 0 && data.extractions.length > lastBuildCountRef.current) {
+            setHasNewExtractions(true);
+          }
+        }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[Brain] Failed to load extractions:", err);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // 从 DB 文献构建 extractedPapers（用于 fallback）
@@ -165,7 +211,9 @@ export default function BrainPage() {
       .then((data) => {
         if (data.hypotheses) setHypotheses(data.hypotheses);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[Brain] Failed to load hypotheses (DB):", err);
+      });
   }, [projectId, useDemo]);
 
   // 注册当前项目 ID 到 store（fire-and-forget 持久化用）
@@ -183,17 +231,24 @@ export default function BrainPage() {
       .then((data) => {
         if (data.matrix?.data) {
           // DB 有矩阵，直接使用
-          setDbMatrix(data.matrix.data as MatrixData);
+          const m = data.matrix.data as MatrixData;
+          setDbMatrix(m);
+          // 用 dbExtractions 的数量（如果已加载），而非 totalExperiments
+          if (dbExtractions) lastBuildCountRef.current = dbExtractions.length;
         } else if (dbExtractions && dbExtractions.length > 0) {
           // DB 没有矩阵，从 DB 提取数据实时生成并保存
           const generated = generateMatrixFromDB(dbExtractions);
           setDbMatrix(generated);
+          lastBuildCountRef.current = dbExtractions.length;
           // fire-and-forget 保存
           fetch(`/api/projects/${projectId}/matrix`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ data: generated }),
-          }).catch(() => {});
+          }).catch((err) => {
+            console.error("[Brain] Failed to save matrix (from DB extractions):", err);
+            toast.error("机制矩阵保存失败");
+          });
         } else if (extractedPapers.length > 0) {
           // 从 store 数据实时生成（fallback）
           const generated = generateMatrix(
@@ -205,16 +260,48 @@ export default function BrainPage() {
             }))
           );
           setDbMatrix(generated);
+          lastBuildCountRef.current = extractedPapers.length;
           fetch(`/api/projects/${projectId}/matrix`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ data: generated }),
-          }).catch(() => {});
+          }).catch((err) => {
+            console.error("[Brain] Failed to save matrix (from store fallback):", err);
+            toast.error("机制矩阵保存失败");
+          });
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("[Brain] Failed to load matrix from DB:", err);
+      })
       .finally(() => setMatrixLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // 监听提取完成事件（同 tab 和跨 tab）
+  useEffect(() => {
+    if (!projectId) return;
+
+    const onExtractionDone = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { projectId?: string } | undefined;
+      if (detail?.projectId === projectId) {
+        setHasNewExtractions(true);
+      }
+    };
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === `extraction-done-${projectId}`) {
+        setHasNewExtractions(true);
+      }
+    };
+
+    window.addEventListener("extraction-done", onExtractionDone);
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      window.removeEventListener("extraction-done", onExtractionDone);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [projectId]);
 
   const matrixData = useMemo(() => {
@@ -255,6 +342,23 @@ export default function BrainPage() {
 
   return (
     <main className="p-8 max-w-7xl mx-auto space-y-8">
+      {/* 新提取结果提示 */}
+      {hasNewExtractions && !useDemo && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <RefreshCw size={14} />
+            检测到新的提取结果，矩阵可能需要更新
+          </span>
+          <button
+            onClick={rebuildMatrix}
+            disabled={rebuilding}
+            className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            {rebuilding ? "更新中…" : "立即更新"}
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold mb-1 flex items-center gap-2">
@@ -264,7 +368,7 @@ export default function BrainPage() {
           <p className="text-gray-500 text-sm">
             {useDemo
               ? "展示数据 — 搜索文献并提取后，真实数据会替代这里"
-              : `${extractedPapers.length} 篇文献 · ${matrixData.totalExperiments} 个实验`}
+              : `${dbExtractions?.length ?? extractedPapers.length} 条实验数据 · 来自 ${extractedPapers.length} 篇文献`}
           </p>
         </div>
         {useDemo && (
@@ -309,8 +413,25 @@ export default function BrainPage() {
         transition={{ duration: 0.4, delay: 0.1 }}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">机制矩阵</h2>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            机制矩阵
+            {hasNewExtractions && !useDemo && (
+              <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-normal">
+                有更新
+              </span>
+            )}
+          </h2>
           <div className="flex gap-2">
+            {!useDemo && (
+              <button
+                onClick={rebuildMatrix}
+                disabled={rebuilding}
+                className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1"
+              >
+                <RefreshCw size={12} className={rebuilding ? "animate-spin" : ""} />
+                {rebuilding ? "重建中…" : "重建矩阵"}
+              </button>
+            )}
             <button
               onClick={() => {
                 const csv = exportMatrixToCsv(matrixData);

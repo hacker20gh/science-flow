@@ -196,7 +196,9 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error("[Chat] Failed to save conversation title:", err);
+      });
     }
 
     const abortController = new AbortController();

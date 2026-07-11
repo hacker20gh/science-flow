@@ -12,6 +12,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { trackTokenUsage } from "@/lib/token-tracker";
+import { AsyncLocalStorage } from "async_hooks";
 
 // 默认配置
 const DEFAULT_BASE_URL = "http://127.0.0.1:15721";
@@ -20,6 +21,14 @@ const DEFAULT_MODELS = {
   chat: "claude-sonnet-5",
   analysis: "claude-opus-4-8",
 };
+
+// ===== 重试状态追踪（AsyncLocalStorage，避免并发竞态） =====
+const retryStorage = new AsyncLocalStorage<{ isRetry: boolean }>();
+
+/** 获取当前异步上下文的重试状态 */
+export function getIsRetryMode(): boolean {
+  return retryStorage.getStore()?.isRetry ?? false;
+}
 
 // 服务器端单例客户端
 let client: Anthropic | null = null;
@@ -89,7 +98,7 @@ export function getLLMClient(baseUrl?: string): Anthropic {
       if (result && typeof result === "object" && "usage" in result) {
         const usage = (result as { usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number } }).usage;
         if (usage) {
-          const feature = detectFeature(params?.system);
+          const feature = (params?._sciflowFeature as string) || detectFeature(params?.system);
           trackTokenUsage({
             feature,
             model: (params?.model as string) || "unknown",
@@ -97,6 +106,7 @@ export function getLLMClient(baseUrl?: string): Anthropic {
             outputTokens: usage.output_tokens,
             cachedTokens: usage.cache_read_input_tokens || 0,
             durationMs: duration,
+            isRetry: getIsRetryMode(),
           });
         }
       }
@@ -201,11 +211,31 @@ export async function withLLMRetry<T>(
   const label = opts?.label ?? "LLM";
 
   let lastError: unknown;
+  // 确保当前异步上下文有 retryStorage
+  const existingStore = retryStorage.getStore();
+  if (!existingStore) {
+    return retryStorage.run({ isRetry: false }, () => withLLMRetry(fn, opts));
+  }
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // 每个 attempt 更新当前异步上下文的重试状态
+    existingStore.isRetry = attempt > 0;
+    const attemptStart = Date.now();
     try {
       return await fn();
     } catch (error) {
+      const attemptDuration = Date.now() - attemptStart;
       lastError = error;
+
+      // 记录失败调用（token 为 0，但记录耗时和失败事实）
+      trackTokenUsage({
+        feature: label,
+        model: "unknown",
+        inputTokens: 0,
+        outputTokens: 0,
+        durationMs: attemptDuration,
+        isRetry: attempt > 0,
+      });
 
       // 不可重试的错误，直接抛
       if (!isRetryableError(error)) {

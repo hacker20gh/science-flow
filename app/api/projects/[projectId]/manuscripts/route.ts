@@ -47,6 +47,7 @@ export async function POST(
           methods: body.methods || null,
           results: body.results || null,
           discussion: body.discussion || null,
+          references: body.references || null,
         },
       });
 
@@ -66,5 +67,44 @@ export async function POST(
   } catch (error) {
     console.error("Failed to create manuscript:", error);
     return Response.json({ error: "创建论文草稿失败" }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+
+  const { projectId } = await params;
+
+  try {
+    const body = await req.json();
+
+    if (!body.manuscriptId) {
+      return Response.json({ error: "缺少 manuscriptId" }, { status: 400 });
+    }
+
+    const manuscript = await prisma.manuscript.update({
+      where: {
+        id: body.manuscriptId,
+        projectId, // ensure ownership
+      },
+      data: {
+        abstract: body.abstract ?? undefined,
+        introduction: body.introduction ?? undefined,
+        methods: body.methods ?? undefined,
+        results: body.results ?? undefined,
+        discussion: body.discussion ?? undefined,
+        references: body.references ?? undefined,
+      },
+    });
+
+    return Response.json({ manuscript });
+  } catch (error) {
+    console.error("Failed to update manuscript:", error);
+    return Response.json({ error: "更新论文草稿失败" }, { status: 500 });
   }
 }

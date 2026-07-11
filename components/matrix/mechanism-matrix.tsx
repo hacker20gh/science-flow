@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
+import { toast } from "sonner";
 import {
   DndContext,
   closestCenter,
@@ -27,6 +28,7 @@ import {
   Maximize2,
   Minimize2,
   GripVertical,
+  ArrowUpDown,
 } from "lucide-react";
 import type {
   MatrixData,
@@ -65,7 +67,7 @@ function SortableColumnHeader({
       style={style}
       className={`${ds.header} text-center font-semibold min-w-[110px] border-b-2 group ${
         hasConflict
-          ? "border-b-amber-400 bg-amber-50/80"
+          ? "border-b-amber-400 bg-amber-50"
           : "border-b-gray-200 bg-gradient-to-b from-gray-50 to-gray-100"
       }`}
     >
@@ -110,6 +112,16 @@ interface MechanismMatrixProps {
 }
 
 type Density = "compact" | "comfortable" | "spacious";
+type SortKey = "paper" | "drug" | "cellLine" | "year" | "completeness";
+type SortDir = "asc" | "desc";
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "paper", label: "文献" },
+  { key: "drug", label: "药物" },
+  { key: "cellLine", label: "细胞系" },
+  { key: "year", label: "年份" },
+  { key: "completeness", label: "数据量" },
+];
 
 const DENSITY_STYLES: Record<Density, { cell: string; header: string; row: string }> = {
   compact: { cell: "px-2 py-1", header: "px-2 py-1.5", row: "h-8" },
@@ -135,6 +147,14 @@ export function MechanismMatrix({
   const [showConflicts, setShowConflicts] = useState(true);
   const [data, setData] = useState<MatrixData>(initialData);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<{
+    row: MatrixRow;
+    col: MatrixColumn;
+    cell: MatrixCell;
+    rect: DOMRect;
+  } | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("completeness");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [visibleRowCount, setVisibleRowCount] = useState(50);
   const tableRef = useRef<HTMLDivElement>(null);
 
@@ -192,6 +212,47 @@ export function MechanismMatrix({
       ? data.columns
       : data.columns.filter((c) => c.type === filterType);
 
+  // 排序后的行
+  const sortedRows = useMemo(() => {
+    const rows = [...data.rows];
+    const mul = sortDir === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      switch (sortKey) {
+        case "paper":
+          return mul * a.paperTitle.localeCompare(b.paperTitle);
+        case "drug":
+          return mul * a.drugConc.localeCompare(b.drugConc);
+        case "cellLine":
+          return mul * a.cellLine.localeCompare(b.cellLine);
+        case "year":
+          return mul * ((a.year ?? 0) - (b.year ?? 0));
+        case "completeness":
+          return mul * (Object.keys(a.cells).length - Object.keys(b.cells).length);
+        default:
+          return 0;
+      }
+    });
+    return rows;
+  }, [data.rows, sortKey, sortDir]);
+
+  // 汇总统计：每列的 ↑↓— 计数
+  const summary = useMemo(() => {
+    const map = new Map<string, { up: number; down: number; noChange: number }>();
+    for (const col of data.columns) {
+      map.set(col.id, { up: 0, down: 0, noChange: 0 });
+    }
+    for (const row of data.rows) {
+      for (const [colId, cell] of Object.entries(row.cells)) {
+        const s = map.get(colId);
+        if (!s) continue;
+        if (cell.direction === "up") s.up++;
+        else if (cell.direction === "down") s.down++;
+        else if (cell.direction === "no_change") s.noChange++;
+      }
+    }
+    return map;
+  }, [data.rows, data.columns]);
+
   function handleCellClick(
     row: MatrixRow,
     col: MatrixColumn,
@@ -225,7 +286,10 @@ export function MechanismMatrix({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ columns: reordered.map((c) => c.id) }),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error("[Matrix] Failed to save column order:", err);
+        toast.error("列排序保存失败，刷新后可能恢复原状");
+      });
       onMatrixUpdate?.(updated);
       return updated;
     });
@@ -294,6 +358,30 @@ export function MechanismMatrix({
                 {t === "all" ? "全部" : t === "pathway" ? "🧬 通路" : "🔬 表型"}
               </button>
             ))}
+          </div>
+
+          {/* 排序 */}
+          <div className="flex items-center gap-1.5 border-l border-gray-200 pl-3">
+            <ArrowUpDown size={12} className="text-gray-400" />
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="text-xs bg-gray-100 text-gray-600 rounded px-2 py-1 border-0 focus:ring-1 focus:ring-blue-300"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+              className="p-1 rounded hover:bg-gray-200 text-gray-500"
+              title={sortDir === "asc" ? "升序" : "降序"}
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${sortDir === "asc" ? "rotate-180" : ""}`}
+              />
+            </button>
           </div>
 
           {/* 密度切换 */}
@@ -395,22 +483,22 @@ export function MechanismMatrix({
       )}
 
       {/* 矩阵表格 */}
-      <div ref={tableRef} className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
+      <div ref={tableRef} className="overflow-auto border border-gray-200 rounded-xl shadow-sm max-h-[70vh]">
         <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <table className="min-w-full text-xs border-collapse">
             {/* 表头 */}
-            <thead>
+            <thead className="sticky top-0 z-20">
               <tr>
                 {/* 左上角固定列头 */}
                 <th
-                  className={`${ds.header} text-left font-semibold text-gray-700 sticky left-0 z-20 min-w-[200px] border-r border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100`}
+                  className={`${ds.header} text-left font-semibold text-gray-700 sticky left-0 z-30 min-w-[260px] border-r border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100`}
                 >
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm">📋</span>
                     <span>文献 · 实验条件</span>
                   </div>
                   <div className="text-[10px] text-gray-400 font-normal mt-0.5">
-                    {data.rows.length} 行数据
+                    {sortedRows.length} 行数据
                   </div>
                 </th>
 
@@ -430,15 +518,18 @@ export function MechanismMatrix({
 
           {/* 表体 — paginated */}
           <tbody>
-            {data.rows.slice(0, visibleRowCount).map((row, rowIdx) => {
+            {sortedRows.slice(0, visibleRowCount).map((row, rowIdx) => {
               const isHovered = hoveredRow === row.id;
+              const prevRow = rowIdx > 0 ? sortedRows[rowIdx - 1] : null;
+              const sameSource = prevRow?.paperId === row.paperId;
               return (
                 <tr
                   key={row.id}
                   onMouseEnter={() => setHoveredRow(row.id)}
                   onMouseLeave={() => setHoveredRow(null)}
                   className={`
-                    border-t border-gray-100 transition-colors
+                    border-t transition-colors
+                    ${sameSource ? "border-t-blue-100" : "border-t-gray-100"}
                     ${rowIdx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
                     ${isHovered ? "bg-blue-50/40 !important" : ""}
                   `}
@@ -446,28 +537,37 @@ export function MechanismMatrix({
                   {/* 文献+实验条件（固定列） */}
                   <td
                     className={`
-                      ${ds.cell} sticky left-0 z-10 border-r border-gray-200 transition-colors
+                      ${ds.cell} sticky left-0 z-10 border-r transition-colors relative
+                      ${sameSource ? "border-l-2 border-l-blue-400 border-r-gray-200" : "border-r-gray-200"}
                       ${rowIdx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
                       ${isHovered ? "bg-blue-50/40 !important" : ""}
                     `}
                   >
-                    <div className="flex items-start gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div
-                          className="font-medium text-gray-800 truncate max-w-[180px]"
-                          title={row.paperTitle}
-                        >
-                          {row.drugConc || row.paperTitle}
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-gray-500 truncate max-w-[120px]" title={row.cellLine}>
-                            {row.cellLine}
-                          </span>
-                          {row.year && (
-                            <span className="text-gray-400 shrink-0">· {row.year}</span>
-                          )}
-                        </div>
+                    <div className="space-y-0.5 min-w-0">
+                      {/* 第一层：药物+浓度（主标识，粗体） */}
+                      <div className="font-semibold text-gray-900 text-[13px] truncate" title={row.drugConc}>
+                        {row.drugConc || "—"}
                       </div>
+                      {/* 第二层：细胞系 · 物种 */}
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="text-gray-600 truncate">{row.cellLine}</span>
+                        {row.species && (
+                          <>
+                            <span className="text-gray-300">·</span>
+                            <span className="text-gray-500 truncate">{row.species}</span>
+                          </>
+                        )}
+                      </div>
+                      {/* 第三层：论文来源（2行截断） */}
+                      <div className="text-[11px] text-gray-400 leading-tight line-clamp-2" title={row.paperTitle}>
+                        {row.paperTitle}
+                      </div>
+                      {/* 年份标签 */}
+                      {row.year && (
+                        <span className="inline-block text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded mt-0.5">
+                          {row.year}
+                        </span>
+                      )}
                     </div>
                   </td>
 
@@ -486,7 +586,13 @@ export function MechanismMatrix({
                       <td
                         key={col.id}
                         onClick={(e) => handleCellClick(row, col, e.currentTarget, cell || undefined)}
-                        title={cell ? `证据强度: ${cell.evidenceStrength ?? "?"}/100 — ${strength?.label ?? "未知"}` : undefined}
+                        onMouseEnter={(e) => {
+                          if (cell?.direction) {
+                            setHoveredCell({ row, col, cell, rect: e.currentTarget.getBoundingClientRect() });
+                          }
+                        }}
+                        onMouseLeave={() => setHoveredCell(null)}
+                        title={undefined}
                         className={`
                           ${ds.cell} text-center cursor-pointer transition-all relative group
                           ${isEmpty
@@ -549,19 +655,42 @@ export function MechanismMatrix({
               );
             })}
           </tbody>
+
+          {/* 汇总统计行 */}
+          <tfoot className="sticky bottom-0 z-10">
+            <tr className="bg-gray-100 border-t-2 border-gray-300">
+              <td className={`${ds.cell} sticky left-0 z-20 font-semibold text-gray-600 bg-gray-100 border-r border-gray-200`}>
+                汇总
+              </td>
+              {visibleColumns.map((col) => {
+                const s = summary.get(col.id);
+                if (!s) return <td key={col.id} className={`${ds.cell} text-center text-gray-400`}>—</td>;
+                const total = s.up + s.down + s.noChange;
+                if (total === 0) return <td key={col.id} className={`${ds.cell} text-center text-gray-400`}>—</td>;
+                return (
+                  <td key={col.id} className={`${ds.cell} text-center font-medium`}>
+                    {s.up > 0 && <span className="text-green-600">{s.up}↑</span>}
+                    {s.up > 0 && s.down > 0 && <span className="text-gray-300 mx-0.5"> </span>}
+                    {s.down > 0 && <span className="text-red-600">{s.down}↓</span>}
+                    {s.noChange > 0 && <span className="text-gray-400 ml-1">{s.noChange}—</span>}
+                  </td>
+                );
+              })}
+            </tr>
+          </tfoot>
         </table>
         </DndContext>
       </div>
 
       {/* 分页：超过50行时显示 */}
-      {data.rows.length > 50 && (
+      {sortedRows.length > 50 && (
         <div className="flex items-center justify-between text-xs text-gray-500 px-1">
           <span>
-            第 1–{Math.min(visibleRowCount, data.rows.length)} 行，共 {data.rows.length} 行
+            第 1–{Math.min(visibleRowCount, sortedRows.length)} 行，共 {sortedRows.length} 行
           </span>
-          {visibleRowCount < data.rows.length && (
+          {visibleRowCount < sortedRows.length && (
             <button
-              onClick={() => setVisibleRowCount((prev) => Math.min(prev + 50, data.rows.length))}
+              onClick={() => setVisibleRowCount((prev) => Math.min(prev + 50, sortedRows.length))}
               className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
             >
               加载更多（+50 行）
@@ -591,6 +720,58 @@ export function MechanismMatrix({
           </span>
         </div>
       </div>
+
+      {/* Hover Tooltip */}
+      {hoveredCell && (() => {
+        const { row, col, cell, rect } = hoveredCell;
+        const strength = cell.evidenceStrength != null ? getStrengthLevel(cell.evidenceStrength) : null;
+        const isUp = cell.direction === "up";
+        const isDown = cell.direction === "down";
+        const TOOLTIP_WIDTH = 280;
+        const MARGIN = 8;
+        let left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
+        let top = rect.top - MARGIN;
+        if (left < MARGIN) left = MARGIN;
+        if (left + TOOLTIP_WIDTH > window.innerWidth - MARGIN) left = window.innerWidth - MARGIN - TOOLTIP_WIDTH;
+        // 默认显示在上方，如果上方不够则显示在下方
+        const showBelow = top < 160;
+        if (showBelow) top = rect.bottom + MARGIN;
+        else top = top - 120; // 估算 tooltip 高度
+
+        return (
+          <div
+            className="fixed z-50 bg-gray-900 text-white rounded-lg shadow-xl p-3 pointer-events-none"
+            style={{ left, top, width: TOOLTIP_WIDTH }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`text-base font-bold ${isUp ? "text-green-400" : isDown ? "text-red-400" : "text-gray-400"}`}>
+                {isUp ? "↑" : isDown ? "↓" : "—"} {isUp ? "上调" : isDown ? "下调" : "无变化"}
+              </span>
+              {strength && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                  (cell.evidenceStrength ?? 0) >= 80 ? "bg-green-800 text-green-200"
+                  : (cell.evidenceStrength ?? 0) >= 60 ? "bg-green-900 text-green-300"
+                  : (cell.evidenceStrength ?? 0) >= 40 ? "bg-amber-900 text-amber-200"
+                  : "bg-gray-700 text-gray-300"
+                }`}>
+                  {cell.evidenceStrength}/100 · {strength.label}
+                </span>
+              )}
+            </div>
+            <div className="space-y-1 text-[11px] text-gray-300">
+              {cell.significance && <div><span className="text-gray-500">显著性：</span>{cell.significance}</div>}
+              {cell.method && <div><span className="text-gray-500">方法：</span>{cell.method}</div>}
+              <div><span className="text-gray-500">条件：</span>{row.drugConc} · {row.cellLine}</div>
+              {cell.evidenceQuote && (
+                <div className="mt-1.5 pt-1.5 border-t border-gray-700">
+                  <span className="text-gray-500">原文：</span>
+                  <span className="italic text-gray-400 line-clamp-2">&ldquo;{cell.evidenceQuote}&rdquo;</span>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 单元格内联编辑器 */}
       {editingCell && (
