@@ -1,25 +1,27 @@
 /**
  * Token 消耗追踪器
  *
- * 内存存储 + 持久化到 localStorage（前端）。
+ * 双层存储：内存缓存 + DB 持久化。
  * 每次 LLM 调用后记录 input/output tokens。
  */
 
+import { prisma } from "@/lib/db-server";
+
 export interface TokenUsageRecord {
   id: string;
-  timestamp: number;
   feature: string;
   model: string;
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
   durationMs: number;
-  isRetry?: boolean; // 标记是否为重试调用
+  isRetry: boolean;
+  createdAt: Date;
 }
 
-// 服务端内存存储
-const usageHistory: TokenUsageRecord[] = [];
-const MAX_RECORDS = 1000;
+// 内存缓存（最近 100 条，用于快速返回）
+const memoryCache: TokenUsageRecord[] = [];
+const MEMORY_MAX = 100;
 
 // 模型单价（每 1M tokens，美元）
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
@@ -33,12 +35,13 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 };
 
 function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
-  const pricing = MODEL_PRICING[model] || { input: 3, output: 15 }; // 默认 sonnet 价格
+  const pricing = MODEL_PRICING[model] || { input: 3, output: 15 };
   return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
 }
 
 /**
  * 记录一次 LLM 调用的 token 用量
+ * 同时写入内存缓存和 DB（DB 异步，不阻塞）
  */
 export function trackTokenUsage(params: {
   feature: string;
@@ -50,8 +53,7 @@ export function trackTokenUsage(params: {
   isRetry?: boolean;
 }): void {
   const record: TokenUsageRecord = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    timestamp: Date.now(),
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     feature: params.feature,
     model: params.model,
     inputTokens: params.inputTokens,
@@ -59,24 +61,60 @@ export function trackTokenUsage(params: {
     cachedTokens: params.cachedTokens || 0,
     durationMs: params.durationMs || 0,
     isRetry: params.isRetry || false,
+    createdAt: new Date(),
   };
 
-  usageHistory.push(record);
-  if (usageHistory.length > MAX_RECORDS) {
-    usageHistory.shift();
+  // 内存缓存
+  memoryCache.push(record);
+  if (memoryCache.length > MEMORY_MAX) memoryCache.shift();
+
+  // DB 持久化（异步，不阻塞调用方）
+  if (prisma) {
+    (prisma as { tokenUsage?: { create: (args: { data: Record<string, unknown> }) => Promise<unknown> } }).tokenUsage?.create({
+      data: {
+        id: record.id,
+        feature: record.feature,
+        model: record.model,
+        inputTokens: record.inputTokens,
+        outputTokens: record.outputTokens,
+        cachedTokens: record.cachedTokens,
+        durationMs: record.durationMs,
+        isRetry: record.isRetry,
+      },
+    }).catch((err: unknown) => {
+      console.warn("[token-tracker] DB write failed:", (err as Error)?.message);
+    });
   }
 }
 
 /**
- * 获取 token 用量统计
+ * 获取 token 用量统计（从 DB 读取，包含历史数据）
  */
-export function getTokenUsageStats(timeRange?: { start: number; end: number }) {
-  const filtered = timeRange
-    ? usageHistory.filter((r) => r.timestamp >= timeRange.start && r.timestamp <= timeRange.end)
-    : usageHistory;
+export async function getTokenUsageStats(): Promise<ReturnType<typeof buildStats>> {
+  if (!prisma) {
+    return buildStats(memoryCache);
+  }
 
+  try {
+    // 从 DB 读取最近 7 天的记录
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const records = await (prisma as any).tokenUsage.findMany({
+      where: { createdAt: { gte: sevenDaysAgo } },
+      orderBy: { createdAt: "desc" },
+      take: 5000,
+    });
+
+    return buildStats(records as TokenUsageRecord[]);
+  } catch (err) {
+    console.warn("[token-tracker] DB read failed, using memory cache:", (err as Error)?.message);
+    return buildStats(memoryCache);
+  }
+}
+
+function buildStats(records: TokenUsageRecord[]) {
   // 总计
-  const totals = filtered.reduce(
+  const totals = records.reduce(
     (acc, r) => ({
       inputTokens: acc.inputTokens + r.inputTokens,
       outputTokens: acc.outputTokens + r.outputTokens,
@@ -90,7 +128,7 @@ export function getTokenUsageStats(timeRange?: { start: number; end: number }) {
 
   // 按功能分组
   const byFeature = new Map<string, { inputTokens: number; outputTokens: number; calls: number; costUSD: number }>();
-  for (const r of filtered) {
+  for (const r of records) {
     const existing = byFeature.get(r.feature) || { inputTokens: 0, outputTokens: 0, calls: 0, costUSD: 0 };
     existing.inputTokens += r.inputTokens;
     existing.outputTokens += r.outputTokens;
@@ -101,7 +139,7 @@ export function getTokenUsageStats(timeRange?: { start: number; end: number }) {
 
   // 按模型分组
   const byModel = new Map<string, { inputTokens: number; outputTokens: number; calls: number; costUSD: number }>();
-  for (const r of filtered) {
+  for (const r of records) {
     const existing = byModel.get(r.model) || { inputTokens: 0, outputTokens: 0, calls: 0, costUSD: 0 };
     existing.inputTokens += r.inputTokens;
     existing.outputTokens += r.outputTokens;
@@ -113,9 +151,9 @@ export function getTokenUsageStats(timeRange?: { start: number; end: number }) {
   // 按小时分组（最近 24 小时）
   const hourlyMap = new Map<string, { inputTokens: number; outputTokens: number; calls: number }>();
   const now = Date.now();
-  const last24h = filtered.filter((r) => now - r.timestamp < 24 * 60 * 60 * 1000);
+  const last24h = records.filter((r) => now - new Date(r.createdAt).getTime() < 24 * 60 * 60 * 1000);
   for (const r of last24h) {
-    const hour = new Date(r.timestamp).toISOString().slice(0, 13); // "2026-07-11T13"
+    const hour = new Date(r.createdAt).toISOString().slice(0, 13);
     const existing = hourlyMap.get(hour) || { inputTokens: 0, outputTokens: 0, calls: 0 };
     existing.inputTokens += r.inputTokens;
     existing.outputTokens += r.outputTokens;
@@ -132,15 +170,16 @@ export function getTokenUsageStats(timeRange?: { start: number; end: number }) {
     .sort((a, b) => b.costUSD - a.costUSD);
 
   // 最近记录
-  const recentRecords = filtered.slice(-20).reverse().map((r) => ({
+  const recentRecords = records.slice(0, 20).map((r) => ({
     ...r,
+    timestamp: new Date(r.createdAt).getTime(),
     costUSD: estimateCost(r.model, r.inputTokens, r.outputTokens),
   }));
 
   return {
     totals: {
       ...totals,
-      costCNY: totals.costUSD * 7.2, // 粗略汇率
+      costCNY: totals.costUSD * 7.2,
     },
     byFeature: Object.fromEntries(byFeature),
     byModel: Object.fromEntries(byModel),

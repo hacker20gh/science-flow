@@ -327,3 +327,20 @@ model CourseProgress {
   @@unique([userId, courseId, lessonId])
   @@index([userId, courseId])
 }
+
+// ===== Token 用量追踪 =====
+
+model TokenUsage {
+  id           String   @id @default(cuid())
+  feature      String   // extraction, chat, design, troubleshoot, analysis, manuscript, review, preprocess
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  cachedTokens Int      @default(0)
+  durationMs   Int      @default(0)
+  isRetry      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([feature, createdAt])
+  @@index([createdAt])
+}
