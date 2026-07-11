@@ -1,5 +1,10 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
+
+export interface PastedImage {
+  data: string; // base64 data URL
+  type: string; // MIME type like 'image/png'
+}
 
 interface ChatInputProps {
   input: string;
@@ -9,9 +14,21 @@ interface ChatInputProps {
   onStop: () => void;
   attachedFile?: File | null;
   onFileSelect?: (file: File | null) => void;
+  pastedImage?: PastedImage | null;
+  onImagePaste?: (image: PastedImage | null) => void;
 }
 
-export function ChatInput({ input, isStreaming, onInputChange, onSend, onStop, attachedFile, onFileSelect }: ChatInputProps) {
+export function ChatInput({
+  input,
+  isStreaming,
+  onInputChange,
+  onSend,
+  onStop,
+  attachedFile,
+  onFileSelect,
+  pastedImage,
+  onImagePaste,
+}: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -49,8 +66,52 @@ export function ChatInput({ input, isStreaming, onInputChange, onSend, onStop, a
     setIsDragOver(false);
   }
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!onImagePaste) return;
+      const items = e.clipboardData.items;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            onImagePaste({
+              data: dataUrl,
+              type: file.type,
+            });
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
+      }
+    },
+    [onImagePaste]
+  );
+
   return (
     <div className="p-3 border-t border-gray-200 bg-white shrink-0">
+      {/* Image preview */}
+      {pastedImage && (
+        <div className="mb-2 relative inline-block">
+          <img
+            src={pastedImage.data}
+            alt="粘贴的图片"
+            className="max-h-24 rounded-lg border border-gray-200"
+          />
+          <button
+            onClick={() => onImagePaste?.(null)}
+            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center hover:bg-red-600 shadow-sm"
+            title="移除图片"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* 附件预览 */}
       {attachedFile && (
         <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
@@ -95,10 +156,11 @@ export function ChatInput({ input, isStreaming, onInputChange, onSend, onStop, a
               if (!isStreaming) onSend();
             }
           }}
+          onPaste={handlePaste}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
-          placeholder={isStreaming ? "AI 正在回复中..." : "问任何关于你课题的问题... (Enter 发送，Shift+Enter 换行)"}
+          placeholder={isStreaming ? "AI 正在回复中..." : "问任何关于你课题的问题... (Enter 发送，Shift+Enter 换行，可粘贴图片)"}
           disabled={isStreaming}
           rows={1}
           className={`flex-1 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400 resize-none min-h-[38px] max-h-[120px] ${
@@ -121,7 +183,7 @@ export function ChatInput({ input, isStreaming, onInputChange, onSend, onStop, a
         ) : (
           <button
             onClick={onSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() && !pastedImage}
             className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed shrink-0 self-end"
           >
             发送

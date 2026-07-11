@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { type Message, type ToolResultData, type ProjectContext, TOOL_LABELS, exportChat } from "@/lib/chat/chat-utils";
 import { ChatHeader } from "./chat-header";
 import { MessageList } from "./message-list";
-import { ChatInput } from "./chat-input";
+import { ChatInput, type PastedImage } from "./chat-input";
+import { ConversationManager } from "./conversation-manager";
 
 interface ChatPanelProps {
   isOpen: boolean;
@@ -26,6 +27,9 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [pendingToolResults, setPendingToolResults] = useState<ToolResultData[]>([]);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [pastedImage, setPastedImage] = useState<PastedImage | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [showConversations, setShowConversations] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -51,12 +55,15 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
   }, []);
 
   // 加载对话历史
-  const loadHistory = useCallback(async () => {
-    if (!projectId || historyLoadedRef.current) return;
-    historyLoadedRef.current = true;
+  const loadHistory = useCallback(async (convId?: string | null) => {
+    if (!projectId) return;
+    const targetConvId = convId !== undefined ? convId : conversationId;
     setIsLoadingHistory(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/chat`);
+      const url = targetConvId
+        ? `/api/projects/${projectId}/chat?conversationId=${targetConvId}`
+        : `/api/projects/${projectId}/chat`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         if (data.messages?.length > 0) {
@@ -67,6 +74,8 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
               timestamp: m.createdAt ? new Date(m.createdAt).getTime() : undefined,
             }))
           );
+        } else {
+          setMessages([]);
         }
       }
     } catch {
@@ -74,11 +83,74 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [projectId]);
+  }, [projectId, conversationId]);
 
+  // 初始化对话：加载列表，选最新或创建新的
   useEffect(() => {
-    if (isOpen && projectId) loadHistory();
-  }, [isOpen, projectId, loadHistory]);
+    if (!isOpen || !projectId || historyLoadedRef.current) return;
+    historyLoadedRef.current = true;
+
+    async function initConversation() {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/conversations`);
+        const data = await res.json();
+        const convs = data.conversations || [];
+
+        if (convs.length > 0) {
+          // Use the most recent conversation
+          const latest = convs[0];
+          setConversationId(latest.id);
+          await loadHistory(latest.id);
+        } else {
+          // Create a new conversation
+          const createRes = await fetch(`/api/projects/${projectId}/conversations`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "新对话" }),
+          });
+          const createData = await createRes.json();
+          if (createData.conversation?.id) {
+            setConversationId(createData.conversation.id);
+          }
+        }
+      } catch {
+        // Silent fallback - chat will work without conversation
+      }
+    }
+
+    initConversation();
+  }, [isOpen, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When switching to a new conversation, load its history
+  const handleSelectConversation = useCallback(
+    async (convId: string) => {
+      if (convId === conversationId) return;
+      setConversationId(convId);
+      setMessages([]);
+      await loadHistory(convId);
+    },
+    [conversationId, loadHistory]
+  );
+
+  // Create a new conversation
+  const handleCreateConversation = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/conversations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "新对话" }),
+      });
+      const data = await res.json();
+      if (data.conversation?.id) {
+        setConversationId(data.conversation.id);
+        setMessages([]);
+        historyLoadedRef.current = false;
+      }
+    } catch {
+      // silent
+    }
+  }, [projectId]);
 
   // 拖拽调整宽度
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -102,7 +174,8 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
   // 发送消息
   async function sendMessage(text?: string, fileData?: { name: string; data: string; type: string } | null) {
     const content = (text || input).trim();
-    if (!content || isStreaming) return;
+    if (!content && !pastedImage) return;
+    if (isStreaming) return;
 
     const userMsg: Message = { role: "user", content, timestamp: Date.now() };
     const newMessages = [...messages, userMsg];
@@ -111,8 +184,20 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
     setIsStreaming(true);
     setPendingToolResults([]);
 
-    // Clear attached file after sending
+    // Clear attached file and pasted image after sending
     if (fileData) setAttachedFile(null);
+    const imageToSend = pastedImage;
+    setPastedImage(null);
+
+    // Auto-generate title from first user message (first 30 chars)
+    if (conversationId && messages.length === 0 && content) {
+      const title = content.slice(0, 30) + (content.length > 30 ? "..." : "");
+      fetch(`/api/projects/${projectId}/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      }).catch(() => {});
+    }
 
     const abortController = new AbortController();
     abortRef.current = abortController;
@@ -121,7 +206,16 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages, projectContext, projectId, attachment: fileData || undefined }),
+        body: JSON.stringify({
+          messages: newMessages,
+          projectContext,
+          projectId,
+          conversationId: conversationId || undefined,
+          attachment: fileData || undefined,
+          imageData: imageToSend
+            ? { data: imageToSend.data.split(",")[1], type: imageToSend.type }
+            : undefined,
+        }),
         signal: abortController.signal,
       });
 
@@ -209,9 +303,11 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
 
   async function clearChat() {
     setMessages([]);
-    historyLoadedRef.current = false;
     if (projectId) {
-      try { await fetch(`/api/projects/${projectId}/chat`, { method: "DELETE" }); } catch { /* */ }
+      const url = conversationId
+        ? `/api/projects/${projectId}/chat?conversationId=${conversationId}`
+        : `/api/projects/${projectId}/chat`;
+      try { await fetch(url, { method: "DELETE" }); } catch { /* */ }
     }
   }
 
@@ -280,18 +376,33 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
       )}
 
       {/* Header */}
-      <ChatHeader
-        messageCount={messages.length}
-        showSearch={showSearch}
-        isFullscreen={isFullscreen}
-        projectName={projectContext?.name}
-        messages={messages}
-        onToggleSearch={() => setShowSearch(!showSearch)}
-        onExport={() => exportChat(messages, projectContext?.name)}
-        onClear={clearChat}
-        onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
-        onClose={onToggle}
-      />
+      <div className="relative">
+        <ChatHeader
+          messageCount={messages.length}
+          showSearch={showSearch}
+          isFullscreen={isFullscreen}
+          projectName={projectContext?.name}
+          messages={messages}
+          onToggleSearch={() => setShowSearch(!showSearch)}
+          onExport={() => exportChat(messages, projectContext?.name)}
+          onClear={clearChat}
+          onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+          onClose={onToggle}
+          onToggleConversations={() => setShowConversations((v) => !v)}
+        />
+
+        {/* Conversation Manager Dropdown */}
+        {projectId && (
+          <ConversationManager
+            projectId={projectId}
+            isOpen={showConversations}
+            activeConversationId={conversationId}
+            onSelect={handleSelectConversation}
+            onCreate={handleCreateConversation}
+            onClose={() => setShowConversations(false)}
+          />
+        )}
+      </div>
 
       {/* 搜索栏 */}
       {showSearch && (
@@ -350,6 +461,8 @@ export function ChatPanel({ isOpen, onToggle, projectId, projectContext }: ChatP
         onStop={stopStreaming}
         attachedFile={attachedFile}
         onFileSelect={setAttachedFile}
+        pastedImage={pastedImage}
+        onImagePaste={setPastedImage}
       />
 
       {/* Markdown 样式 */}

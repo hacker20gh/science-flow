@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
 
-// GET /api/projects/[projectId]/chat — 获取对话历史
+// GET /api/projects/[projectId]/chat?conversationId=xxx — 获取对话历史（可按 conversationId 过滤）
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
@@ -14,6 +14,8 @@ export async function GET(
     }
 
     const { projectId } = await params;
+    const { searchParams } = new URL(req.url);
+    const conversationId = searchParams.get("conversationId");
 
     if (!prisma) {
       return NextResponse.json({ messages: [] });
@@ -23,6 +25,7 @@ export async function GET(
       where: {
         projectId,
         userId: session.user.id,
+        ...(conversationId ? { conversationId } : {}),
       },
       orderBy: { createdAt: "desc" },
       take: 100,
@@ -85,9 +88,9 @@ export async function POST(
   }
 }
 
-// DELETE /api/projects/[projectId]/chat — 清空对话历史
+// DELETE /api/projects/[projectId]/chat?conversationId=xxx — 清空对话历史（可按 conversationId 过滤）
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
@@ -97,6 +100,8 @@ export async function DELETE(
     }
 
     const { projectId } = await params;
+    const { searchParams } = new URL(req.url);
+    const conversationId = searchParams.get("conversationId");
 
     if (!prisma) {
       return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
@@ -106,6 +111,7 @@ export async function DELETE(
       where: {
         projectId,
         userId: session.user.id,
+        ...(conversationId ? { conversationId } : {}),
       },
     });
 

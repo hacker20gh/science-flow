@@ -11,6 +11,7 @@ interface ChatHeaderProps {
   onClear: () => void;
   onToggleFullscreen: () => void;
   onClose: () => void;
+  onToggleConversations?: () => void;
 }
 
 export function ChatHeader({
@@ -24,6 +25,7 @@ export function ChatHeader({
   onClear,
   onToggleFullscreen,
   onClose,
+  onToggleConversations,
 }: ChatHeaderProps) {
   const userMsgCount = messages.filter((m) => m.role === "user").length;
 
@@ -37,6 +39,16 @@ export function ChatHeader({
         )}
       </div>
       <div className="flex items-center gap-0.5">
+        {/* 对话列表 */}
+        {onToggleConversations && (
+          <button
+            onClick={onToggleConversations}
+            className="p-1.5 text-gray-400 hover:text-gray-600 text-xs"
+            title="对话列表"
+          >
+            ☰
+          </button>
+        )}
         {/* 搜索 */}
         <button
           onClick={onToggleSearch}

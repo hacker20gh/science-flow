@@ -7,7 +7,7 @@ import { CHAT_TOOLS, executeTool } from "@/lib/llm/chat-tools";
 
 interface ChatMessage {
   role: "user" | "assistant";
-  content: string;
+  content: string | Array<{ type: string; text?: string; image?: { data: string; type: string } }>;
 }
 
 interface ChatRequest {
@@ -18,8 +18,13 @@ interface ChatRequest {
     hypotheses: string[];
   };
   projectId?: string;
+  conversationId?: string;
   attachment?: {
     name: string;
+    data: string; // base64
+    type: string; // MIME type
+  };
+  imageData?: {
     data: string; // base64
     type: string; // MIME type
   };
@@ -30,7 +35,7 @@ const MAX_TOOL_ROUNDS = 5;
 
 export async function POST(req: NextRequest) {
   const body: ChatRequest = await req.json();
-  const { messages, projectContext, projectId, attachment } = body;
+  const { messages, projectContext, projectId, conversationId, attachment, imageData } = body;
 
   if (!messages || messages.length === 0) {
     return new Response(JSON.stringify({ error: "messages required" }), { status: 400 });
@@ -68,7 +73,16 @@ export async function POST(req: NextRequest) {
 
   // Token 预算管理
   const MESSAGE_BUDGET = 50_000;
-  const managed = manageMessageBudget(messages, MESSAGE_BUDGET);
+  // Normalize content to string for manageMessageBudget
+  const normalizedForBudget = messages.map((m) => ({
+    role: m.role,
+    content: typeof m.content === "string"
+      ? m.content
+      : Array.isArray(m.content)
+        ? m.content.filter((b): b is { type: string; text: string } => b.type === "text").map((b) => b.text).join("\n")
+        : String(m.content),
+  }));
+  const managed = manageMessageBudget(normalizedForBudget, MESSAGE_BUDGET);
 
   const client = getLLMClient();
   const encoder = new TextEncoder();
@@ -83,10 +97,22 @@ export async function POST(req: NextRequest) {
       try {
         // 构建 Anthropic messages 格式
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let apiMessages: any[] = managed.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
+        let apiMessages: any[] = managed.messages.map((m, idx) => {
+          // Last user message may include image data
+          if (idx === managed.messages.length - 1 && m.role === "user" && imageData?.data) {
+            return {
+              role: m.role,
+              content: [
+                { type: "image", source: { type: "base64", media_type: imageData.type, data: imageData.data } },
+                ...(typeof m.content === "string" ? [{ type: "text", text: m.content }] : []),
+              ],
+            };
+          }
+          return {
+            role: m.role,
+            content: m.content,
+          };
+        });
 
         let toolRound = 0;
         // Collect all tool calls across rounds for persistence
@@ -192,13 +218,22 @@ export async function POST(req: NextRequest) {
 
         // 保存消息到 DB
         if (projectId && userId && fullAssistantText) {
+          const lastMsg = messages[messages.length - 1];
+          const userText = lastMsg
+            ? typeof lastMsg.content === "string"
+              ? lastMsg.content
+              : Array.isArray(lastMsg.content)
+                ? lastMsg.content.filter((b): b is { type: string; text: string } => b.type === "text").map((b) => b.text).join("\n")
+                : ""
+            : undefined;
           saveMessages(
             projectId,
             userId,
-            messages[messages.length - 1]?.content,
+            userText,
             fullAssistantText,
             collectedToolCalls.length > 0 ? collectedToolCalls : undefined,
-            MODELS.chat
+            MODELS.chat,
+            conversationId
           ).catch((e) => console.warn("[chat] Failed to save messages:", e));
         }
       } catch (error) {
@@ -224,16 +259,21 @@ async function saveMessages(
   userContent: string | undefined,
   assistantContent: string,
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; output: string }>,
-  modelName?: string
+  modelName?: string,
+  conversationId?: string
 ) {
   if (!prisma) return;
   try {
-    const userData = userContent
-      ? { projectId, userId, role: "user" as string, content: userContent }
-      : null;
-    const assistantData: Record<string, unknown> = {
+    const baseData: Record<string, unknown> = {
       projectId,
       userId,
+      ...(conversationId ? { conversationId } : {}),
+    };
+    const userData = userContent
+      ? { ...baseData, role: "user" as string, content: userContent }
+      : null;
+    const assistantData: Record<string, unknown> = {
+      ...baseData,
       role: "assistant",
       content: assistantContent,
     };
