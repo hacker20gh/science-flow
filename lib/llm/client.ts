@@ -11,6 +11,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { trackTokenUsage } from "@/lib/token-tracker";
 
 // 默认配置
 const DEFAULT_BASE_URL = "http://127.0.0.1:15721";
@@ -75,9 +76,51 @@ export function getLLMClient(baseUrl?: string): Anthropic {
       apiKey: process.env.CCS_API_KEY || "placeholder",
     });
     currentBaseUrl = url;
+
+    // 包装 messages.create，自动追踪 token 用量
+    const originalCreate = client.messages.create.bind(client.messages);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client.messages as any).create = async (params: Record<string, unknown>, _options?: unknown) => {
+      const start = Date.now();
+      const result = await originalCreate(params as unknown as Parameters<typeof originalCreate>[0]);
+      const duration = Date.now() - start;
+
+      // 非流式响应有 usage 字段
+      if (result && typeof result === "object" && "usage" in result) {
+        const usage = (result as { usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number } }).usage;
+        if (usage) {
+          const feature = detectFeature(params?.system);
+          trackTokenUsage({
+            feature,
+            model: (params?.model as string) || "unknown",
+            inputTokens: usage.input_tokens,
+            outputTokens: usage.output_tokens,
+            cachedTokens: usage.cache_read_input_tokens || 0,
+            durationMs: duration,
+          });
+        }
+      }
+      return result;
+    };
   }
 
   return client;
+}
+
+/**
+ * 从 system prompt 推断功能类型
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function detectFeature(system: any): string {
+  const sysText = typeof system === "string" ? system : "";
+  if (sysText.includes("extract") || sysText.includes("biomedical literature analysis")) return "extraction";
+  if (sysText.includes("manuscript") || sysText.includes("academic writer")) return "manuscript";
+  if (sysText.includes("review") || sysText.includes("peer reviewer")) return "review";
+  if (sysText.includes("experiment") || sysText.includes("designing experiments")) return "design";
+  if (sysText.includes("troubleshoot")) return "troubleshoot";
+  if (sysText.includes("biostatistician") || sysText.includes("analyze")) return "analysis";
+  if (sysText.includes("search") || sysText.includes("query")) return "preprocess";
+  return "chat";
 }
 
 export type ModelType = "extraction" | "chat" | "analysis";
