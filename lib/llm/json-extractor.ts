@@ -5,7 +5,7 @@
  * 优先使用 tool_use（Anthropic 原生），文本提取作为 fallback。
  */
 
-import { z } from "zod";
+import { z, toJSONSchema } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Message, Tool } from "@anthropic-ai/sdk/resources/messages";
 
@@ -20,7 +20,9 @@ export function createToolFromSchema(
   description: string,
   schema: z.ZodSchema,
 ): Tool {
-  const jsonSchema = zodToJsonSchema(schema);
+  const jsonSchema = toJSONSchema(schema, { target: "jsonSchema7" });
+  // 移除 additionalProperties，避免 LLM 返回额外字段时被 Zod 拒绝
+  stripAdditionalProperties(jsonSchema);
   return {
     name,
     description,
@@ -29,39 +31,23 @@ export function createToolFromSchema(
 }
 
 /**
- * Zod schema → JSON Schema（递归转换）
+ * 递归移除 JSON Schema 中的 additionalProperties 字段
+ * toJSONSchema 默认添加 additionalProperties: false，会导致 LLM 返回额外字段时校验失败
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function zodToJsonSchema(schema: z.ZodSchema): any {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const def = (schema as any)._def;
-
-  if (def?.typeName === "ZodObject" && def?.shape) {
-    const properties: Record<string, unknown> = {};
-    const required: string[] = [];
-    for (const [key, val] of Object.entries(def.shape)) {
-      properties[key] = zodToJsonSchema(val as z.ZodSchema);
-      // 检查是否可选
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const valDef = (val as any)._def;
-      if (valDef?.typeName !== "ZodOptional" && valDef?.typeName !== "ZodNullable") {
-        required.push(key);
+function stripAdditionalProperties(schema: any): void {
+  if (schema && typeof schema === "object") {
+    delete schema.additionalProperties;
+    if (schema.properties) {
+      for (const val of Object.values(schema.properties)) {
+        stripAdditionalProperties(val);
       }
     }
-    return { type: "object", properties, required };
+    if (schema.items) stripAdditionalProperties(schema.items);
+    if (schema.anyOf) schema.anyOf.forEach(stripAdditionalProperties);
+    if (schema.oneOf) schema.oneOf.forEach(stripAdditionalProperties);
+    if (schema.allOf) schema.allOf.forEach(stripAdditionalProperties);
   }
-  if (def?.typeName === "ZodArray") {
-    return { type: "array", items: zodToJsonSchema(def.type) };
-  }
-  if (def?.typeName === "ZodString") return { type: "string" };
-  if (def?.typeName === "ZodNumber") return { type: "number" };
-  if (def?.typeName === "ZodBoolean") return { type: "boolean" };
-  if (def?.typeName === "ZodNullable") return zodToJsonSchema(def.innerType);
-  if (def?.typeName === "ZodOptional") return zodToJsonSchema(def.innerType);
-  if (def?.typeName === "ZodRecord") return { type: "object", additionalProperties: zodToJsonSchema(def.valueType) };
-  if (def?.typeName === "ZodEnum") return { type: "string", enum: def.values };
-  if (def?.typeName === "ZodLiteral") return { type: "string", const: def.value };
-  return { type: "object" };
 }
 
 // ===== 结构化输出提取 =====

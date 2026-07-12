@@ -10,6 +10,7 @@ import { getLLMClient, MODELS, withLLMRetry, getIsRetryMode } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
 import { trackTokenUsage } from "@/lib/token-tracker";
+import { sleep } from "@/lib/utils/sleep";
 
 // ===== Zod Schema =====
 
@@ -283,8 +284,4 @@ export async function batchExtract(
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   return results;
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }

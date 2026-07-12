@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
+import { mapExtractionToDB } from "@/lib/extraction-mapper";
 
 export async function GET(
   _req: NextRequest,
@@ -28,6 +30,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return Response.json({ error: "未登录" }, { status: 401 });
+  }
+
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
@@ -53,29 +60,7 @@ export async function POST(
     await prisma.$transaction(async (tx: any) => {
       for (const ext of extractions) {
         await tx.extraction.create({
-          data: {
-            paperId,
-            drugName: ext.drug_intervention?.name || null,
-            drugConc: ext.drug_intervention?.concentration || null,
-            duration: ext.drug_intervention?.duration || null,
-            coTreatment: ext.drug_intervention?.co_treatment || null,
-            cellLine: ext.model?.cell_line || null,
-            species: ext.model?.species || null,
-            passage: ext.model?.passage || null,
-            pathway: ext.pathway_effects?.[0]?.pathway || null,
-            pathwayDir: ext.pathway_effects?.[0]?.direction || null,
-            phenotype: ext.phenotype_effects?.[0]?.phenotype || null,
-            phenotypeDir: ext.phenotype_effects?.[0]?.direction || null,
-            method: ext.statistical_test || null,
-            expMethod: ext.pathway_effects?.[0]?.method || null,
-            conclusion: ext.conclusion || null,
-            rawText: ext.evidence_quote || null,
-            pathwayEffects: ext.pathway_effects || undefined,
-            phenotypeEffects: ext.phenotype_effects || undefined,
-            controls: ext.controls || undefined,
-            sampleSize: ext.sample_size || null,
-            confidence: ext.experiments?.length ? 0.8 : null,
-          },
+          data: mapExtractionToDB(ext, paperId),
         });
       }
 
@@ -93,5 +78,38 @@ export async function POST(
   } catch (error) {
     console.error("Failed to save extractions:", error);
     return Response.json({ error: "保存提取结果失败" }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const session = await auth();
+  if (!session?.user) {
+    return Response.json({ error: "未登录" }, { status: 401 });
+  }
+
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+  const { projectId } = await params;
+  try {
+    const body = await req.json();
+    const { extractionId, verified } = body;
+    if (!extractionId || typeof verified !== "boolean") {
+      return Response.json({ error: "extractionId 和 verified 必填" }, { status: 400 });
+    }
+    const updated = await prisma.extraction.updateMany({
+      where: { id: extractionId, paper: { projectId } },
+      data: { verified },
+    });
+    if (updated.count === 0) {
+      return Response.json({ error: "提取记录不存在" }, { status: 404 });
+    }
+    return Response.json({ updated: updated.count });
+  } catch (error) {
+    console.error("Failed to update verified:", error);
+    return Response.json({ error: "更新失败" }, { status: 500 });
   }
 }

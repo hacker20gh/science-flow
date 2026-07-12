@@ -14,6 +14,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { trackTokenUsage } from "@/lib/token-tracker";
 import { startLLMGeneration, finishLLMGeneration, failLLMGeneration } from "./langfuse";
 import { AsyncLocalStorage } from "async_hooks";
+import { sleep } from "@/lib/utils/sleep";
 
 // 默认配置
 const DEFAULT_BASE_URL = "http://127.0.0.1:15721";
@@ -192,10 +193,6 @@ export const MODELS = {
 } as const;
 
 // ===== 重试 + 指数退避 =====
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /**
  * 判断错误是否值得重试

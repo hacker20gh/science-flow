@@ -34,6 +34,15 @@ export function createSSEStream(
 ): Response {
   const stream = new ReadableStream({
     async start(controller) {
+      // 心跳保活：每 15 秒发送一次，防止代理超时
+      const heartbeat = setInterval(() => {
+        try {
+          emitEvent(controller, { type: "heartbeat" });
+        } catch {
+          // controller 已关闭，忽略
+        }
+      }, 15_000);
+
       try {
         await handler((event) => emitEvent(controller, event));
         emitEvent(controller, { type: "done" });
@@ -43,8 +52,10 @@ export function createSSEStream(
           type: "error",
           message: error instanceof Error ? error.message : "处理失败，请重试",
         });
+      } finally {
+        clearInterval(heartbeat);
+        controller.close();
       }
-      controller.close();
     },
   });
 

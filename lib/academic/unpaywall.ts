@@ -6,6 +6,8 @@
  * 通过 DOI 查找论文的 Open Access PDF 链接
  */
 
+import { sleep } from "@/lib/utils/sleep";
+
 const BASE_URL = "https://api.unpaywall.org/v2";
 
 export interface OaResult {
@@ -77,8 +79,4 @@ export async function batchFindOa(
   }
 
   return results;
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }

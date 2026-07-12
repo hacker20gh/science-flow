@@ -5,6 +5,8 @@
  * 免费，无需 API Key（注册 email 可提高速率限制）
  */
 
+import { sleep } from "@/lib/utils/sleep";
+
 const BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
 export interface PubMedPaper {
@@ -206,8 +208,4 @@ export async function searchPubMed(options: SearchOptions): Promise<PubMedPaper[
   await sleep(350); // 速率限制
 
   return fetchDetails(pmids);
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
