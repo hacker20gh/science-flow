@@ -215,28 +215,26 @@ export default function ZoteroImport({ projectId, onClose, onImported }: ZoteroI
                   <div key={col.key}>
                     <button
                       onClick={() => setSelectedCollection(col.key)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors flex items-center justify-between ${
+                      className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
                         selectedCollection === col.key
                           ? "bg-blue-100 text-blue-700 font-medium"
                           : "text-gray-600 hover:bg-gray-100"
                       }`}
                     >
                       <span className="truncate">📁 {col.name}</span>
-                      <span className="text-[10px] text-gray-400 ml-1 shrink-0">{col.numItems}</span>
                     </button>
                     {/* 子库 */}
                     {childrenOf(col.key).map((child) => (
                       <button
                         key={child.key}
                         onClick={() => setSelectedCollection(child.key)}
-                        className={`w-full text-left pl-7 pr-3 py-1.5 rounded-lg text-[11px] transition-colors flex items-center justify-between ${
+                        className={`w-full text-left pl-7 pr-3 py-1.5 rounded-lg text-[11px] transition-colors ${
                           selectedCollection === child.key
                             ? "bg-blue-50 text-blue-600 font-medium"
                             : "text-gray-500 hover:bg-gray-100"
                         }`}
                       >
                         <span className="truncate">↳ {child.name}</span>
-                        <span className="text-[10px] text-gray-400 ml-1 shrink-0">{child.numItems}</span>
                       </button>
                     ))}
                   </div>
