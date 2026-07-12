@@ -176,11 +176,11 @@ status() {
   print_header "部署状态"
 
   print_info "Vercel 部署列表:"
-  vercel ls 2>/dev/null || print_warning "无法获取部署列表（可能未登录 Vercel）"
+  npx vercel ls 2>/dev/null || print_warning "无法获取部署列表（可能未登录 Vercel）"
 
   echo ""
   print_info "最近日志:"
-  vercel logs sciflow-ai.vercel.app --limit 10 2>/dev/null || print_warning "无法获取日志"
+  npx vercel logs --limit 10 2>/dev/null || print_warning "无法获取日志"
 }
 
 # 查看详细状态
@@ -204,7 +204,7 @@ status_detailed() {
 
   # Vercel 状态
   print_info "Vercel 部署:"
-  vercel ls 2>/dev/null || print_warning "无法获取部署列表"
+  npx vercel ls 2>/dev/null || print_warning "无法获取部署列表"
 }
 
 # 回滚部署
@@ -216,7 +216,7 @@ rollback() {
   echo ""
 
   if [[ $REPLY =~ ^[Yy]$ ]]; then
-    vercel rollback
+    npx vercel rollback
     print_success "回滚完成"
   else
     print_info "回滚已取消"
@@ -227,7 +227,7 @@ rollback() {
 env_list() {
   print_header "环境变量"
 
-  vercel env ls 2>/dev/null || print_warning "无法获取环境变量（可能未登录 Vercel）"
+  npx vercel env ls 2>/dev/null || print_warning "无法获取环境变量（可能未登录 Vercel）"
 }
 
 # 添加环境变量
@@ -242,7 +242,7 @@ env_add() {
 
   print_header "添加环境变量: $var_name"
 
-  vercel env add "$var_name"
+  npx vercel env add "$var_name"
 }
 
 # 本地开发
@@ -384,8 +384,8 @@ help() {
 # 主函数
 main() {
   # 检查依赖
-  check_command "git"
-  check_command "npm"
+  check_command "git" || exit 1
+  check_command "npm" || exit 1
 
   # 解析命令
   case "${1:-help}" in

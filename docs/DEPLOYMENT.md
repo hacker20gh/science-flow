@@ -34,10 +34,10 @@
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Vercel (CDN + Serverless)                 │
-│  ┌────────────┐  ┌────────────┐  ┌────────────────────┐     │
-│  │   Next.js  │  │  API Routes │  │  Edge Functions    │     │
-│  │   Frontend │  │  (Node.js)  │  │  (Middleware)      │     │
-│  └────────────┘  └────────────┘  └────────────────────┘     │
+│  ┌────────────┐  ┌────────────┐                              │
+│  │   Next.js  │  │  API Routes │                              │
+│  │   Frontend │  │  (Node.js)  │                              │
+│  └────────────┘  └────────────┘                              │
 └─────────────────────────────────────────────────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
@@ -1044,7 +1044,7 @@ git push origin main --tags
 
 ```bash
 # 克隆并设置
-git clone git@github.com:hacker20gh/scifience-flow.git
+git clone git@github.com:hacker20gh/science-flow.git
 cd science-flow
 npm install
 cp .env.example .env.local
