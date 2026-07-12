@@ -1,0 +1,27 @@
+# SciFlow AI 代码所有者
+# 详细文档: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# 默认所有者
+* @hacker20gh
+
+# 前端组件
+/components/ @hacker20gh
+/app/ @hacker20gh
+
+# API 路由
+/app/api/ @hacker20gh
+
+# 数据库
+/prisma/ @hacker20gh
+
+# 配置文件
+*.config.ts @hacker20gh
+*.config.js @hacker20gh
+package.json @hacker20gh
+
+# CI/CD
+/.github/ @hacker20gh
+
+# 文档
+/docs/ @hacker20gh
+*.md @hacker20gh
