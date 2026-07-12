@@ -350,10 +350,34 @@ export default function DataPage() {
             </div>
 
             {/* 渲染示例图表 */}
-            {(result.figure_config.type === "bar_chart" || result.figure_config.type === "box_plot") && csvData && (
+            {result.figure_config.type === "bar_chart" && csvData && (
               <div className="mt-4 border-t border-gray-100 pt-4">
                 <ChartRenderer
                   type="bar"
+                  title={result.figure_config.title}
+                  xLabel={result.figure_config.x_axis}
+                  yLabel={result.figure_config.y_axis}
+                  data={parseCsvForChart(csvData)}
+                  series={["value"]}
+                />
+              </div>
+            )}
+            {result.figure_config.type === "box_plot" && csvData && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <ChartRenderer
+                  type="box_plot"
+                  title={result.figure_config.title}
+                  xLabel={result.figure_config.x_axis}
+                  yLabel={result.figure_config.y_axis}
+                  data={parseCsvForChart(csvData)}
+                  series={["value"]}
+                />
+              </div>
+            )}
+            {result.figure_config.type === "heatmap" && csvData && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <ChartRenderer
+                  type="heatmap"
                   title={result.figure_config.title}
                   xLabel={result.figure_config.x_axis}
                   yLabel={result.figure_config.y_axis}
