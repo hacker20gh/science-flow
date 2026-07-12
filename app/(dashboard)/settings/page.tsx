@@ -23,6 +23,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [zoteroApiKey, setZoteroApiKey] = useState("");
 
   // Load saved settings on mount
   useEffect(() => {
@@ -39,6 +40,9 @@ export default function SettingsPage() {
             chat: data.config.models.chat || prev.chat,
             analysis: data.config.models.analysis || prev.analysis,
           }));
+        }
+        if (data.zoteroApiKey) {
+          setZoteroApiKey(data.zoteroApiKey);
         }
       } catch {
         // Keep default
@@ -60,7 +64,7 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl, models }),
+        body: JSON.stringify({ baseUrl, models, zoteroApiKey }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -149,6 +153,24 @@ export default function SettingsPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Zotero 集成 */}
+      <section className="mb-8">
+        <h2 className="text-sm font-medium text-gray-700 mb-3">📥 Zotero 集成</h2>
+        <p className="text-xs text-gray-500 mb-4">
+          连接你的 Zotero 文献库，一键导入文献到项目中。
+        </p>
+        <input
+          type="password"
+          value={zoteroApiKey}
+          onChange={(e) => setZoteroApiKey(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          placeholder="留空表示不使用 Zotero"
+        />
+        <p className="text-xs text-gray-400 mt-1">
+          前往 <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noopener" className="text-blue-600 hover:underline">zotero.org/settings/keys</a> 生成 API Key
+        </p>
       </section>
 
       {/* 保存 */}

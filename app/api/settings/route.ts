@@ -19,8 +19,16 @@ export async function GET() {
       where: { key: "llmConfig" },
     });
 
+    // Also load Zotero API key
+    const zoteroSetting = await prisma.userSetting.findUnique({
+      where: { key: "zoteroApiKey" },
+    });
+
     if (setting?.value) {
-      return NextResponse.json({ config: setting.value });
+      return NextResponse.json({
+        config: setting.value,
+        zoteroApiKey: (zoteroSetting?.value as string) || "",
+      });
     }
 
     // Fallback: check user's llmConfig field
@@ -29,7 +37,10 @@ export async function GET() {
       select: { llmConfig: true },
     });
 
-    return NextResponse.json({ config: user?.llmConfig || null });
+    return NextResponse.json({
+      config: user?.llmConfig || null,
+      zoteroApiKey: (zoteroSetting?.value as string) || "",
+    });
   } catch (error) {
     console.error("Failed to load settings:", error);
     return NextResponse.json({ config: null });
@@ -49,7 +60,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { baseUrl, models } = body;
+    const { baseUrl, models, zoteroApiKey } = body;
 
     if (!baseUrl || typeof baseUrl !== "string") {
       return NextResponse.json({ error: "baseUrl is required" }, { status: 400 });
@@ -73,6 +84,15 @@ export async function POST(req: NextRequest) {
       create: { key: "llmConfig", value: config },
       update: { value: config },
     });
+
+    // Save Zotero API key (if provided)
+    if (zoteroApiKey !== undefined) {
+      await prisma.userSetting.upsert({
+        where: { key: "zoteroApiKey" },
+        create: { key: "zoteroApiKey", value: zoteroApiKey || "" },
+        update: { value: zoteroApiKey || "" },
+      });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

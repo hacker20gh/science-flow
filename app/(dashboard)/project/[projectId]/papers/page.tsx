@@ -22,6 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useProjectStore } from "@/store/project-store";
+import ZoteroImport from "@/components/papers/zotero-import";
 
 interface Extraction {
   id: string;
@@ -73,6 +74,7 @@ export default function PapersPage() {
   const [batchLoading, setBatchLoading] = useState(false);
   const [extractProgress, setExtractProgress] = useState<string>("");
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single' | 'batch'; id?: string } | null>(null);
+  const [showZoteroImport, setShowZoteroImport] = useState(false);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/papers`)
@@ -316,13 +318,21 @@ export default function PapersPage() {
             文献管理
           </h1>
         </div>
-        <Link
-          href={`/project/${projectId}/papers/search`}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all text-sm font-medium flex items-center gap-2"
-        >
-          <Search size={16} />
-          搜索文献
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowZoteroImport(true)}
+            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium flex items-center gap-2"
+          >
+            📥 从 Zotero 导入
+          </button>
+          <Link
+            href={`/project/${projectId}/papers/search`}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all text-sm font-medium flex items-center gap-2"
+          >
+            <Search size={16} />
+            搜索文献
+          </Link>
+        </div>
       </div>
 
       {/* 统计概览 */}
@@ -541,6 +551,21 @@ export default function PapersPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      )}
+
+      {showZoteroImport && (
+        <ZoteroImport
+          projectId={projectId as string}
+          onClose={() => setShowZoteroImport(false)}
+          onImported={() => {
+            setShowZoteroImport(false);
+            // 重新加载论文列表
+            fetch(`/api/projects/${projectId}/papers`)
+              .then((r) => r.json())
+              .then((d) => setPapers(d.papers || []))
+              .catch(() => {});
+          }}
+        />
       )}
     </main>
   );
