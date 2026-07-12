@@ -1,14 +1,16 @@
 /**
  * Zotero 文献库 API
  *
- * GET  /api/zotero?limit=25&start=0&q=search  → 获取用户的 Zotero 文献库
+ * GET  /api/zotero                              → 获取用户的 Zotero 文献库
+ * GET  /api/zotero?mode=collections             → 获取用户的 Collections 列表
+ * GET  /api/zotero?collectionKey=xxx&limit=25   → 获取指定 Collection 下的文献
  * POST /api/zotero                              → 批量导入文献到项目
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
-import { getLibraryItems } from "@/lib/academic/zotero";
+import { getLibraryItems, getCollections } from "@/lib/academic/zotero";
 
 // ===== 读取用户的 Zotero API Key =====
 async function getZoteroApiKey(): Promise<string | null> {
@@ -20,7 +22,10 @@ async function getZoteroApiKey(): Promise<string | null> {
 }
 
 /**
- * GET /api/zotero — 获取用户的 Zotero 文献库
+ * GET /api/zotero
+ * - ?mode=collections → 返回 Collections 列表
+ * - ?collectionKey=xxx → 返回指定 Collection 的文献
+ * - 无参数 → 返回全部文献
  */
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -30,21 +35,31 @@ export async function GET(request: NextRequest) {
 
   const apiKey = await getZoteroApiKey();
   if (!apiKey) {
-    return NextResponse.json({ configured: false, items: [], total: 0 });
+    return NextResponse.json({ configured: false, items: [], total: 0, collections: [] });
   }
 
   const { searchParams } = new URL(request.url);
-  const limit = parseInt(searchParams.get("limit") || "25", 10);
-  const start = parseInt(searchParams.get("start") || "0", 10);
-  const q = searchParams.get("q") || undefined;
+  const mode = searchParams.get("mode");
 
   try {
-    const result = await getLibraryItems(apiKey, { limit, start, q });
+    // 获取 Collections 列表
+    if (mode === "collections") {
+      const collections = await getCollections(apiKey);
+      return NextResponse.json({ configured: true, collections });
+    }
+
+    // 获取文献列表（支持按 Collection 过滤）
+    const limit = parseInt(searchParams.get("limit") || "25", 10);
+    const start = parseInt(searchParams.get("start") || "0", 10);
+    const q = searchParams.get("q") || undefined;
+    const collectionKey = searchParams.get("collectionKey") || undefined;
+
+    const result = await getLibraryItems(apiKey, { limit, start, q, collectionKey });
     return NextResponse.json({ configured: true, ...result });
   } catch (err) {
     console.error("[zotero] Error:", (err as Error)?.message);
     return NextResponse.json(
-      { configured: true, items: [], total: 0, error: (err as Error)?.message },
+      { configured: true, items: [], total: 0, collections: [], error: (err as Error)?.message },
       { status: 502 }
     );
   }
