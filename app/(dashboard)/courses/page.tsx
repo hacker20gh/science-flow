@@ -954,7 +954,7 @@ export default function CoursesPage() {
   const isCompleted = (courseId: string, lessonId: string) =>
     progress[courseId]?.[lessonId] === "completed";
 
-  const courseCompletionCount = (courseId: string, total: number) => {
+  const courseCompletionCount = (courseId: string, _total: number) => {
     const courseProgress = progress[courseId];
     if (!courseProgress) return 0;
     return Object.values(courseProgress).filter((s) => s === "completed").length;

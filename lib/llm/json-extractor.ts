@@ -223,7 +223,7 @@ export function createRetryFunction(
       content: `Return ONLY a valid JSON object matching the required schema. No text before or after. No markdown code blocks. No explanations.${exampleJSON}`,
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const response = await client.messages.create({
       model: params.model,
       max_tokens: params.maxTokens,

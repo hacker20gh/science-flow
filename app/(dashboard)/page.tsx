@@ -31,10 +31,6 @@ export default function HomePage() {
   const [saving, setSaving] = useState(false);
   const [deleteProject, setDeleteProject] = useState<Project | null>(null);
 
-  useEffect(() => {
-    fetchProjects();
-  }, []);
-
   async function fetchProjects() {
     try {
       const res = await fetch("/api/projects");
@@ -46,6 +42,10 @@ export default function HomePage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
 
   async function handleCreate() {
     if (!newName.trim()) return;

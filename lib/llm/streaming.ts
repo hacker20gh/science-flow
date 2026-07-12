@@ -9,6 +9,7 @@
 
 import { trackTokenUsage } from "@/lib/token-tracker";
 import { getIsRetryMode } from "./client";
+import { startLLMGeneration, finishLLMGeneration, failLLMGeneration } from "./langfuse";
 import type { SSEEvent } from "./sse-consumer";
 
 export type { SSEEvent };
@@ -69,30 +70,43 @@ export async function streamLLMResponse(
   emit: (event: SSEEvent) => void,
   feature?: string
 ): Promise<string> {
-  const response = await client.messages.create({ ...params, stream: true });
+  // Langfuse generation（调用前）
+  const langfuseGen = startLLMGeneration({
+    name: feature || "streaming",
+    model: (params?.model as string) || "unknown",
+    input: params?.messages,
+    metadata: { feature, streaming: true },
+  });
 
   let fullText = "";
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedTokens = 0;
 
-  for await (const event of response) {
-    if (event.type === "message_start") {
-      const usage = event.message?.usage;
-      if (usage) {
-        inputTokens = usage.input_tokens || 0;
-        cachedTokens = usage.cache_read_input_tokens || 0;
+  try {
+    const response = await client.messages.create({ ...params, stream: true });
+
+    for await (const event of response) {
+      if (event.type === "message_start") {
+        const usage = event.message?.usage;
+        if (usage) {
+          inputTokens = usage.input_tokens || 0;
+          cachedTokens = usage.cache_read_input_tokens || 0;
+        }
+      } else if (event.type === "message_delta") {
+        const usage = event.usage;
+        if (usage) outputTokens = usage.output_tokens || 0;
+      } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        fullText += event.delta.text;
+        emit({ type: "text", text: event.delta.text });
       }
-    } else if (event.type === "message_delta") {
-      const usage = event.usage;
-      if (usage) outputTokens = usage.output_tokens || 0;
-    } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-      fullText += event.delta.text;
-      emit({ type: "text", text: event.delta.text });
     }
+  } catch (error) {
+    failLLMGeneration(langfuseGen, error);
+    throw error;
   }
 
-  // 追踪 token 用量
+  // 追踪 token 用量（现有 + Langfuse）
   if (feature && (inputTokens > 0 || outputTokens > 0)) {
     trackTokenUsage({
       feature,
@@ -102,6 +116,10 @@ export async function streamLLMResponse(
       cachedTokens,
       isRetry: getIsRetryMode(),
     });
+
+    finishLLMGeneration(langfuseGen, fullText, { inputTokens, outputTokens, cachedTokens });
+  } else {
+    finishLLMGeneration(langfuseGen, fullText);
   }
 
   return fullText;
@@ -122,7 +140,13 @@ export async function streamLLMWithToolUse(
   toolUseBlocks: Array<{ name: string; input: unknown }>;
   usage: { inputTokens: number; outputTokens: number; cachedTokens: number };
 }> {
-  const response = await client.messages.create({ ...params, stream: true });
+  // Langfuse generation（调用前）
+  const langfuseGen = startLLMGeneration({
+    name: "tool-use-stream",
+    model: (params?.model as string) || "unknown",
+    input: params?.messages,
+    metadata: { streaming: true, hasTools: true },
+  });
 
   let fullText = "";
   const toolUseBlocks: Array<{ name: string; input: unknown }> = [];
@@ -132,45 +156,51 @@ export async function streamLLMWithToolUse(
   let outputTokens = 0;
   let cachedTokens = 0;
 
-  for await (const event of response) {
-    if (event.type === "message_start") {
-      // message_start 包含 input_tokens 和 cache_read_input_tokens
-      const usage = event.message?.usage;
-      if (usage) {
-        inputTokens = usage.input_tokens || 0;
-        cachedTokens = usage.cache_read_input_tokens || 0;
-      }
-    } else if (event.type === "message_delta") {
-      // message_delta 包含 output_tokens
-      const usage = event.usage;
-      if (usage) {
-        outputTokens = usage.output_tokens || 0;
-      }
-    } else if (event.type === "content_block_start") {
-      if (event.content_block.type === "tool_use") {
-        currentToolName = event.content_block.name;
-        currentToolInput = "";
-      }
-    } else if (event.type === "content_block_delta") {
-      if (event.delta.type === "text_delta") {
-        fullText += event.delta.text;
-        emit({ type: "text", text: event.delta.text });
-      } else if (event.delta.type === "input_json_delta") {
-        currentToolInput += event.delta.partial_json;
-      }
-    } else if (event.type === "content_block_stop") {
-      if (currentToolName) {
-        try {
-          const input = JSON.parse(currentToolInput || "{}");
-          toolUseBlocks.push({ name: currentToolName, input });
-        } catch {
-          // malformed tool input, skip
+  try {
+    const response = await client.messages.create({ ...params, stream: true });
+
+    for await (const event of response) {
+      if (event.type === "message_start") {
+        const usage = event.message?.usage;
+        if (usage) {
+          inputTokens = usage.input_tokens || 0;
+          cachedTokens = usage.cache_read_input_tokens || 0;
         }
-        currentToolName = "";
-        currentToolInput = "";
+      } else if (event.type === "message_delta") {
+        const usage = event.usage;
+        if (usage) outputTokens = usage.output_tokens || 0;
+      } else if (event.type === "content_block_start") {
+        if (event.content_block.type === "tool_use") {
+          currentToolName = event.content_block.name;
+          currentToolInput = "";
+        }
+      } else if (event.type === "content_block_delta") {
+        if (event.delta.type === "text_delta") {
+          fullText += event.delta.text;
+          emit({ type: "text", text: event.delta.text });
+        } else if (event.delta.type === "input_json_delta") {
+          currentToolInput += event.delta.partial_json;
+        }
+      } else if (event.type === "content_block_stop") {
+        if (currentToolName) {
+          try {
+            const input = JSON.parse(currentToolInput || "{}");
+            toolUseBlocks.push({ name: currentToolName, input });
+          } catch {
+            // malformed tool input, skip
+          }
+          currentToolName = "";
+          currentToolInput = "";
+        }
       }
     }
+  } catch (error) {
+    failLLMGeneration(langfuseGen, error);
+    throw error;
   }
+
+  // Langfuse generation（调用后）
+  finishLLMGeneration(langfuseGen, { fullText, toolUseBlocks }, { inputTokens, outputTokens, cachedTokens });
 
   return { fullText, toolUseBlocks, usage: { inputTokens, outputTokens, cachedTokens } };
 }

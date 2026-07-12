@@ -225,7 +225,7 @@ export async function extractFromText(
     }
 
     // 阻塞式路径：monkey-patch 自动追踪
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const response = await client.messages.create({
       ...llmParams,
       _sciflowFeature: "extraction",

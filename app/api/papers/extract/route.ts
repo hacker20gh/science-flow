@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 如果有 paperId，批量从 DB 查询 fullText + oaUrl（一次查询，避免 N+1）
-    let dbFullTexts: Record<string, string> = {};
+    const dbFullTexts: Record<string, string> = {};
     const paperIds = papers.filter(p => p.paperId && !p.fullText).map(p => p.paperId);
     if (paperIds.length > 0) {
       try {

@@ -1,8 +1,23 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/lib/db-server";
 
 export async function GET() {
   try {
+    if (!prisma) {
+      return NextResponse.json(
+        {
+          status: "unhealthy",
+          timestamp: new Date().toISOString(),
+          error: "Database not configured",
+          services: {
+            database: "not_configured",
+            application: "running",
+          },
+        },
+        { status: 503 }
+      );
+    }
+
     // 检查数据库连接
     await prisma.$queryRaw`SELECT 1`;
 

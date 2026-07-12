@@ -176,7 +176,7 @@ export default function BrainPage() {
       .catch((err) => {
         console.error("[Brain] Failed to load extractions:", err);
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [projectId]);
 
   // 从 DB 文献构建 extractedPapers（用于 fallback）

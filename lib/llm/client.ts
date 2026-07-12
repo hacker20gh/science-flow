@@ -12,6 +12,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { trackTokenUsage } from "@/lib/token-tracker";
+import { startLLMGeneration, finishLLMGeneration, failLLMGeneration } from "./langfuse";
 import { AsyncLocalStorage } from "async_hooks";
 
 // 默认配置
@@ -86,31 +87,64 @@ export function getLLMClient(baseUrl?: string): Anthropic {
     });
     currentBaseUrl = url;
 
-    // 包装 messages.create，自动追踪 token 用量
+    // 包装 messages.create，自动追踪 token 用量 + Langfuse generation
     const originalCreate = client.messages.create.bind(client.messages);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (client.messages as any).create = async (params: Record<string, unknown>, _options?: unknown) => {
       const start = Date.now();
-      const result = await originalCreate(params as unknown as Parameters<typeof originalCreate>[0]);
-      const duration = Date.now() - start;
+      try {
+        const result = await originalCreate(params as unknown as Parameters<typeof originalCreate>[0]);
+        const duration = Date.now() - start;
 
-      // 非流式响应有 usage 字段
-      if (result && typeof result === "object" && "usage" in result) {
-        const usage = (result as { usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number } }).usage;
-        if (usage) {
-          const feature = (params?._sciflowFeature as string) || detectFeature(params?.system);
-          trackTokenUsage({
-            feature,
-            model: (params?.model as string) || "unknown",
-            inputTokens: usage.input_tokens,
-            outputTokens: usage.output_tokens,
-            cachedTokens: usage.cache_read_input_tokens || 0,
-            durationMs: duration,
-            isRetry: getIsRetryMode(),
-          });
+        // 非流式响应有 usage 字段
+        if (result && typeof result === "object" && "usage" in result) {
+          const usage = (result as { usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number } }).usage;
+          if (usage) {
+            const feature = (params?._sciflowFeature as string) || detectFeature(params?.system);
+            const model = (params?.model as string) || "unknown";
+
+            // 现有 token tracker
+            trackTokenUsage({
+              feature,
+              model,
+              inputTokens: usage.input_tokens,
+              outputTokens: usage.output_tokens,
+              cachedTokens: usage.cache_read_input_tokens || 0,
+              durationMs: duration,
+              isRetry: getIsRetryMode(),
+            });
+
+            // Langfuse generation（仅非流式调用，流式调用由 streaming.ts 处理）
+            if (!params?.stream) {
+              const langfuseGen = startLLMGeneration({
+                name: feature,
+                model,
+                input: params?.messages,
+                metadata: { feature, isRetry: getIsRetryMode() },
+              });
+              finishLLMGeneration(langfuseGen, result.content, {
+                inputTokens: usage.input_tokens,
+                outputTokens: usage.output_tokens,
+                cachedTokens: usage.cache_read_input_tokens || 0,
+              });
+            }
+          }
         }
+
+        return result;
+      } catch (error) {
+        // Langfuse 记录失败（仅非流式调用）
+        if (!params?.stream) {
+          const feature = (params?._sciflowFeature as string) || detectFeature(params?.system);
+          const langfuseGen = startLLMGeneration({
+            name: feature,
+            model: (params?.model as string) || "unknown",
+            input: params?.messages,
+          });
+          failLLMGeneration(langfuseGen, error);
+        }
+        throw error;
       }
-      return result;
     };
   }
 

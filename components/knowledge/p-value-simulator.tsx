@@ -122,7 +122,7 @@ export function PValueSimulator() {
 
           <div>
             <label className="flex items-center justify-between text-xs text-gray-500 mb-1">
-              <span>真实效应量 (Cohen's d)</span>
+              <span>真实效应量 (Cohen&apos;s d)</span>
               <span className="font-mono">{trueEffect.toFixed(2)}</span>
             </label>
             <input
@@ -267,7 +267,7 @@ export function PValueSimulator() {
           <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700 space-y-1">
             <p className="font-medium">💡 如何解读：</p>
             {trueEffect === 0 ? (
-              <p>当真实效应为 0 时，约 {(alpha * 100).toFixed(1)}% 的模拟会显示"显著"——这就是 I 型错误（假阳性）。</p>
+              <p>当真实效应为 0 时，约 {(alpha * 100).toFixed(1)}% 的模拟会显示&quot;显著&quot;——这就是 I 型错误（假阳性）。</p>
             ) : (
               <p>
                 效应量 {trueEffect.toFixed(2)} + 样本量 {sampleSize} → 功效 {(power * 100).toFixed(1)}%。

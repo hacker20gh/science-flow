@@ -101,7 +101,7 @@ export async function preprocessQuery(userInput: string): Promise<ProcessedQuery
   try {
     const result = await withLLMRetry(async () => {
       const client = getLLMClient();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const response = await client.messages.create({
         model: MODELS.extraction,
         max_tokens: 2048,
