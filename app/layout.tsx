@@ -24,6 +24,12 @@ export default function RootLayout({
       suppressHydrationWarning
       className={cn("h-full antialiased", "font-sans", geist.variable)}
     >
+      <head>
+        {/* React Scan：开发环境 re-render 检测（生产环境不加载） */}
+        {process.env.NODE_ENV === "development" && (
+          <script src="https://unpkg.com/react-scan/dist/auto.global.js" async />
+        )}
+      </head>
       <body className="min-h-full flex flex-col bg-gray-50 text-gray-900" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" }}>
         <Providers>{children}</Providers>
         <Toaster />
