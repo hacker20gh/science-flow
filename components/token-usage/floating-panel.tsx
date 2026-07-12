@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import TracesTab from "./traces-tab";
 
 interface TokenStats {
   totals: {
@@ -32,11 +33,84 @@ const FEATURE_LABELS: Record<string, string> = {
   preprocess: "🔍 搜索优化",
 };
 
+// 面板尺寸限制
+const MIN_W = 280, MAX_W = 600;
+const MIN_H = 320, MAX_H = 800;
+const DEFAULT_W = 320, DEFAULT_H = 480;
+const STORAGE_KEY = "sciflow-panel-size";
+
+function loadSize(): { w: number; h: number } {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const { w, h } = JSON.parse(saved);
+      return {
+        w: Math.min(MAX_W, Math.max(MIN_W, w || DEFAULT_W)),
+        h: Math.min(MAX_H, Math.max(MIN_H, h || DEFAULT_H)),
+      };
+    }
+  } catch { /* ignore */ }
+  return { w: DEFAULT_W, h: DEFAULT_H };
+}
+
 export default function FloatingTokenPanel() {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"overview" | "trend" | "ranking" | "recent">("overview");
+  const [tab, setTab] = useState<"overview" | "trend" | "ranking" | "recent" | "traces">("overview");
   const [stats, setStats] = useState<TokenStats | null>(null);
 
+  // ===== 可调尺寸 =====
+  const [size, setSize] = useState({ w: DEFAULT_W, h: DEFAULT_H });
+  const [sizeLoaded, setSizeLoaded] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+
+  // 从 localStorage 加载尺寸（仅客户端）
+  useEffect(() => {
+    setSize(loadSize());
+    setSizeLoaded(true);
+  }, []);
+
+  // 保存尺寸到 localStorage
+  const saveSize = useCallback((w: number, h: number) => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ w, h })); } catch { /* ignore */ }
+  }, []);
+
+  // 拖拽调整大小
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragRef.current) return;
+      e.preventDefault();
+      const { startX, startY, startW, startH } = dragRef.current;
+      const newW = Math.min(MAX_W, Math.max(MIN_W, startW + (e.clientX - startX)));
+      const newH = Math.min(MAX_H, Math.max(MIN_H, startH + (e.clientY - startY)));
+      setSize({ w: newW, h: newH });
+    };
+    const onMouseUp = () => {
+      if (dragRef.current) {
+        dragRef.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        // 保存最终尺寸
+        setSize((s) => { saveSize(s.w, s.h); return s; });
+      }
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [saveSize]);
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startW: size.w, startH: size.h };
+    document.body.style.cursor = "nwse-resize";
+    document.body.style.userSelect = "none";
+  }, [size]);
+
+  // 数据加载
   useEffect(() => {
     if (!open) return;
     const load = () => fetch("/api/token-usage").then((r) => r.json()).then(setStats).catch((err) => {
@@ -63,14 +137,21 @@ export default function FloatingTokenPanel() {
 
       {open && (
         <div className="flex flex-col items-start gap-2">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-2xl w-80 max-h-[480px] overflow-hidden flex flex-col">
-          <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+        <div
+          ref={panelRef}
+          className="bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden flex flex-col relative"
+          style={sizeLoaded ? { width: size.w, height: size.h } : { width: DEFAULT_W, maxHeight: DEFAULT_H }}
+        >
+          <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between bg-gray-50 shrink-0">
             <span className="text-sm font-semibold text-gray-800">⚡ Token 消耗</span>
-            <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">{size.w}×{size.h}</span>
+              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+            </div>
           </div>
 
-          <div className="flex border-b border-gray-100 text-xs">
-            {([["overview","概览"],["trend","趋势"],["ranking","排行"],["recent","明细"]] as const).map(([key,label]) => (
+          <div className="flex border-b border-gray-100 text-xs shrink-0">
+            {([["overview","概览"],["trend","趋势"],["ranking","排行"],["recent","明细"],["traces","Traces"]] as const).map(([key,label]) => (
               <button key={key} onClick={() => setTab(key)}
                 className={`flex-1 py-2 ${tab === key ? "text-blue-600 border-b-2 border-blue-600 font-medium" : "text-gray-500 hover:text-gray-700"}`}>
                 {label}
@@ -79,13 +160,29 @@ export default function FloatingTokenPanel() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
-            {!stats ? <div className="text-center text-gray-400 text-xs py-8">加载中...</div>
-            : tab === "overview" ? <OverviewTab stats={stats} />
-            : tab === "trend" ? <TrendTab stats={stats} />
-            : tab === "ranking" ? <RankingTab stats={stats} />
-            : <RecentTab stats={stats} />}
+            {!stats && tab !== "traces" ? <div className="text-center text-gray-400 text-xs py-8">加载中...</div>
+            : tab === "overview" ? <OverviewTab stats={stats!} />
+            : tab === "trend" ? <TrendTab stats={stats!} />
+            : tab === "ranking" ? <RankingTab stats={stats!} />
+            : tab === "recent" ? <RecentTab stats={stats!} />
+            : <TracesTab />}
+          </div>
+
+          {/* 拖拽调整大小手柄（右下角） */}
+          <div
+            onMouseDown={onResizeStart}
+            className="absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize group"
+            title="拖拽调整大小"
+          >
+            <svg
+              className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors absolute bottom-0.5 right-0.5"
+              viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+            >
+              <path d="M14 2L2 14M14 8L8 14M14 14L14 14" strokeLinecap="round" />
+            </svg>
           </div>
         </div>
+
         <button
           onClick={() => setOpen(false)}
           className="bg-gray-900 text-white rounded-full px-3 py-2 text-xs shadow-lg hover:bg-gray-800 transition-all flex items-center gap-1.5"
