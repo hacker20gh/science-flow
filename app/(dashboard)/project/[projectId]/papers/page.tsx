@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useProjectStore } from "@/store/project-store";
 import ZoteroImport from "@/components/papers/zotero-import";
+import SciteBadge from "@/components/papers/scite-badge";
 
 interface Extraction {
   id: string;
@@ -821,6 +822,7 @@ function PaperCard({
                 <ExternalLink size={10} /> DOI
               </a>
             )}
+            <SciteBadge doi={paper.doi || undefined} />
             {paper.pmid && (
               <a
                 href={`https://pubmed.ncbi.nlm.nih.gov/${paper.pmid}`}
