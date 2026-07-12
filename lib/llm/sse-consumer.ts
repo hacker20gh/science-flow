@@ -14,6 +14,7 @@ export type SSEEvent =
   | { type: "progress"; step: string; current: number; total: number } // 步骤进度
   | { type: "result"; data: unknown }                 // 结构化结果
   | { type: "error"; message: string }                // 错误
+  | { type: "heartbeat" }                             // 心跳保活
   | { type: "done" };                                 // 完成
 
 // ===== 前端 SSE 消费者工具 =====
@@ -67,6 +68,9 @@ export async function consumeSSEStream(
               break;
             case "error":
               options.onError?.(event.message);
+              break;
+            case "heartbeat":
+              // 心跳保活，忽略
               break;
             case "done":
               options.onDone?.();

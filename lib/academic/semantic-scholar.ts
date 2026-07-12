@@ -6,6 +6,8 @@
  * 注册地址：https://www.semanticscholar.org/product/api#api-key
  */
 
+import { sleep } from "@/lib/utils/sleep";
+
 const BASE_URL = "https://api.semanticscholar.org/graph/v1";
 const S2_API_KEY = process.env.S2_API_KEY;
 
@@ -169,8 +171,4 @@ function mapS2Paper(raw: any): S2Paper {
     tldr: raw.tldr?.text || null,
     publicationTypes: raw.publicationTypes || [],
   };
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }

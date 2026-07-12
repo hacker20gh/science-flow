@@ -1,19 +1,26 @@
 import { NextRequest } from "next/server";
 import { readFile } from "fs/promises";
 import path from "path";
+import { auth } from "@/lib/auth";
 import { extractFromText, smartTruncate } from "@/lib/llm/extraction";
 import { prisma } from "@/lib/db-server";
+import { mapExtractionToDB } from "@/lib/extraction-mapper";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse");
+const pdfParse = require("pdf-parse-new");
 
 async function parsePdf(buffer: Buffer) {
   return pdfParse(buffer);
 }
 
 export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return Response.json({ error: "未登录" }, { status: 401 });
+  }
+
   try {
     const { projectId, paperId, fileName } = await req.json();
 
@@ -46,28 +53,7 @@ export async function POST(req: NextRequest) {
           await prisma.$transaction(async (tx: any) => {
             for (const exp of extraction.experiments) {
               await tx.extraction.create({
-                data: {
-                  paperId,
-                  drugName: exp.drug_intervention?.name || null,
-                  drugConc: exp.drug_intervention?.concentration || null,
-                  duration: exp.drug_intervention?.duration || null,
-                  coTreatment: exp.drug_intervention?.co_treatment || null,
-                  cellLine: exp.model?.cell_line || null,
-                  species: exp.model?.species || null,
-                  passage: exp.model?.passage || null,
-                  pathway: exp.pathway_effects?.[0]?.pathway || null,
-                  pathwayDir: exp.pathway_effects?.[0]?.direction || null,
-                  phenotype: exp.phenotype_effects?.[0]?.phenotype || null,
-                  phenotypeDir: exp.phenotype_effects?.[0]?.direction || null,
-                  method: exp.statistical_test || null,
-                  expMethod: exp.pathway_effects?.[0]?.method || null,
-                  conclusion: exp.conclusion || null,
-                  rawText: exp.evidence_quote || null,
-                  pathwayEffects: exp.pathway_effects || undefined,
-                  phenotypeEffects: exp.phenotype_effects || undefined,
-                  controls: exp.controls || undefined,
-                  sampleSize: exp.sample_size || null,
-                },
+                data: mapExtractionToDB(exp, paperId),
               });
             }
 

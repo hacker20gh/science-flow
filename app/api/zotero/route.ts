@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
       // 按 DOI 去重
       if (item.doi) {
         const existing = await prisma.paper.findUnique({
-          where: { doi: item.doi },
+          where: { projectId_doi: { projectId, doi: item.doi } },
         });
         if (existing) {
           skipped++;

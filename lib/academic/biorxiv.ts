@@ -13,6 +13,8 @@
  * 这里主要提供：通过 DOI 获取 bioRxiv 论文详情 + OA PDF 下载
  */
 
+import { sleep } from "@/lib/utils/sleep";
+
 const BASE_URL = "https://api.biorxiv.org/details/biorxiv";
 
 export interface BioRxivPaper {
@@ -85,8 +87,4 @@ export async function checkBioRxiv(
 
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, dois.length) }, () => worker()));
   return results;
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }

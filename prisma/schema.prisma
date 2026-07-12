@@ -67,7 +67,7 @@ model Paper {
   projectId    String
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  doi          String?  @unique
+  doi          String?
   pmid         String?
   title        String
   authors      String[]
@@ -84,6 +84,7 @@ model Paper {
 
   createdAt DateTime @default(now())
 
+  @@unique([projectId, doi])
   @@index([projectId])
   @@index([pmid])
 }
@@ -93,7 +94,7 @@ model Paper {
 model Extraction {
   id      String @id @default(cuid())
   paperId String
-  paper   Paper  @relation(fields: [paperId], references: [id])
+  paper   Paper  @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
   drugName     String?  // 药物/干预名称
   drugConc     String?  // 药物浓度
@@ -121,6 +122,9 @@ model Extraction {
   verified   Boolean   @default(false)
 
   createdAt DateTime @default(now())
+
+  @@index([paperId])
+  @@index([verified])
 }
 
 // ===== 假设 =====

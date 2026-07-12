@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { extractFromText, type ExtractionResult } from "@/lib/llm/extraction";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
+import { sleep } from "@/lib/utils/sleep";
 
 interface ExtractRequestBody {
   papers: Array<{
@@ -19,6 +21,11 @@ interface ExtractRequestBody {
  * 如果提供了 paperId，会自动从 DB 查找已保存的全文
  */
 export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
+
   try {
     const body: ExtractRequestBody = await req.json();
     const { papers } = body;
@@ -45,7 +52,9 @@ export async function POST(req: NextRequest) {
       try {
         const { prisma } = await import("@/lib/db-server");
         if (prisma) {
-          const dbPapers = await prisma.paper.findMany({
+          // 用局部变量收窄类型，确保 async 闭包中不会丢失 null 收窄
+          const db = prisma;
+          const dbPapers = await db.paper.findMany({
             where: { id: { in: paperIds } },
             select: { id: true, fullText: true, oaUrl: true },
           });
@@ -65,52 +74,59 @@ export async function POST(req: NextRequest) {
             (p: { id: string; fullText: string | null; oaUrl: string | null }) => !dbFullTexts[p.id] && p.oaUrl
           );
 
-          // 逐个下载（await 确保全部完成后再开始提取）
-          for (const dbPaper of papersNeedingDownload) {
-            try {
-              console.log(`[Extract] 自动下载 OA PDF: ${dbPaper.oaUrl}`);
-              const response = await fetch(dbPaper.oaUrl!, {
-                headers: { "User-Agent": "SciFlow-AI/1.0 (research tool)" },
-                signal: AbortSignal.timeout(30000),
-              });
-              if (!response.ok) {
-                console.warn(`[Extract] 下载失败: HTTP ${response.status}`);
-                continue;
-              }
+          // Parallel downloads with concurrency limit
+          const CONCURRENT_DOWNLOADS = 3;
+          const downloadQueue = [...papersNeedingDownload];
 
-              const contentType = response.headers.get("content-type");
-              if (contentType && !contentType.includes("pdf")) {
-                console.warn(`[Extract] 非 PDF: ${contentType}`);
-                continue;
-              }
-
-              const buffer = Buffer.from(await response.arrayBuffer());
-              if (buffer.length > 50 * 1024 * 1024) {
-                console.warn(`[Extract] 文件过大: ${buffer.length}`);
-                continue;
-              }
-
-              const pdfData = await pdfParse(buffer);
-              if (pdfData.text && pdfData.text.trim().length > 100) {
-                dbFullTexts[dbPaper.id] = pdfData.text;
-                console.log(`[Extract] 自动下载成功: ${dbPaper.id} → ${pdfData.numpages} 页, ${pdfData.text.length} 字符`);
-                // 异步保存到 DB（不阻塞提取）
-                prisma.paper.update({
-                  where: { id: dbPaper.id },
-                  data: { fullText: pdfData.text },
-                }).catch((err: unknown) => {
-                  console.error(`[Extract] Failed to save fullText for ${dbPaper.id}:`, err);
+          async function downloadWorker() {
+            while (downloadQueue.length > 0) {
+              const dbPaper = downloadQueue.shift()!;
+              try {
+                console.log(`[Extract] 自动下载 OA PDF: ${dbPaper.oaUrl}`);
+                const response = await fetch(dbPaper.oaUrl!, {
+                  headers: { "User-Agent": "SciFlow-AI/1.0 (research tool)" },
+                  signal: AbortSignal.timeout(30000),
                 });
-              } else {
-                console.warn(`[Extract] PDF 文本过短: ${pdfData.text?.length || 0} 字符`);
+                if (!response.ok) {
+                  console.warn(`[Extract] 下载失败: HTTP ${response.status}`);
+                  continue;
+                }
+
+                const contentType = response.headers.get("content-type");
+                if (contentType && !contentType.includes("pdf")) {
+                  console.warn(`[Extract] 非 PDF: ${contentType}`);
+                  continue;
+                }
+
+                const buffer = Buffer.from(await response.arrayBuffer());
+                if (buffer.length > 50 * 1024 * 1024) {
+                  console.warn(`[Extract] 文件过大: ${buffer.length}`);
+                  continue;
+                }
+
+                const pdfData = await pdfParse(buffer);
+                if (pdfData.text && pdfData.text.trim().length > 100) {
+                  dbFullTexts[dbPaper.id] = pdfData.text;
+                  console.log(`[Extract] 自动下载成功: ${dbPaper.id} → ${pdfData.numpages} 页, ${pdfData.text.length} 字符`);
+                  db.paper.update({
+                    where: { id: dbPaper.id },
+                    data: { fullText: pdfData.text },
+                  }).catch((err: unknown) => {
+                    console.error(`[Extract] Failed to save fullText for ${dbPaper.id}:`, err);
+                  });
+                } else {
+                  console.warn(`[Extract] PDF 文本过短: ${pdfData.text?.length || 0} 字符`);
+                }
+              } catch (dlError) {
+                console.warn(`[Extract] 自动下载失败: ${(dlError as Error)?.message}`);
               }
-            } catch (dlError) {
-              console.warn(`[Extract] 自动下载失败: ${(dlError as Error)?.message}`);
             }
           }
+
+          await Promise.all(Array.from({ length: CONCURRENT_DOWNLOADS }, () => downloadWorker()));
         }
-      } catch {
-        // DB 不可用时静默降级
+      } catch (dbError) {
+        console.error("[Extract] DB query failed, continuing without fullText:", dbError);
       }
     }
 
@@ -175,8 +191,4 @@ export async function POST(req: NextRequest) {
       emit({ type: "error", message: "Extraction failed. Please try again." });
     });
   }
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
