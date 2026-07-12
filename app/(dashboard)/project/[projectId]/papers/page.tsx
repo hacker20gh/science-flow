@@ -319,6 +319,9 @@ export default function PapersPage() {
           </h1>
         </div>
         <div className="flex items-center gap-2">
+          <DoiQuickImport projectId={projectId as string} onImported={() => {
+            fetch(`/api/projects/${projectId}/papers`).then((r) => r.json()).then((d) => setPapers(d.papers || [])).catch(() => {});
+          }} />
           <button
             onClick={() => setShowZoteroImport(true)}
             className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium flex items-center gap-2"
@@ -568,6 +571,88 @@ export default function PapersPage() {
         />
       )}
     </main>
+  );
+}
+
+// ===== DOI 快速导入 =====
+
+function DoiQuickImport({ projectId, onImported }: { projectId: string; onImported: () => void }) {
+  const [doi, setDoi] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleImport = async () => {
+    const cleanDoi = doi.trim().replace(/^https?:\/\/doi\.org\//i, "").replace(/^doi:/i, "");
+    if (!cleanDoi) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // 1. Crossref 解析
+      const resp = await fetch(`/api/crossref?doi=${encodeURIComponent(cleanDoi)}`);
+      const data = await resp.json();
+      if (!data.metadata) {
+        setError("未找到该 DOI");
+        return;
+      }
+
+      // 2. 保存到项目
+      const m = data.metadata;
+      const authors = m.authors.map((a: { family?: string; given?: string; name?: string }) =>
+        a.name || [a.family, a.given].filter(Boolean).join(", ")
+      );
+
+      const saveResp = await fetch(`/api/projects/${projectId}/papers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: m.title,
+          authors,
+          doi: m.doi,
+          journal: m.journal,
+          year: m.year,
+          abstract: m.abstract,
+          oaUrl: m.url,
+          source: "crossref",
+        }),
+      });
+
+      if (saveResp.ok) {
+        setDoi("");
+        onImported();
+        toast.success("文献已添加");
+      } else {
+        const err = await saveResp.json();
+        setError(err.error || "保存失败");
+      }
+    } catch (err) {
+      setError((err as Error)?.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1">
+        <input
+          type="text"
+          value={doi}
+          onChange={(e) => { setDoi(e.target.value); setError(null); }}
+          onKeyDown={(e) => e.key === "Enter" && handleImport()}
+          placeholder="输入 DOI 快速导入..."
+          className="w-48 px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:border-blue-400"
+          disabled={loading}
+        />
+        {loading && <Loader2 size={14} className="text-blue-500 animate-spin" />}
+      </div>
+      {error && (
+        <div className="absolute top-full left-0 mt-1 text-[10px] text-red-500 bg-white px-2 py-1 rounded shadow-sm border">
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 
