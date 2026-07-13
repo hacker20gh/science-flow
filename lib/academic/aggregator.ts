@@ -120,6 +120,11 @@ export async function aggregateSearch(
 
   const deduped = deduplicate(unified);
 
+  // 关键词推断：对类型为"研究论文"的论文，从标题/摘要检测更具体的类型
+  for (const paper of deduped) {
+    paper.articleType = inferArticleType(paper.title, paper.abstract, paper.articleType);
+  }
+
   // 排序：如果有引用数过滤，满足条件的排前面，其余排后面（不删除）
   sortPapers(deduped, sortBy, minCitationCount);
 
@@ -393,6 +398,15 @@ function mergePaper(target: UnifiedPaper, source: UnifiedPaper): void {
   if (!target.oaPdfUrl && source.oaPdfUrl) target.oaPdfUrl = source.oaPdfUrl;
   if (!target.oaUrl && source.oaUrl) target.oaUrl = source.oaUrl;
 
+  // 文献类型合并：保留更具体的类型
+  if (source.articleType && target.articleType !== source.articleType) {
+    const targetPriority = TYPE_PRIORITY[target.articleType] ?? 0;
+    const sourcePriority = TYPE_PRIORITY[source.articleType] ?? 0;
+    if (sourcePriority > targetPriority) {
+      target.articleType = source.articleType;
+    }
+  }
+
   // 引用数回填：取两者中较大值（忽略 0，避免 PubMed 的 0 覆盖 S2 的真实值）
   const effectiveSource = source.citationCount || 0;
   const effectiveTarget = target.citationCount || 0;
@@ -421,30 +435,80 @@ function mergePaper(target: UnifiedPaper, source: UnifiedPaper): void {
 }
 
 /**
+ * 文献类型优先级（越具体越优先）
+ * RCT > 临床试验 > 病例报告 > 观察性研究 > 研究论文
+ * 系统综述 > Meta 分析 > 综述 > 研究论文
+ */
+const TYPE_PRIORITY: Record<string, number> = {
+  "RCT": 100,
+  "系统综述": 95,
+  "Meta 分析": 90,
+  "临床试验": 85,
+  "病例报告": 80,
+  "观察性研究": 75,
+  "综述": 70,
+  "研究论文": 50,
+  "预印本": 40,
+  "会议论文": 30,
+  "学位论文": 25,
+  "专著": 20,
+  "书章": 15,
+  "社论": 10,
+  "评论": 10,
+  "通信": 10,
+  "勘误": 5,
+  "数据集": 5,
+  "参考文献": 5,
+  "其他": 0,
+};
+
+/**
  * PubMed 文献类型 → 科研人员易懂的中文标签
  */
 const ARTICLE_TYPE_MAP: Record<string, string> = {
   "Journal Article": "研究论文",
-  Review: "综述",
-  "Meta-Analysis": "Meta 分析",
+  "Review": "综述",
   "Systematic Review": "系统综述",
+  "Meta-Analysis": "Meta 分析",
   "Clinical Trial": "临床试验",
   "Randomized Controlled Trial": "RCT",
   "Observational Study": "观察性研究",
   "Case Reports": "病例报告",
+  "Case Report": "病例报告",
   "Preprint": "预印本",
   "Editorial": "社论",
   "Comment": "评论",
-  Letter: "通信",
+  "Letter": "通信",
+  "Practice Guideline": "临床指南",
+  "Comparative Study": "比较研究",
+  "Multicenter Study": "多中心研究",
+  "Validation Study": "验证研究",
+  "Evaluation Study": "评估研究",
+  "Historical Article": "历史综述",
+  "Twin Study": "双胞胎研究",
+  "Retracted Publication": "撤稿论文",
+  "Erratum": "勘误",
+  "Dataset": "数据集",
+  "Review Literature": "文献综述",
+  "Research Support, N.I.H., Extramural": "研究论文",
+  "Research Support, U.S. Gov't, P.H.S.": "研究论文",
 };
 
 function normalizeArticleType(pubmedTypes: string[]): string {
   if (pubmedTypes.length === 0) return "研究论文";
+  let best = "研究论文";
+  let bestPriority = 0;
   for (const pt of pubmedTypes) {
     const mapped = ARTICLE_TYPE_MAP[pt];
-    if (mapped) return mapped;
+    if (mapped) {
+      const priority = TYPE_PRIORITY[mapped] ?? 0;
+      if (priority > bestPriority) {
+        best = mapped;
+        bestPriority = priority;
+      }
+    }
   }
-  return "研究论文";
+  return best;
 }
 
 /**
@@ -454,6 +518,7 @@ const S2_TYPE_MAP: Record<string, string> = {
   "JournalArticle": "研究论文",
   "Review": "综述",
   "MetaAnalysis": "Meta 分析",
+  "SystematicReview": "系统综述",
   "ClinicalTrial": "临床试验",
   "CaseReport": "病例报告",
   "Editorial": "社论",
@@ -465,15 +530,25 @@ const S2_TYPE_MAP: Record<string, string> = {
   "Book": "专著",
   "BookSection": "书章",
   "Reference": "参考文献",
+  "Retraction": "撤稿论文",
+  "JournalArticle,Review": "综述",  // S2 sometimes concatenates
 };
 
 function normalizeS2ArticleType(types: string[]): string {
   if (!types || types.length === 0) return "研究论文";
+  let best = "研究论文";
+  let bestPriority = 0;
   for (const t of types) {
     const mapped = S2_TYPE_MAP[t];
-    if (mapped) return mapped;
+    if (mapped) {
+      const priority = TYPE_PRIORITY[mapped] ?? 0;
+      if (priority > bestPriority) {
+        best = mapped;
+        bestPriority = priority;
+      }
+    }
   }
-  return "研究论文";
+  return best;
 }
 
 /**
@@ -491,13 +566,52 @@ const OPENALEX_TYPE_MAP: Record<string, string> = {
   "proceedings-article": "会议论文",
   "reference-entry": "参考文献",
   "dissertation": "学位论文",
-  "grant": "基金",
+  "grant": "其他",
   "report": "报告",
-  "standard": "标准",
-  "paratext": "辅助文本",
+  "standard": "其他",
+  "paratext": "其他",
   "other": "其他",
+  "monograph": "专著",
+  "reference": "参考文献",
+  "posted-content": "预印本",
+  "journal-article": "研究论文",
+  "peer-review": "同行评审",
+  "component": "其他",
 };
 
 function normalizeOpenAlexType(type: string): string {
   return OPENALEX_TYPE_MAP[type] || "研究论文";
+}
+
+/**
+ * 基于标题/摘要关键词推断文献类型（fallback）
+ * 当源数据的类型字段不准确时，从文本内容推断
+ */
+export function inferArticleType(title: string, abstract: string, currentType: string): string {
+  // 如果已有较具体的类型，不覆盖
+  if (currentType !== "研究论文") return currentType;
+
+  const text = `${title} ${abstract}`.toLowerCase();
+
+  // 按优先级匹配关键词
+  const patterns: [RegExp, string][] = [
+    [/systematic\s+review/i, "系统综述"],
+    [/meta-analysis|meta\s+analysis|荟萃分析/i, "Meta 分析"],
+    [/metaanalytic/i, "Meta 分析"],
+    [/\breview\b.*\bof\b|\breview\b.*\bliterature|\bnarrative\s+review|\bliterature\s+review|\bcomprehensive\s+review|\bupdated\s+review|\bstate[- ]of[- ]the[- ]art\s+review/i, "综述"],
+    [/\breview\b.*\barticle|\breview\b.*\bpaper/i, "综述"],
+    [/randomized\s+controlled\s+trial|rct\b/i, "RCT"],
+    [/clinical\s+trial|phase\s+[iI1-3]+/i, "临床试验"],
+    [/case[- ]report|case\s+series/i, "病例报告"],
+    [/observational\s+study|cohort\s+study|cross[- ]sectional/i, "观察性研究"],
+    [/practice\s+guideline|clinical\s+guideline|consensus/i, "临床指南"],
+    [/erratum|corrigendum|retraction/i, "勘误"],
+    [/comment|editorial|letter|correspondence/i, "通信"],
+  ];
+
+  for (const [pattern, type] of patterns) {
+    if (pattern.test(text)) return type;
+  }
+
+  return currentType;
 }

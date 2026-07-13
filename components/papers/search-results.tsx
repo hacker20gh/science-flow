@@ -61,6 +61,26 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   const [filterMinCitations, setFilterMinCitations] = useState<number>(0);
   const [filterMinYear, setFilterMinYear] = useState<string>("");
   const [filterMaxYear, setFilterMaxYear] = useState<string>("");
+  const [filterJournal, setFilterJournal] = useState("");
+  const [filterArticleType, setFilterArticleType] = useState<string | null>(null);
+
+  // 快捷筛选预设
+  const QUICK_FILTERS = [
+    { label: "高引用 ≥100", action: () => { setFilterMinCitations(100); setShowFilters(true); } },
+    { label: "近3年", action: () => { const y = new Date().getFullYear(); setFilterMinYear(String(y - 3)); setFilterMaxYear(""); setShowFilters(true); } },
+    { label: "Q1 期刊", action: () => { setFilterJournal("Q1"); setShowFilters(true); } },
+    { label: "仅 OA", action: () => { setFilterOaOnly(true); setShowFilters(true); } },
+  ];
+
+  // 文献类型选项
+  const ARTICLE_TYPES = [
+    { value: "研究论文", label: "研究论文" },
+    { value: "综述", label: "综述" },
+    { value: "Meta 分析", label: "Meta 分析" },
+    { value: "系统综述", label: "系统综述" },
+    { value: "临床试验", label: "临床试验" },
+    { value: "RCT", label: "RCT" },
+  ];
 
   // 客户端排序
   const [sortBy, setSortBy] = useState<"relevance" | "citation" | "date">("relevance");
@@ -88,8 +108,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   const PAGE_SIZE = pageSize ?? 20;
 
   // 客户端过滤
-  // Reset page when filters or sort change
-  useEffect(() => { setCurrentPage(0); setSelected(new Set()); }, [filterText, filterSource, filterOaOnly, filterMinCitations, sortBy]);
+  useEffect(() => { setCurrentPage(0); setSelected(new Set()); }, [filterText, filterSource, filterOaOnly, filterMinCitations, sortBy, filterMinYear, filterMaxYear, filterJournal, filterArticleType]);
 
   const filteredPapers = useMemo(() => {
     const filtered = papers.filter((p) => {
@@ -105,6 +124,16 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
       if (filterMinCitations > 0 && (p.citationCount || 0) < filterMinCitations) return false;
       if (filterMinYear && p.year < parseInt(filterMinYear)) return false;
       if (filterMaxYear && p.year > parseInt(filterMaxYear)) return false;
+      if (filterJournal) {
+        const fq = filterJournal.toLowerCase();
+        if (fq === "q1" || fq === "q2" || fq === "q3" || fq === "q4") {
+          const m = journalMetrics[p.journal];
+          if (!m || m.jcrQuartile?.toLowerCase() !== fq) return false;
+        } else {
+          if (!p.journal?.toLowerCase().includes(fq)) return false;
+        }
+      }
+      if (filterArticleType && p.articleType !== filterArticleType) return false;
       return true;
     });
 
@@ -117,7 +146,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
     // "relevance" = keep original order
 
     return filtered;
-  }, [papers, filterText, filterSource, filterOaOnly, filterMinCitations, sortBy, filterMinYear, filterMaxYear]);
+  }, [papers, filterText, filterSource, filterOaOnly, filterMinCitations, sortBy, filterMinYear, filterMaxYear, filterJournal, filterArticleType, journalMetrics]);
 
   // Paginated papers
   const totalPages = Math.ceil(filteredPapers.length / PAGE_SIZE);
@@ -226,7 +255,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
     );
   }
 
-  const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0, filterMinYear, filterMaxYear].filter(Boolean).length;
+  const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0, filterMinYear, filterMaxYear, filterJournal, filterArticleType].filter(Boolean).length;
 
   return (
     <div className="space-y-4">
@@ -257,6 +286,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
 
       {/* 筛选工具栏 */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+        {/* 第一行：搜索框 + 筛选按钮 + 排序 */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -290,85 +320,167 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
           </select>
         </div>
 
-        {showFilters && (
-          <div className="flex items-center gap-3 flex-wrap pt-1 border-t border-gray-200">
-            {/* 来源筛选 */}
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-500">来源：</span>
-              {Object.entries(SOURCE_LABELS).map(([key, info]) => (
-                <button
-                  key={key}
-                  onClick={() => setFilterSource(filterSource === key ? null : key)}
-                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                    filterSource === key
-                      ? "bg-blue-50 border-blue-300 text-blue-700"
-                      : "border-gray-200 text-gray-500 hover:border-gray-300"
-                  }`}
-                >
-                  {info.label}
-                </button>
-              ))}
-            </div>
-
-            {/* OA 筛选 */}
-            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={filterOaOnly}
-                onChange={(e) => setFilterOaOnly(e.target.checked)}
-                className="rounded w-3 h-3"
-              />
-              仅 OA
-            </label>
-
-            {/* 最低引用 */}
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-500">最低引用：</span>
-              <select
-                value={filterMinCitations}
-                onChange={(e) => setFilterMinCitations(Number(e.target.value))}
-                className="text-xs border border-gray-200 rounded px-1.5 py-0.5"
-              >
-                <option value={0}>不限</option>
-                <option value={10}>≥10</option>
-                <option value={50}>≥50</option>
-                <option value={100}>≥100</option>
-              </select>
-            </div>
-
-            {/* 年份范围 */}
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-500">年份：</span>
-              <input
-                type="number"
-                value={filterMinYear}
-                onChange={(e) => setFilterMinYear(e.target.value)}
-                placeholder="起"
-                min={1900}
-                max={2030}
-                className="w-14 text-xs border border-gray-200 rounded px-1.5 py-0.5"
-              />
-              <span className="text-xs text-gray-400">-</span>
-              <input
-                type="number"
-                value={filterMaxYear}
-                onChange={(e) => setFilterMaxYear(e.target.value)}
-                placeholder="止"
-                min={1900}
-                max={2030}
-                className="w-14 text-xs border border-gray-200 rounded px-1.5 py-0.5"
-              />
-            </div>
-
-            {/* 清除筛选 */}
-            {activeFilterCount > 0 && (
+        {/* 快捷筛选按钮 */}
+        {!showFilters && activeFilterCount === 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-gray-400">快捷：</span>
+            {QUICK_FILTERS.map((qf, i) => (
               <button
-                onClick={() => { setFilterText(""); setFilterSource(null); setFilterOaOnly(false); setFilterMinCitations(0); setFilterMinYear(""); setFilterMaxYear(""); }}
-                className="text-xs text-red-500 hover:text-red-700"
+                key={i}
+                onClick={qf.action}
+                className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
               >
-                清除筛选
+                {qf.label}
               </button>
+            ))}
+          </div>
+        )}
+
+        {/* 激活的筛选条件 pills */}
+        {activeFilterCount > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-gray-400">当前筛选：</span>
+            {filterText && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                搜索: {filterText.length > 15 ? filterText.slice(0, 15) + "..." : filterText}
+                <button onClick={() => setFilterText("")} className="hover:text-blue-900">×</button>
+              </span>
             )}
+            {filterSource && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                {SOURCE_LABELS[filterSource]?.label || filterSource}
+                <button onClick={() => setFilterSource(null)} className="hover:text-purple-900">×</button>
+              </span>
+            )}
+            {filterOaOnly && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+                仅 OA
+                <button onClick={() => setFilterOaOnly(false)} className="hover:text-green-900">×</button>
+              </span>
+            )}
+            {filterMinCitations > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                引用 ≥{filterMinCitations}
+                <button onClick={() => setFilterMinCitations(0)} className="hover:text-amber-900">×</button>
+              </span>
+            )}
+            {filterMinYear && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200">
+                {filterMinYear}{filterMaxYear ? `-${filterMaxYear}` : "至今"}
+                <button onClick={() => { setFilterMinYear(""); setFilterMaxYear(""); }} className="hover:text-cyan-900">×</button>
+              </span>
+            )}
+            {filterJournal && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                期刊: {filterJournal}
+                <button onClick={() => setFilterJournal("")} className="hover:text-indigo-900">×</button>
+              </span>
+            )}
+            {filterArticleType && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                {filterArticleType}
+                <button onClick={() => setFilterArticleType(null)} className="hover:text-rose-900">×</button>
+              </span>
+            )}
+            <button
+              onClick={() => { setFilterText(""); setFilterSource(null); setFilterOaOnly(false); setFilterMinCitations(0); setFilterMinYear(""); setFilterMaxYear(""); setFilterJournal(""); setFilterArticleType(null); }}
+              className="text-xs text-red-500 hover:text-red-700 ml-1"
+            >
+              清除全部
+            </button>
+          </div>
+        )}
+
+        {/* 展开的筛选面板 */}
+        {showFilters && (
+          <div className="pt-2 border-t border-gray-200 space-y-3">
+            {/* 来源 + OA */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 font-medium">来源：</span>
+                {Object.entries(SOURCE_LABELS).map(([key, info]) => (
+                  <button
+                    key={key}
+                    onClick={() => setFilterSource(filterSource === key ? null : key)}
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                      filterSource === key
+                        ? "bg-blue-50 border-blue-300 text-blue-700"
+                        : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}
+                  >
+                    {info.label}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={filterOaOnly} onChange={(e) => setFilterOaOnly(e.target.checked)} className="rounded w-3 h-3" />
+                仅 OA
+              </label>
+            </div>
+
+            {/* 引用 + 年份 */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 font-medium">引用：</span>
+                <select value={filterMinCitations} onChange={(e) => setFilterMinCitations(Number(e.target.value))} className="text-xs border border-gray-200 rounded px-1.5 py-0.5">
+                  <option value={0}>不限</option>
+                  <option value={10}>≥10</option>
+                  <option value={50}>≥50</option>
+                  <option value={100}>≥100</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 font-medium">年份：</span>
+                <input type="number" value={filterMinYear} onChange={(e) => setFilterMinYear(e.target.value)} placeholder="起" min={1900} max={2030} className="w-14 text-xs border border-gray-200 rounded px-1.5 py-0.5" />
+                <span className="text-xs text-gray-400">-</span>
+                <input type="number" value={filterMaxYear} onChange={(e) => setFilterMaxYear(e.target.value)} placeholder="止" min={1900} max={2030} className="w-14 text-xs border border-gray-200 rounded px-1.5 py-0.5" />
+              </div>
+            </div>
+
+            {/* 期刊 + 文献类型 */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 font-medium">期刊：</span>
+                <input
+                  type="text"
+                  value={filterJournal === "Q1" || filterJournal === "Q2" || filterJournal === "Q3" || filterJournal === "Q4" ? "" : filterJournal}
+                  onChange={(e) => setFilterJournal(e.target.value)}
+                  placeholder="期刊名或 Q1-Q4"
+                  className="w-36 text-xs border border-gray-200 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+                <div className="flex gap-0.5">
+                  {["Q1", "Q2", "Q3", "Q4"].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => setFilterJournal(filterJournal === q ? "" : q)}
+                      className={`text-xs px-1.5 py-0.5 rounded border transition-colors ${
+                        filterJournal === q
+                          ? "bg-amber-50 border-amber-300 text-amber-700"
+                          : "border-gray-200 text-gray-500 hover:border-gray-300"
+                      }`}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 font-medium">类型：</span>
+                {ARTICLE_TYPES.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setFilterArticleType(filterArticleType === t.value ? null : t.value)}
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                      filterArticleType === t.value
+                        ? "bg-blue-50 border-blue-300 text-blue-700"
+                        : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
