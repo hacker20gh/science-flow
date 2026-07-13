@@ -59,6 +59,8 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   const [filterSource, setFilterSource] = useState<string | null>(null);
   const [filterOaOnly, setFilterOaOnly] = useState(false);
   const [filterMinCitations, setFilterMinCitations] = useState<number>(0);
+  const [filterMinYear, setFilterMinYear] = useState<string>("");
+  const [filterMaxYear, setFilterMaxYear] = useState<string>("");
 
   // 客户端排序
   const [sortBy, setSortBy] = useState<"relevance" | "citation" | "date">("relevance");
@@ -101,6 +103,8 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
       if (filterSource && !p.sources?.includes(filterSource)) return false;
       if (filterOaOnly && !p.isOpenAccess) return false;
       if (filterMinCitations > 0 && (p.citationCount || 0) < filterMinCitations) return false;
+      if (filterMinYear && p.year < parseInt(filterMinYear)) return false;
+      if (filterMaxYear && p.year > parseInt(filterMaxYear)) return false;
       return true;
     });
 
@@ -113,7 +117,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
     // "relevance" = keep original order
 
     return filtered;
-  }, [papers, filterText, filterSource, filterOaOnly, filterMinCitations, sortBy]);
+  }, [papers, filterText, filterSource, filterOaOnly, filterMinCitations, sortBy, filterMinYear, filterMaxYear]);
 
   // Paginated papers
   const totalPages = Math.ceil(filteredPapers.length / PAGE_SIZE);
@@ -222,7 +226,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
     );
   }
 
-  const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0].filter(Boolean).length;
+  const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0, filterMinYear, filterMaxYear].filter(Boolean).length;
 
   return (
     <div className="space-y-4">
@@ -332,10 +336,34 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
               </select>
             </div>
 
+            {/* 年份范围 */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-gray-500">年份：</span>
+              <input
+                type="number"
+                value={filterMinYear}
+                onChange={(e) => setFilterMinYear(e.target.value)}
+                placeholder="起"
+                min={1900}
+                max={2030}
+                className="w-14 text-xs border border-gray-200 rounded px-1.5 py-0.5"
+              />
+              <span className="text-xs text-gray-400">-</span>
+              <input
+                type="number"
+                value={filterMaxYear}
+                onChange={(e) => setFilterMaxYear(e.target.value)}
+                placeholder="止"
+                min={1900}
+                max={2030}
+                className="w-14 text-xs border border-gray-200 rounded px-1.5 py-0.5"
+              />
+            </div>
+
             {/* 清除筛选 */}
             {activeFilterCount > 0 && (
               <button
-                onClick={() => { setFilterText(""); setFilterSource(null); setFilterOaOnly(false); setFilterMinCitations(0); }}
+                onClick={() => { setFilterText(""); setFilterSource(null); setFilterOaOnly(false); setFilterMinCitations(0); setFilterMinYear(""); setFilterMaxYear(""); }}
                 className="text-xs text-red-500 hover:text-red-700"
               >
                 清除筛选

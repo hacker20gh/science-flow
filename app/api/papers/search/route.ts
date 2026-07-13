@@ -136,9 +136,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3. 补充 OA 信息（并行 5 路） + bioRxiv（免费预印本 PDF）
-    const enriched = await enrichWithOa(papers);
-    await enrichWithBioRxiv(enriched);
+    // 3. 补充 OA 信息（后台异步，不阻塞响应）
+    // OA 结果缓存 24 小时，下次搜索直接命中
+    const enriched = papers; // 先返回搜索结果
+    enrichWithOa(papers).then(() => enrichWithBioRxiv(papers)).catch(() => {});
 
     // 4. OA 偏好排序：有 OA PDF 的排前面（"优先显示" = 排序，不是过滤）
     if (onlyOpenAccess) {

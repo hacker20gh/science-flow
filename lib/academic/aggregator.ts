@@ -263,8 +263,12 @@ function sortGroup(
       break;
     case "relevance":
     default:
-      // Semantic Scholar 默认按相关性，PubMed 默认按 relevance
-      // 保持默认顺序（搜索结果已按相关性排列）
+      // 多源论文加权：被多个数据库收录的论文更可靠
+      papers.sort((a, b) => {
+        const aScore = (a.sources?.length || 1) * 10 + (a.citationCount || 0) * 0.1;
+        const bScore = (b.sources?.length || 1) * 10 + (b.citationCount || 0) * 0.1;
+        return bScore - aScore;
+      });
       break;
   }
 }
