@@ -7,8 +7,9 @@
  * 客户端 SSE 消费函数（consumeSSEStream）在 sse-consumer.ts 中。
  */
 
+import OpenAI from "openai";
 import { trackTokenUsage } from "@/lib/token-tracker";
-import { getIsRetryMode } from "./client";
+import { getIsRetryMode, getOpenAIClient } from "./client";
 import { startLLMGeneration, finishLLMGeneration, failLLMGeneration } from "./langfuse";
 import type { SSEEvent } from "./sse-consumer";
 
@@ -66,6 +67,168 @@ export function createSSEStream(
       Connection: "keep-alive",
     },
   });
+}
+
+// ===== Anthropic → OpenAI 参数转换 =====
+
+/** 将 Anthropic tool 定义转换为 OpenAI function 定义 */
+function convertAnthropicToolsToOpenAI(
+  tools: Array<{ name: string; description?: string; input_schema: Record<string, unknown> }>
+): OpenAI.ChatCompletionCreateParams["tools"] {
+  return tools.map((tool) => ({
+    type: "function" as const,
+    function: {
+      name: tool.name,
+      description: tool.description || "",
+      parameters: tool.input_schema,
+    },
+  }));
+}
+
+/** 将 Anthropic messages 转换为 OpenAI messages 格式 */
+function convertAnthropicMessagesToOpenAI(
+  messages: Array<Record<string, unknown>>
+): OpenAI.Chat.ChatCompletionMessageParam[] {
+  const result: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+
+  for (const msg of messages) {
+    const role = msg.role as string;
+
+    if (role === "user" || role === "assistant") {
+      // 简单文本消息
+      if (typeof msg.content === "string") {
+        result.push({ role: role as "user" | "assistant", content: msg.content });
+        continue;
+      }
+
+      // Anthropic content block 数组
+      if (Array.isArray(msg.content)) {
+        const textParts: string[] = [];
+        for (const block of msg.content) {
+          if (block.type === "text") {
+            textParts.push(block.text);
+          }
+        }
+        if (textParts.length > 0) {
+          result.push({ role: role as "user" | "assistant", content: textParts.join("\n") });
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 使用 OpenAI 兼容 API 进行流式调用（支持 tool_use）
+ *
+ * 将 Anthropic 格式的参数转换为 OpenAI 格式，
+ * 将 OpenAI 的流式 chunk 转换为与 Anthropic 路径相同的 SSEEvent 和返回格式。
+ */
+async function streamOpenAI(
+  openai: OpenAI,
+  params: Record<string, unknown>,
+  emit: (event: SSEEvent) => void
+): Promise<{
+  fullText: string;
+  toolUseBlocks: Array<{ name: string; input: unknown }>;
+  usage: { inputTokens: number; outputTokens: number; cachedTokens: number };
+}> {
+  const model = (params.model as string) || "unknown";
+  const maxTokens = (params.max_tokens as number) || 4096;
+  const system = params.system as string | undefined;
+  const anthropicMessages = (params.messages as Array<Record<string, unknown>>) || [];
+  const anthropicTools = params.tools as Array<{ name: string; description?: string; input_schema: Record<string, unknown> }> | undefined;
+
+  // 转换参数
+  const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  if (system) {
+    openaiMessages.push({ role: "system", content: system });
+  }
+  openaiMessages.push(...convertAnthropicMessagesToOpenAI(anthropicMessages));
+
+  const openaiTools = anthropicTools ? convertAnthropicToolsToOpenAI(anthropicTools) : undefined;
+
+  // 发起流式请求
+  const stream = await openai.chat.completions.create({
+    model,
+    max_tokens: maxTokens,
+    messages: openaiMessages,
+    ...(openaiTools ? { tools: openaiTools } : {}),
+    stream: true,
+  });
+
+  let fullText = "";
+  const toolUseBlocks: Array<{ name: string; input: unknown }> = [];
+
+  // OpenAI tool_calls 累积缓冲（按 index）
+  const toolCallBuffers: Map<number, { name: string; arguments: string }> = new Map();
+
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta;
+    if (!delta) continue;
+
+    // 文本增量
+    if (delta.content) {
+      fullText += delta.content;
+      emit({ type: "text", text: delta.content });
+    }
+
+    // 工具调用增量
+    if (delta.tool_calls) {
+      for (const toolCall of delta.tool_calls) {
+        const idx = toolCall.index;
+        const existing = toolCallBuffers.get(idx);
+
+        if (toolCall.function?.name && !existing) {
+          // 新工具调用开始
+          toolCallBuffers.set(idx, {
+            name: toolCall.function.name,
+            arguments: toolCall.function.arguments || "",
+          });
+        } else if (existing && toolCall.function?.arguments) {
+          // 追加 JSON 片段
+          existing.arguments += toolCall.function.arguments;
+        }
+      }
+    }
+
+    // 完成原因（可用于提前检测结束）
+    if (chunk.choices[0]?.finish_reason === "tool_calls" || chunk.choices[0]?.finish_reason === "stop") {
+      // 流结束，处理累积的 tool calls
+      if (chunk.choices[0].finish_reason === "tool_calls") {
+        for (const [, buffer] of toolCallBuffers) {
+          try {
+            const input = JSON.parse(buffer.arguments || "{}");
+            toolUseBlocks.push({ name: buffer.name, input });
+          } catch {
+            // malformed tool input, skip
+          }
+        }
+        toolCallBuffers.clear();
+      }
+    }
+  }
+
+  // 如果流结束但 tool_calls 未在 finish_reason 中处理（某些 API 不返回 finish_reason）
+  if (toolCallBuffers.size > 0) {
+    for (const [, buffer] of toolCallBuffers) {
+      try {
+        const input = JSON.parse(buffer.arguments || "{}");
+        toolUseBlocks.push({ name: buffer.name, input });
+      } catch {
+        // malformed tool input, skip
+      }
+    }
+    toolCallBuffers.clear();
+  }
+
+  return {
+    fullText,
+    toolUseBlocks,
+    // OpenAI 流式模式不返回 usage（需要 stream_options），填 0 由上层追踪
+    usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0 },
+  };
 }
 
 /**
@@ -151,12 +314,54 @@ export async function streamLLMWithToolUse(
   toolUseBlocks: Array<{ name: string; input: unknown }>;
   usage: { inputTokens: number; outputTokens: number; cachedTokens: number };
 }> {
+  // 从 DB 配置解析模型名（如果调用方传的是默认值）
+  const { getModelForFeature } = await import("./client");
+  const rawModel = (params?.model as string) || "";
+  let resolvedModel = rawModel;
+  if (rawModel.startsWith("claude-") || rawModel.startsWith("gpt-")) {
+    // 看起来是旧的默认值，尝试从 DB 读取
+    const feature = rawModel.includes("haiku") || rawModel.includes("mini") ? "extraction"
+      : rawModel.includes("opus") || rawModel.includes("o1") ? "analysis"
+      : "chat";
+    resolvedModel = await getModelForFeature(feature);
+    if (resolvedModel !== rawModel) {
+      params = { ...params, model: resolvedModel } as typeof params;
+    }
+  }
+
+  // 优先使用 OpenAI 兼容 API（如果可用）
+  const openai = getOpenAIClient();
+  if (openai) {
+    try {
+      const langfuseGen = startLLMGeneration({
+        name: "tool-use-stream",
+        model: (params?.model as string) || "unknown",
+        input: params?.messages,
+        metadata: { streaming: true, hasTools: true, provider: "openai" },
+      });
+
+      try {
+        const result = await streamOpenAI(openai, params as unknown as Record<string, unknown>, emit);
+        finishLLMGeneration(langfuseGen, { fullText: result.fullText, toolUseBlocks: result.toolUseBlocks }, result.usage);
+        return result;
+      } catch (error) {
+        failLLMGeneration(langfuseGen, error);
+        console.error("[SSE] OpenAI streaming 失败，降级到 Anthropic:", (error as Error)?.message);
+        // 降级到 Anthropic 路径（不 throw，继续执行下面的 Anthropic 代码）
+      }
+    } catch {
+      // Langfuse 初始化失败不应阻塞降级
+    }
+  }
+
+  // ===== Anthropic CCS 降级路径（保持原有行为） =====
+
   // Langfuse generation（调用前）
   const langfuseGen = startLLMGeneration({
     name: "tool-use-stream",
     model: (params?.model as string) || "unknown",
     input: params?.messages,
-    metadata: { streaming: true, hasTools: true },
+    metadata: { streaming: true, hasTools: true, provider: "anthropic" },
   });
 
   let fullText = "";

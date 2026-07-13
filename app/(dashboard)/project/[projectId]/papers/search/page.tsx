@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import { useParams, useRouter } from "next/navigation";
@@ -70,6 +70,20 @@ export default function ProjectPaperSearchPage() {
     if (projectId) loadProject(projectId);
   }, [projectId, loadProject]);
 
+  // Ctrl+K keyboard shortcut to focus search input
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        const input = document.querySelector('input[data-search-input]') as HTMLInputElement | null
+          || document.querySelector('input[placeholder*="研究"]') as HTMLInputElement | null;
+        input?.focus();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const [view, setView] = useState<"search" | "extracting" | "review">("search");
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [extractionData, setExtractionData] = useState<ExtractionResult[] | null>(null);
@@ -103,6 +117,8 @@ export default function ProjectPaperSearchPage() {
     experiments: number;
     error?: string;
   }>>([]);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -173,6 +189,10 @@ export default function ProjectPaperSearchPage() {
   }
 
   async function handleSearch(query: string, options: SearchOptions) {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsLoading(true);
     setError(null);
     setResults(null);
@@ -188,21 +208,33 @@ export default function ProjectPaperSearchPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, projectId, ...options }),
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error((await res.json()).error || "搜索失败");
+      if (!res.ok) {
+        const text = await res.text();
+        try { throw new Error(JSON.parse(text).error || `HTTP ${res.status}`); }
+        catch (e) { if (e instanceof SyntaxError) throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`); else throw e; }
+      }
       const data = await res.json();
       setResults(data);
       loadHistory();
 
-      // Partial source failure notification
+      // Partial source failure notification — distinguish real failures from no-results
       const failedSources: string[] = [];
-      if (data.sources?.pubmed === 0 && data.total > 0) failedSources.push('PubMed');
-      if (data.sources?.semanticScholar === 0 && data.total > 0) failedSources.push('Semantic Scholar');
-      if (data.sources?.openAlex === 0 && data.total > 0) failedSources.push('OpenAlex');
-      if (failedSources.length > 0 && failedSources.length < 3) {
-        toast.warning(`${failedSources.join('、')} 暂时不可用，显示的结果来自其他数据源`);
+      const allSourcesZero = data.sources?.pubmed === 0 && data.sources?.semanticScholar === 0 && data.sources?.openAlex === 0;
+      if (!allSourcesZero) {
+        if (data.sources?.pubmed === 0 && data.total > 0) failedSources.push('PubMed');
+        if (data.sources?.semanticScholar === 0 && data.total > 0) failedSources.push('Semantic Scholar');
+        if (data.sources?.openAlex === 0 && data.total > 0) failedSources.push('OpenAlex');
+      }
+      if (failedSources.length > 0) {
+        toast.warning(
+          `${failedSources.join('、')} 暂时不可用`,
+          { description: '显示的结果来自其他数据源，部分论文可能未收录' }
+        );
       }
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "搜索失败");
     } finally {
       setIsLoading(false);
@@ -210,8 +242,7 @@ export default function ProjectPaperSearchPage() {
   }
 
   function handleRefinementClick(refinement: string) {
-    // 从搜索历史中获取上次的搜索参数，或使用默认值
-    const lastParams = searchHistory[0]?.searchParams as SearchOptions | undefined;
+    const lastParams = lastSearchOptions || searchHistory[0]?.searchParams as SearchOptions | undefined;
     handleSearch(refinement, lastParams || {
       maxResults: 20,
       minYear: null,
@@ -264,7 +295,10 @@ export default function ProjectPaperSearchPage() {
   async function handleSelect(papers: Paper[]) {
     // Extraction limit warning
     if (papers.length > 10) {
-      toast.warning('每次最多提取 10 篇文献，将只提取前 10 篇');
+      const dropped = papers.length - 10;
+      toast.warning(`每次最多提取 10 篇，将跳过最后 ${dropped} 篇`, {
+        description: papers.slice(10, 13).map(p => p.title.slice(0, 40)).join("; ") + (dropped > 3 ? "..." : ""),
+      });
     }
     const papersToExtract = papers.slice(0, 10);
     setSelectedPapers(papersToExtract);
@@ -462,10 +496,8 @@ export default function ProjectPaperSearchPage() {
         </p>
       </div>
 
-      {/* 搜索表单 */}
-      {view === "search" && (
-        <SearchForm onSearch={handleSearch} isLoading={isLoading} />
-      )}
+      {/* 搜索表单（始终可见，搜索中禁用输入） */}
+      <SearchForm onSearch={handleSearch} isLoading={isLoading} />
 
       {/* 错误提示 */}
       {error && (
@@ -627,7 +659,8 @@ export default function ProjectPaperSearchPage() {
       {results && view === "search" && (
         <div className="mt-4">
           <div className="text-xs text-gray-400 mb-3">
-            合计 {results.total} 篇（已去重）
+            共 {results.total} 篇（已去重）
+            {results.total > 20 && <span className="ml-1">· 显示前 20 篇，可通过筛选缩小范围</span>}
             {isFromCache && cachedQuery && (
               <button
                 onClick={() => {

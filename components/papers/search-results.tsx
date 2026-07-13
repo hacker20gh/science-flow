@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { Download, Loader2, Check, Upload, ExternalLink, ChevronDown, ChevronUp, Search, Filter } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,9 +39,11 @@ interface SearchResultsProps {
   onRefinementClick?: (refinement: string) => void;
   onDiscoverRelated?: (selectedKeys: Set<string>) => void;
   isDiscovering?: boolean;
+  /** Enable client-side pagination (default: show all) */
+  pageSize?: number;
 }
 
-export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore, isLoadingMore, refinements, onRefinementClick, onDiscoverRelated, isDiscovering }: SearchResultsProps) {
+export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore, isLoadingMore, refinements, onRefinementClick, onDiscoverRelated, isDiscovering, pageSize }: SearchResultsProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
@@ -58,9 +60,19 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   const [filterOaOnly, setFilterOaOnly] = useState(false);
   const [filterMinCitations, setFilterMinCitations] = useState<number>(0);
 
+  // 客户端排序
+  const [sortBy, setSortBy] = useState<"relevance" | "citation" | "date">("relevance");
+
+  // 客户端分页
+  const [currentPage, setCurrentPage] = useState(0);
+  const PAGE_SIZE = pageSize ?? 20;
+
   // 客户端过滤
+  // Reset page when filters or sort change
+  useEffect(() => { setCurrentPage(0); setSelected(new Set()); }, [filterText, filterSource, filterOaOnly, filterMinCitations, sortBy]);
+
   const filteredPapers = useMemo(() => {
-    return papers.filter((p) => {
+    const filtered = papers.filter((p) => {
       if (filterText) {
         const q = filterText.toLowerCase();
         const matchTitle = p.title.toLowerCase().includes(q);
@@ -73,7 +85,21 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
       if (filterMinCitations > 0 && (p.citationCount || 0) < filterMinCitations) return false;
       return true;
     });
-  }, [papers, filterText, filterSource, filterOaOnly, filterMinCitations]);
+
+    // Apply client-side sort
+    if (sortBy === "citation") {
+      filtered.sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0));
+    } else if (sortBy === "date") {
+      filtered.sort((a, b) => (b.year || 0) - (a.year || 0));
+    }
+    // "relevance" = keep original order
+
+    return filtered;
+  }, [papers, filterText, filterSource, filterOaOnly, filterMinCitations, sortBy]);
+
+  // Paginated papers
+  const totalPages = Math.ceil(filteredPapers.length / PAGE_SIZE);
+  const paginatedPapers = filteredPapers.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   function toggle(paper: Paper) {
     const key = paperKey(paper);
@@ -86,7 +112,10 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   }
 
   function selectAll() {
-    setSelected(new Set(filteredPapers.map(paperKey)));
+    const allKeys = new Set(filteredPapers.map(paperKey));
+    // If all are already selected, deselect all; otherwise select all
+    const allSelected = filteredPapers.every(p => allKeys.has(paperKey(p)) && selected.has(paperKey(p)));
+    setSelected(allSelected ? new Set() : allKeys);
   }
 
   function handleConfirm() {
@@ -228,6 +257,15 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
             <Filter size={12} />
             筛选{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
           </button>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            className="text-xs border border-gray-200 rounded px-2 py-1.5 bg-white hover:bg-gray-50"
+          >
+            <option value="relevance">按相关性</option>
+            <option value="citation">按引用量</option>
+            <option value="date">按发表时间</option>
+          </select>
         </div>
 
         {showFilters && (
@@ -325,12 +363,12 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
       </div>
 
       <div className="space-y-3">
-        {filteredPapers.length === 0 ? (
+        {paginatedPapers.length === 0 ? (
           <div className="text-center py-8 text-gray-400 text-sm">
             筛选后无匹配结果，请调整筛选条件
           </div>
         ) : (
-          filteredPapers.map((paper) => {
+          paginatedPapers.map((paper) => {
           const key = paperKey(paper);
           const isSelected = selected.has(key);
 
@@ -513,6 +551,29 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
         )}
       </div>
 
+      {/* 客户端分页 */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+            disabled={currentPage === 0}
+            className="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ← 上一页
+          </button>
+          <span className="text-xs text-gray-500">
+            {currentPage + 1} / {totalPages} 页
+          </span>
+          <button
+            onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+            disabled={currentPage >= totalPages - 1}
+            className="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            下一页 →
+          </button>
+        </div>
+      )}
+
       {/* 加载更多 */}
       {hasMore && onLoadMore && (
         <div className="flex justify-center pt-2">
@@ -537,5 +598,5 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
 }
 
 function paperKey(paper: Paper): string {
-  return paper.doi || paper.pmid || paper.title;
+  return paper.doi || paper.pmid || `${paper.title}|${paper.authors?.[0] || ""}`;
 }

@@ -7,8 +7,8 @@
  * - OpenAlex：概念过滤 + 全文搜索
  */
 
-import { getLLMClient, MODELS, withLLMRetry } from "./client";
-import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
+import { callExtractionLLM, MODELS, withLLMRetry } from "./client";
+import { extractStructuredOutput } from "./json-extractor";
 import { z } from "zod";
 import { SearchCache } from "@/lib/cache";
 
@@ -40,15 +40,23 @@ const SubQuerySchema = z.object({
 });
 
 const ProcessedQuerySchema = z.object({
-  optimizedQuery: z.string(),
+  optimizedQuery: z.string().optional().default(""),
   pubmedQuery: z.string(),
   s2Query: z.string(),
   openAlexQuery: z.string(),
-  meshTerms: z.array(z.string()),
-  searchIntent: z.string(),
-  suggestedRefinements: z.array(z.string()),
+  meshTerms: z.array(z.string()).default([]),
+  searchIntent: z.string().default(""),
+  suggestedRefinements: z.union([z.array(z.string()), z.string()]).default([]),
   subQueries: z.array(SubQuerySchema).optional(),
-});
+}).transform((data) => ({
+  ...data,
+  // 兼容：如果 suggestedRefinements 是字符串，转为数组
+  suggestedRefinements: Array.isArray(data.suggestedRefinements)
+    ? data.suggestedRefinements
+    : data.suggestedRefinements ? [data.suggestedRefinements as string] : [],
+  // 兼容：如果缺少 optimizedQuery，用 pubmedQuery 兜底
+  optimizedQuery: data.optimizedQuery || data.pubmedQuery,
+}));
 
 const CACHE_TTL = 10 * 60 * 1000;
 const queryCache = new SearchCache<ProcessedQuery>();
@@ -89,27 +97,21 @@ export async function preprocessQuery(userInput: string): Promise<ProcessedQuery
 
   try {
     const result = await withLLMRetry(async () => {
-      const client = getLLMClient();
-       
-      const response = await client.messages.create({
+      const response = await callExtractionLLM({
         model: MODELS.extraction,
-        max_tokens: 2048,
+        maxTokens: 2048,
         system: PREPROCESS_PROMPT,
         messages: [{ role: "user", content: userInput }],
-        _sciflowFeature: "preprocess",
-      } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
+        feature: "preprocess",
+      });
 
       return await extractStructuredOutput(response, ProcessedQuerySchema, {
         label: "query-preprocess",
-        retryFn: createRetryFunction(client, {
-          model: MODELS.extraction,
-          maxTokens: 1024,
-          system: PREPROCESS_PROMPT,
-          userMessage: userInput,
-          originalContent: userInput,
-          schema: ProcessedQuerySchema,
-          feature: "preprocess",
-        }),
+        retryFn: async () => {
+          // Debug: log raw response
+          console.log("[query-preprocess] Raw response content:", JSON.stringify(response.content).slice(0, 500));
+          return response;
+        },
       });
     }, { label: "query-preprocess", maxRetries: 1 });
 
@@ -153,14 +155,21 @@ function fallbackProcess(userInput: string): ProcessedQuery {
 /**
  * 快速模式：跳过 LLM 预处理，直接用原始查询
  * 中文输入走字典翻译，英文直接透传
+ * 为每个搜索引擎生成略有不同的查询以提高精度
  */
 export function fastPreprocess(userInput: string): ProcessedQuery {
   const isChinese = /[一-龥]/.test(userInput);
   const translated = isChinese ? simpleChineseTranslate(userInput) : userInput;
 
+  // PubMed: add [tiab] field tags for better precision
+  const terms = translated.split(/\s+AND\s+/i);
+  const pubmedQuery = terms.length > 1
+    ? terms.map(t => `(${t.trim()}[tiab])`).join(" AND ")
+    : `${translated}[tiab]`;
+
   return {
     optimizedQuery: translated,
-    pubmedQuery: translated,
+    pubmedQuery,
     s2Query: translated,
     openAlexQuery: translated,
     meshTerms: [],
@@ -190,11 +199,114 @@ function simpleChineseTranslate(input: string): string {
     "迁移": "migration",
     "侵袭": "invasion",
     "转移": "metastasis",
+    // Cell death pathways
+    "自噬": "autophagy",
+    "铁死亡": "ferroptosis",
+    "焦亡": "pyroptosis",
+    "坏死性凋亡": "necroptosis",
+    "细胞死亡": "cell death",
+    // Metabolism & stress
+    "糖酵解": "glycolysis",
+    "氧化应激": "oxidative stress",
+    "内质网应激": "endoplasmic reticulum stress",
+    "线粒体": "mitochondria",
+    // Stem cells & gene editing
+    "血管生成": "angiogenesis",
+    "干细胞": "stem cell",
+    "肿瘤干细胞": "cancer stem cell",
+    "CAR-T": "CAR-T",
+    "CRISPR": "CRISPR",
+    "基因编辑": "gene editing",
+    "类器官": "organoid",
+    // Omics & sequencing
+    "单细胞测序": "single-cell sequencing",
+    "单细胞": "single-cell",
+    "RNA测序": "RNA sequencing",
+    "转录组": "transcriptome",
+    "蛋白质组": "proteomics",
+    "代谢组": "metabolomics",
+    // Microbiome
+    "肠道菌群": "gut microbiota",
+    "肠道微生物": "gut microbiome",
+    // Immune checkpoints & cells
+    "免疫检查点": "immune checkpoint",
+    "PD-1": "PD-1",
+    "PD-L1": "PD-L1",
+    "CTLA-4": "CTLA-4",
+    "T细胞": "T cell",
+    "巨噬细胞": "macrophage",
+    "Treg": "regulatory T cell",
+    "NK细胞": "natural killer cell",
+    // Clinical
+    "生物标志物": "biomarker",
+    "预后": "prognosis",
+    "诊断": "diagnosis",
+    "治疗": "therapy",
+    "化疗": "chemotherapy",
+    "放疗": "radiotherapy",
+    "靶向治疗": "targeted therapy",
+    "免疫治疗": "immunotherapy",
+    "联合治疗": "combination therapy",
+    // Drug delivery & biomaterials
+    "药物递送": "drug delivery",
+    "纳米粒子": "nanoparticle",
+    "水凝胶": "hydrogel",
+    "支架": "scaffold",
+    "组织工程": "tissue engineering",
+    // Animal models
+    "动物模型": "animal model",
+    "小鼠模型": "mouse model",
+    "PDX": "patient-derived xenograft",
+    // Diseases
+    "类风湿关节炎": "rheumatoid arthritis",
+    "阿尔茨海默病": "Alzheimer disease",
+    "帕金森病": "Parkinson disease",
+    "糖尿病": "diabetes",
+    "动脉粥样硬化": "atherosclerosis",
+    "心肌梗死": "myocardial infarction",
+    "心力衰竭": "heart failure",
+    "炎症": "inflammation",
+    "纤维化": "fibrosis",
+    "肝纤维化": "liver fibrosis",
+    "肝硬化": "cirrhosis",
+    "肾损伤": "kidney injury",
+    "急性肺损伤": "acute lung injury",
+    "败血症": "sepsis",
+    "COVID-19": "COVID-19",
+    "长新冠": "long COVID",
+    // Molecular biology
+    "蛋白质": "protein",
+    "受体": "receptor",
+    "配体": "ligand",
+    "激酶": "kinase",
+    "磷酸化": "phosphorylation",
+    "泛素化": "ubiquitination",
+    "乙酰化": "acetylation",
+    // Signaling molecules & pathways
+    "mTOR": "mTOR",
+    "NF-κB": "NF-kB",
+    "PI3K": "PI3K",
+    "MAPK": "MAPK",
+    "JAK-STAT": "JAK-STAT",
+    "Wnt": "Wnt",
+    "Notch": "Notch",
+    "Hedgehog": "Hedgehog",
+    "TGF-β": "TGF-beta",
+    "VEGF": "VEGF",
+    "EGFR": "EGFR",
+    "HER2": "HER2",
+    "BRCA": "BRCA",
+    "TP53": "TP53",
+    "KRAS": "KRAS",
+    // Liquid biopsy & epigenetics
+    "液体活检": "liquid biopsy",
+    "循环肿瘤DNA": "circulating tumor DNA ctDNA",
     "外泌体": "exosome",
     "环状RNA": "circular RNA circRNA",
     "长链非编码RNA": "lncRNA",
     "微小RNA": "microRNA miRNA",
     "甲基化": "methylation",
+    // Experimental methods
     "细胞系": "cell line",
     "体内实验": "in vivo",
     "体外实验": "in vitro",

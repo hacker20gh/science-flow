@@ -71,7 +71,7 @@ const S2_TYPE_FILTER_MAP: Record<string, string> = {
   "review": "Review",
   "meta-analysis": "MetaAnalysis",
   "clinical-trial": "ClinicalTrial",
-  "preprint": "Review", // S2 无 Preprint 类型，用 Review 近似
+  "preprint": "JournalArticle", // S2 无 Preprint type; use JournalArticle (most inclusive)
 };
 
 const FIELDS = [

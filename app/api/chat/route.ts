@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
-import { getLLMClient, MODELS, withLLMRetry, getIsRetryMode } from "@/lib/llm/client";
+import { getLLMClient, getOpenAIClient, MODELS, withLLMRetry, getIsRetryMode } from "@/lib/llm/client";
 import { buildRichContext, manageMessageBudget } from "@/lib/llm/context-builder";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
-import { CHAT_TOOLS, executeTool } from "@/lib/llm/chat-tools";
+import { CHAT_TOOLS, executeTool, getOpenAITools, streamChatWithOpenAI } from "@/lib/llm/chat-tools";
 import { trackTokenUsage } from "@/lib/token-tracker";
 
 interface ChatMessage {
@@ -85,7 +85,6 @@ export async function POST(req: NextRequest) {
   }));
   const managed = manageMessageBudget(normalizedForBudget, MESSAGE_BUDGET);
 
-  const client = getLLMClient();
   const encoder = new TextEncoder();
   let fullAssistantText = "";
 
@@ -96,10 +95,9 @@ export async function POST(req: NextRequest) {
       };
 
       try {
-        // 构建 Anthropic messages 格式
+        // 构建 messages 格式
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let apiMessages: any[] = managed.messages.map((m, idx) => {
-          // Last user message may include image data
           if (idx === managed.messages.length - 1 && m.role === "user" && imageData?.data) {
             return {
               role: m.role,
@@ -109,135 +107,138 @@ export async function POST(req: NextRequest) {
               ],
             };
           }
-          return {
-            role: m.role,
-            content: m.content,
-          };
+          return { role: m.role, content: m.content };
         });
 
         let toolRound = 0;
-        // Collect all tool calls across rounds for persistence
         const collectedToolCalls: Array<{ name: string; input: Record<string, unknown>; output: string }> = [];
+
+        // 检测 OpenAI 兼容 API
+        const openai = getOpenAIClient();
+        const useOpenAI = !!openai;
 
         // 工具调用循环
         while (toolRound < MAX_TOOL_ROUNDS) {
-          // 流式调用 LLM（同时处理 text 和 thinking 事件，兼容不同模型）
           const streamStart = Date.now();
-          const streamResponse = await client.messages.create({
-            model: MODELS.chat,
-            max_tokens: 4096,
-            stream: true,
-            system: systemPrompt,
-            messages: apiMessages,
-            tools: projectId ? CHAT_TOOLS : undefined,
-          });
-
           let textContent = "";
-          let thinkingContent = "";
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const toolUseBlocks: any[] = [];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let currentBlock: any = null;
-          let chatInputTokens = 0;
-          let chatOutputTokens = 0;
-          let chatCachedTokens = 0;
 
-          for await (const event of streamResponse) {
-            if (event.type === "message_start") {
-              const usage = event.message?.usage;
-              if (usage) {
-                chatInputTokens = usage.input_tokens || 0;
-                chatCachedTokens = usage.cache_read_input_tokens || 0;
-              }
-            } else if (event.type === "message_delta") {
-              const usage = event.usage;
-              if (usage) chatOutputTokens = usage.output_tokens || 0;
-            } else if (event.type === "content_block_start") {
-              currentBlock = event.content_block;
-            } else if (event.type === "content_block_delta") {
-              if (event.delta.type === "text_delta") {
-                textContent += event.delta.text;
-                fullAssistantText += event.delta.text;
-                emit({ type: "text", text: event.delta.text });
-              } else if (event.delta.type === "thinking_delta") {
-                thinkingContent += event.delta.thinking;
-              }
-            } else if (event.type === "content_block_stop") {
-              if (currentBlock?.type === "tool_use") {
-                toolUseBlocks.push(currentBlock);
-              }
-              currentBlock = null;
-            }
-          }
-
-          // 记录 token 用量
-          if (chatInputTokens > 0 || chatOutputTokens > 0) {
-            trackTokenUsage({
-              feature: "chat",
-              model: MODELS.chat,
-              inputTokens: chatInputTokens,
-              outputTokens: chatOutputTokens,
-              cachedTokens: chatCachedTokens,
-              durationMs: Date.now() - streamStart,
-              isRetry: getIsRetryMode(),
-            });
-          }
-
-          // 如果没有 text 但有 thinking（MIMO 等模型），用 thinking 作为可见回复
-          if (!textContent && thinkingContent) {
-            // 提取 thinking 中的最终回复（跳过推理过程）
-            const reply = extractReplyFromThinking(thinkingContent);
-            if (reply) {
-              textContent = reply;
-              fullAssistantText += reply;
-              emit({ type: "text", text: reply });
-            }
-          }
-
-          // 处理工具调用
-          if (toolUseBlocks.length > 0) {
-            const toolCalls = toolUseBlocks.map((b) => ({
-              id: b.id,
-              name: b.name,
-              input: b.input as Record<string, unknown>,
-            }));
-
-            for (const tool of toolCalls) {
-              emit({ type: "tool_use", tool: tool.name, input: tool.input, status: "executing" });
-            }
-
-            const toolResults = await Promise.all(
-              toolCalls.map((tc) => executeTool(tc.name, tc.input, userId || "anonymous"))
+          if (useOpenAI && openai) {
+            // ===== OpenAI 兼容 API 路径 =====
+            const tools = projectId ? getOpenAITools() : undefined;
+            const result = await streamChatWithOpenAI(
+              openai,
+              {
+                model: MODELS.chat,
+                system: systemPrompt,
+                messages: apiMessages,
+                tools,
+                maxTokens: 4096,
+              },
+              (event) => emit(event),
+              "chat"
             );
+            textContent = result.text;
+            fullAssistantText += result.text;
 
-            for (let i = 0; i < toolCalls.length; i++) {
-              emit({ type: "tool_result", tool: toolCalls[i].name, result: JSON.parse(toolResults[i].result), status: "done" });
-              collectedToolCalls.push({
-                name: toolCalls[i].name,
-                input: toolCalls[i].input,
-                output: toolResults[i].result,
+            // 转换 OpenAI tool calls 为 Anthropic 格式
+            for (const tc of result.toolCalls) {
+              toolUseBlocks.push({
+                id: tc.id,
+                name: tc.name,
+                input: tc.input,
+                type: "tool_use",
+              });
+            }
+          } else {
+            // ===== Anthropic CCS 路径（原有逻辑） =====
+            const client = getLLMClient();
+            const streamResponse = await client.messages.create({
+              model: MODELS.chat,
+              max_tokens: 4096,
+              stream: true,
+              system: systemPrompt,
+              messages: apiMessages,
+              tools: projectId ? CHAT_TOOLS : undefined,
+            });
+
+            let thinkingContent = "";
+            let currentBlock: Record<string, unknown> | null = null;
+            let chatInputTokens = 0;
+            let chatOutputTokens = 0;
+            let chatCachedTokens = 0;
+
+            for await (const event of streamResponse) {
+              if (event.type === "message_start") {
+                const usage = (event as { message?: { usage?: { input_tokens: number; cache_read_input_tokens?: number } } }).message?.usage;
+                if (usage) {
+                  chatInputTokens = usage.input_tokens || 0;
+                  chatCachedTokens = usage.cache_read_input_tokens || 0;
+                }
+              } else if (event.type === "message_delta") {
+                const usage = (event as { usage?: { output_tokens: number } }).usage;
+                if (usage) chatOutputTokens = usage.output_tokens || 0;
+              } else if (event.type === "content_block_start") {
+              currentBlock = (event as unknown as { content_block?: Record<string, unknown> }).content_block || null;
+              } else if (event.type === "content_block_delta") {
+                const delta = (event as { delta?: { type: string; text?: string; thinking?: string } }).delta;
+                if (delta?.type === "text_delta") {
+                  textContent += delta.text || "";
+                  fullAssistantText += delta.text || "";
+                  emit({ type: "text", text: delta.text });
+                } else if (delta?.type === "thinking_delta") {
+                  thinkingContent += delta.thinking || "";
+                }
+              } else if (event.type === "content_block_stop") {
+                if (currentBlock?.type === "tool_use") {
+                  toolUseBlocks.push(currentBlock);
+                }
+                currentBlock = null;
+              }
+            }
+
+            if (chatInputTokens > 0 || chatOutputTokens > 0) {
+              trackTokenUsage({
+                feature: "chat", model: MODELS.chat,
+                inputTokens: chatInputTokens, outputTokens: chatOutputTokens,
+                cachedTokens: chatCachedTokens, durationMs: Date.now() - streamStart,
+                isRetry: getIsRetryMode(),
               });
             }
 
+            if (!textContent && thinkingContent) {
+              const reply = extractReplyFromThinking(thinkingContent);
+              if (reply) { textContent = reply; fullAssistantText += reply; emit({ type: "text", text: reply }); }
+            }
+          }
+
+          // 处理工具调用（两种路径共用）
+          if (toolUseBlocks.length > 0) {
+            const toolCalls = toolUseBlocks.map((b) => ({
+              id: b.id, name: b.name, input: b.input as Record<string, unknown>,
+            }));
+            for (const tool of toolCalls) {
+              emit({ type: "tool_use", tool: tool.name, input: tool.input, status: "executing" });
+            }
+            const toolResults = await Promise.all(
+              toolCalls.map((tc) => executeTool(tc.name, tc.input, userId || "anonymous"))
+            );
+            for (let i = 0; i < toolCalls.length; i++) {
+              emit({ type: "tool_result", tool: toolCalls[i].name, result: JSON.parse(toolResults[i].result), status: "done" });
+              collectedToolCalls.push({ name: toolCalls[i].name, input: toolCalls[i].input, output: toolResults[i].result });
+            }
             const assistantMessage = { role: "assistant" as const, content: [
               ...(textContent ? [{ type: "text" as const, text: textContent }] : []),
               ...toolUseBlocks,
             ] };
-            const toolResultMessage = {
-              role: "user" as const,
-              content: toolCalls.map((tc, i) => ({
-                type: "tool_result" as const,
-                tool_use_id: tc.id,
-                content: toolResults[i].result,
-              })),
-            };
-
+            const toolResultMessage = { role: "user" as const, content: toolCalls.map((tc, i) => ({
+              type: "tool_result" as const, tool_use_id: tc.id, content: toolResults[i].result,
+            })) };
             apiMessages = [...apiMessages, assistantMessage, toolResultMessage];
             toolRound++;
             continue;
           }
-
-          // 没有工具调用，结束循环
           break;
         }
 

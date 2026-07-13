@@ -174,7 +174,7 @@ function tryParseJSON<T>(text: string, schema: z.ZodSchema<T>): T | null {
  * 创建重试函数：要求 LLM 按指定 schema 输出 JSON
  */
 export function createRetryFunction(
-  client: Anthropic,
+  client: Anthropic | null,
   params: {
     model: string;
     maxTokens: number;
@@ -209,15 +209,30 @@ export function createRetryFunction(
       content: `Return ONLY a valid JSON object matching the required schema. No text before or after. No markdown code blocks. No explanations.${exampleJSON}`,
     });
 
-     
-    const response = await client.messages.create({
-      model: params.model,
-      max_tokens: params.maxTokens,
-      system: params.system + "\n\nIMPORTANT: Return ONLY a valid JSON object. No text before or after. No markdown code blocks. The JSON MUST match the schema exactly.",
-      messages,
-      ...(params.feature ? { _sciflowFeature: params.feature } : {}),
-    } as any) as Message;
-    return response;
+    const system = params.system + "\n\nIMPORTANT: Return ONLY a valid JSON object. No text before or after. No markdown code blocks. The JSON MUST match the schema exactly.";
+
+    // 优先使用统一 LLM 接口（自动选择 OpenAI 兼容 API 或 CCS）
+    try {
+      const { callExtractionLLM } = await import("./client");
+      return await callExtractionLLM({
+        model: params.model,
+        maxTokens: params.maxTokens,
+        system,
+        messages,
+        feature: params.feature,
+      });
+    } catch {
+      // 降级：直接使用 Anthropic 客户端
+      if (!client) throw new Error("No LLM client available");
+      const response = await client.messages.create({
+        model: params.model,
+        max_tokens: params.maxTokens,
+        system,
+        messages,
+        ...(params.feature ? { _sciflowFeature: params.feature } : {}),
+      } as never) as Message;
+      return response;
+    }
   };
 }
 

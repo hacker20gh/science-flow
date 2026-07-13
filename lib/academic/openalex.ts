@@ -6,6 +6,8 @@
  * 覆盖全学科，元数据丰富（引用、机构、基金、OA 状态）
  */
 
+import { withRetry } from "@/lib/utils/retry";
+
 const BASE_URL = "https://api.openalex.org";
 
 export interface OpenAlexPaper {
@@ -49,62 +51,64 @@ const OPENALEX_TYPE_FILTER_MAP: Record<string, string> = {
 export async function searchOpenAlex(
   options: SearchOptions
 ): Promise<OpenAlexPaper[]> {
-  const { query, maxResults = 20, minYear, maxYear, articleTypes, minCitationCount } = options;
+  return withRetry(async () => {
+    const { query, maxResults = 20, minYear, maxYear, articleTypes, minCitationCount } = options;
 
-  const params = new URLSearchParams({
-    search: query,
-    per_page: String(maxResults),
-    select: [
-      "id",
-      "title",
-      "authorships",
-      "primary_location",
-      "publication_year",
-      "abstract_inverted_index",
-      "doi",
-      "cited_by_count",
-      "open_access",
-      "best_oa_location",
-      "concepts",
-    ].join(","),
-  });
+    const params = new URLSearchParams({
+      search: query,
+      per_page: String(maxResults),
+      select: [
+        "id",
+        "title",
+        "authorships",
+        "primary_location",
+        "publication_year",
+        "abstract_inverted_index",
+        "doi",
+        "cited_by_count",
+        "open_access",
+        "best_oa_location",
+        "concepts",
+      ].join(","),
+    });
 
-  // OpenAlex polite pool: 带 mailto 参数可获得更快的响应和更低的限流
-  const email = process.env.OPENALEX_EMAIL || process.env.NCBI_EMAIL;
-  if (email) params.set("mailto", email);
+    // OpenAlex polite pool: 带 mailto 参数可获得更快的响应和更低的限流
+    const email = process.env.OPENALEX_EMAIL || process.env.NCBI_EMAIL;
+    if (email) params.set("mailto", email);
 
-  // 构建 filter 参数（OpenAlex 用逗号分隔多个 filter 条件）
-  const filters: string[] = [];
-  if (minYear || maxYear) {
-    const from = minYear || 0;
-    const to = maxYear || new Date().getFullYear();
-    filters.push(`publication_year:${from}-${to}`);
-  }
-  // 文献类型过滤
-  if (articleTypes && articleTypes.length > 0) {
-    const openAlexTypes = articleTypes
-      .map((t) => OPENALEX_TYPE_FILTER_MAP[t])
-      .filter(Boolean);
-    if (openAlexTypes.length > 0) {
-      // OpenAlex type filter 用 OR 逻辑（竖线分隔）
-      filters.push(`type:${openAlexTypes.join("|")}`);
+    // 构建 filter 参数（OpenAlex 用逗号分隔多个 filter 条件）
+    const filters: string[] = [];
+    if (minYear || maxYear) {
+      const from = minYear || 0;
+      const to = maxYear || new Date().getFullYear();
+      filters.push(`publication_year:${from}-${to}`);
     }
-  }
-  // 引用数过滤（OpenAlex 原生支持）
-  if (minCitationCount && minCitationCount > 0) {
-    filters.push(`cited_by_count:>${minCitationCount}`);
-  }
-  if (filters.length > 0) {
-    params.set("filter", filters.join(","));
-  }
+    // 文献类型过滤
+    if (articleTypes && articleTypes.length > 0) {
+      const openAlexTypes = articleTypes
+        .map((t) => OPENALEX_TYPE_FILTER_MAP[t])
+        .filter(Boolean);
+      if (openAlexTypes.length > 0) {
+        // OpenAlex type filter 用 OR 逻辑（竖线分隔）
+        filters.push(`type:${openAlexTypes.join("|")}`);
+      }
+    }
+    // 引用数过滤（OpenAlex 原生支持）
+    if (minCitationCount && minCitationCount > 0) {
+      filters.push(`cited_by_count:>${minCitationCount}`);
+    }
+    if (filters.length > 0) {
+      params.set("filter", filters.join(","));
+    }
 
-  const res = await fetch(`${BASE_URL}/works?${params}`, {
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`OpenAlex search failed: ${res.status}`);
+    const res = await fetch(`${BASE_URL}/works?${params}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`OpenAlex search failed: ${res.status}`);
 
-  const data = await res.json();
-  return (data.results || []).map(mapOpenAlexPaper);
+    const data = await res.json();
+    return (data.results || []).map(mapOpenAlexPaper);
+  }, { maxRetries: 2, baseDelay: 1000 });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

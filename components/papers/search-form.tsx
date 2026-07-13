@@ -72,8 +72,12 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
   function toggleArticleType(type: string) {
     setArticleTypes((prev) => {
       const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
+      if (next.has(type)) {
+        if (next.size <= 1) return prev; // Don't allow deselecting last type
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
       return next;
     });
   }
@@ -87,8 +91,15 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
 
     if (useYearRange && startYear) {
       // 精确年份范围模式
-      minYear = parseInt(startYear) || null;
-      maxYearVal = parseInt(endYear) || null;
+      const sy = parseInt(startYear) || null;
+      const ey = parseInt(endYear) || null;
+      if (sy && ey && sy > ey) {
+        minYear = ey;
+        maxYearVal = sy;
+      } else {
+        minYear = sy;
+        maxYearVal = ey;
+      }
     } else {
       // 最近 N 年模式
       const years = useCustomYear ? parseInt(customYear) || 0 : yearOption;
@@ -132,8 +143,9 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
             {isLoading ? "搜索中..." : "🔍 搜索"}
           </button>
         </div>
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-400 flex items-center gap-2">
           💡 直接描述你的研究内容，系统会自动提取关键词并搜索多个数据库
+          <kbd className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 border border-gray-200 rounded">Ctrl+K</kbd>
         </p>
       </div>
 
@@ -331,14 +343,14 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
                 />
                 优先显示有 Open Access 全文的
               </label>
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer" title="跳过 LLM 查询优化，直接搜索原始关键词">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer" title="直接搜索原始关键词，速度更快但结果可能不够精准">
                 <input
                   type="checkbox"
                   checked={fastMode}
                   onChange={(e) => setFastMode(e.target.checked)}
                   className="rounded"
                 />
-                ⚡ 快速搜索
+                ⚡ 简单搜索（跳过智能优化）
               </label>
             </div>
             <div className="flex items-center gap-2 text-sm">

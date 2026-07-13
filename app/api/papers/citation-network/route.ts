@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { getCitations, getReferences, type S2Paper } from "@/lib/academic/semantic-scholar";
 
 /**
@@ -8,6 +9,11 @@ import { getCitations, getReferences, type S2Paper } from "@/lib/academic/semant
  * 按"被种子论文提及的频次"排序，返回最相关的扩展论文。
  */
 export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
+
   try {
     const body = await req.json();
     const { paperIds, maxResults = 30 } = body;

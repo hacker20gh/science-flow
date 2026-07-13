@@ -5,6 +5,21 @@ import { preprocessQuery, fastPreprocess } from "@/lib/llm/query-preprocessor";
 import { prisma } from "@/lib/db-server";
 import { SearchCache } from "@/lib/cache";
 
+// Simple in-memory rate limiter (per-IP sliding window)
+const rateLimitMap = new Map<string, number[]>();
+const RATE_LIMIT = 20; // requests
+const RATE_WINDOW = 60_000; // 1 minute
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const timestamps = rateLimitMap.get(ip) || [];
+  const recent = timestamps.filter(t => now - t < RATE_WINDOW);
+  if (recent.length >= RATE_LIMIT) return false;
+  recent.push(now);
+  rateLimitMap.set(ip, recent);
+  return true;
+}
+
 const RESULT_CACHE_TTL = 30 * 60 * 1000;
 const resultCache = new SearchCache();
 
@@ -16,6 +31,11 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
+
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0] || "unknown";
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "请求过于频繁，请稍后再试" }, { status: 429 });
   }
 
   try {
@@ -36,6 +56,13 @@ export async function POST(req: NextRequest) {
     if (!query || typeof query !== "string") {
       return NextResponse.json(
         { error: "query is required" },
+        { status: 400 }
+      );
+    }
+
+    if (query.length > 2000) {
+      return NextResponse.json(
+        { error: "查询过长，请精简到 2000 字以内" },
         { status: 400 }
       );
     }
@@ -124,69 +151,79 @@ export async function POST(req: NextRequest) {
 
     // 5. 记录搜索历史（fire-and-forget，保存完整参数和结果快照）
     if (projectId && typeof projectId === "string" && prisma) {
-      const allSources = [...new Set(enriched.flatMap((p) => p.sources || []))];
-      const searchParams = {
-        maxResults,
-        minYear: minYear ? Number(minYear) : null,
-        maxYear: maxYear ? Number(maxYear) : null,
-        minCitationCount: minCitationCount ? Number(minCitationCount) : null,
-        sortBy,
-        articleTypes,
-        onlyOpenAccess,
-      };
-      // 保存结果快照（轻量版）
-      const resultSnapshot = enriched.slice(0, 50).map((p) => ({
-        pmid: p.pmid,
-        doi: p.doi,
-        title: p.title,
-        authors: p.authors,
-        journal: p.journal,
-        year: p.year,
-        abstract: p.abstract?.slice(0, 500) || "",
-        citationCount: p.citationCount,
-        isOpenAccess: p.isOpenAccess,
-        oaPdfUrl: p.oaPdfUrl,
-        tldr: p.tldr,
-        articleType: p.articleType,
-        sources: p.sources,
-      }));
+      // 验证用户拥有该项目
+      const ownsProject = await prisma.project.findFirst({
+        where: { id: projectId, userId: session?.user?.id },
+        select: { id: true },
+      }).catch(() => null);
+      if (!ownsProject) {
+        console.warn("[Search] projectId not owned by user:", projectId);
+      } else {
+        const allSources = [...new Set(enriched.flatMap((p) => p.sources || []))];
+        const searchParams = {
+          maxResults,
+          minYear: minYear ? Number(minYear) : null,
+          maxYear: maxYear ? Number(maxYear) : null,
+          minCitationCount: minCitationCount ? Number(minCitationCount) : null,
+          sortBy,
+          articleTypes,
+          onlyOpenAccess,
+        };
+        // 保存结果快照（轻量版）
+        const resultSnapshot = enriched.slice(0, 50).map((p) => ({
+          pmid: p.pmid,
+          doi: p.doi,
+          title: p.title,
+          authors: p.authors,
+          journal: p.journal,
+          year: p.year,
+          abstract: p.abstract?.slice(0, 500) || "",
+          citationCount: p.citationCount,
+          isOpenAccess: p.isOpenAccess,
+          oaPdfUrl: p.oaPdfUrl,
+          tldr: p.tldr,
+          articleType: p.articleType,
+          sources: p.sources,
+        }));
 
-      prisma.searchHistory
-        .create({
-          data: {
-            projectId,
-            query,
-            optimizedQuery: processed.optimizedQuery,
-            sources: allSources,
-            maxResults,
-            resultCount: enriched.length,
-            ...(searchParams && { searchParams }),
-            ...(resultSnapshot && { resultSnapshot }),
-          } as any,
-        })
-        .catch((err: unknown) => {
-          // 字段不存在时静默降级（DB 未迁移）
-          if (err instanceof Error && err.message.includes("column")) {
-            console.warn("[Search] 新字段未在 DB 中，跳过快照保存");
-            // 降级：不保存新字段
-            if (prisma) {
-              prisma.searchHistory.create({
-                data: {
-                  projectId,
-                  query,
-                  optimizedQuery: processed.optimizedQuery,
-                  sources: allSources,
-                  maxResults,
-                  resultCount: enriched.length,
-                },
-              }).catch((err: unknown) => {
-                console.error("[Search] Failed to save search history (fallback):", err);
-              });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        prisma.searchHistory
+          .create({
+            data: {
+              projectId,
+              query,
+              optimizedQuery: processed.optimizedQuery,
+              sources: allSources,
+              maxResults,
+              resultCount: enriched.length,
+              ...(searchParams && { searchParams }),
+              ...(resultSnapshot && { resultSnapshot }),
+            } as any,
+          })
+          .catch((err: unknown) => {
+            // 字段不存在时静默降级（DB 未迁移）
+            if (err instanceof Error && err.message.includes("column")) {
+              console.warn("[Search] 新字段未在 DB 中，跳过快照保存");
+              // 降级：不保存新字段
+              if (prisma) {
+                prisma.searchHistory.create({
+                  data: {
+                    projectId,
+                    query,
+                    optimizedQuery: processed.optimizedQuery,
+                    sources: allSources,
+                    maxResults,
+                    resultCount: enriched.length,
+                  },
+                }).catch((err: unknown) => {
+                  console.error("[Search] Failed to save search history (fallback):", err);
+                });
+              }
+            } else {
+              console.error("Failed to record search history:", err);
             }
-          } else {
-            console.error("Failed to record search history:", err);
-          }
-        });
+          });
+      }
     }
 
     const responseData = {
@@ -217,9 +254,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(responseData);
   } catch (error) {
-    console.error("Literature search error:", error);
+    const errMsg = error instanceof Error ? error.message : "Unknown error";
+    console.error("[Search] Error:", errMsg, error);
     return NextResponse.json(
-      { error: "Search failed. Please try again." },
+      { error: `搜索失败: ${errMsg}` },
       { status: 500 }
     );
   }

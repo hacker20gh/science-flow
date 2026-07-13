@@ -6,7 +6,7 @@
  */
 
 import { z } from "zod";
-import { getLLMClient, MODELS, withLLMRetry, getIsRetryMode } from "./client";
+import { getLLMClient, MODELS, getModelForFeature, withLLMRetry, getIsRetryMode } from "./client";
 import { extractStructuredOutput, createRetryFunction, createToolFromSchema } from "./json-extractor";
 import { streamLLMWithToolUse, type SSEEvent } from "./streaming";
 import { trackTokenUsage } from "@/lib/token-tracker";
@@ -193,11 +193,12 @@ export async function extractFromText(
   return withLLMRetry(async () => {
     const client = getLLMClient();
     const maxTokens = options?.maxTokens || 8192;
+    const extractionModel = await getModelForFeature("extraction");
 
     const userMessage = `Extract all experimental findings from this paper:\n\nTitle: ${title}\n\nContent:\n${text}`;
 
     const llmParams = {
-      model: MODELS.extraction,
+      model: extractionModel,
       max_tokens: maxTokens,
       system: CORE_PROMPT,
       messages: [{ role: "user" as const, content: userMessage }],
@@ -211,7 +212,7 @@ export async function extractFromText(
       const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, options.onToken);
       trackTokenUsage({
         feature: "extraction",
-        model: MODELS.extraction,
+        model: extractionModel,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         cachedTokens: usage.cachedTokens,

@@ -14,31 +14,16 @@ export async function GET() {
       return NextResponse.json({ config: null });
     }
 
-    // Try UserSetting table first
     const setting = await prisma.userSetting.findUnique({
       where: { key: "llmConfig" },
     });
 
-    // Also load Zotero API key
     const zoteroSetting = await prisma.userSetting.findUnique({
       where: { key: "zoteroApiKey" },
     });
 
-    if (setting?.value) {
-      return NextResponse.json({
-        config: setting.value,
-        zoteroApiKey: (zoteroSetting?.value as string) || "",
-      });
-    }
-
-    // Fallback: check user's llmConfig field
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { llmConfig: true },
-    });
-
     return NextResponse.json({
-      config: user?.llmConfig || null,
+      config: setting?.value || null,
       zoteroApiKey: (zoteroSetting?.value as string) || "",
     });
   } catch (error) {
@@ -60,32 +45,20 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { baseUrl, models, zoteroApiKey } = body;
+    const { config, zoteroApiKey } = body;
 
-    if (!baseUrl || typeof baseUrl !== "string") {
-      return NextResponse.json({ error: "baseUrl is required" }, { status: 400 });
+    if (!config || typeof config !== "object") {
+      return NextResponse.json({ error: "config is required" }, { status: 400 });
     }
 
-    // Validate models if provided
-    const validModels: Record<string, string> = {};
-    if (models && typeof models === "object") {
-      for (const key of ["extraction", "chat", "analysis"]) {
-        if (typeof models[key] === "string" && models[key].trim()) {
-          validModels[key] = models[key].trim();
-        }
-      }
-    }
-
-    const config = { baseUrl, ...Object.keys(validModels).length ? { models: validModels } : {} };
-
-    // Save to UserSetting (upsert)
+    // Save LLM config
     await prisma.userSetting.upsert({
       where: { key: "llmConfig" },
       create: { key: "llmConfig", value: config },
       update: { value: config },
     });
 
-    // Save Zotero API key (if provided)
+    // Save Zotero API key
     if (zoteroApiKey !== undefined) {
       await prisma.userSetting.upsert({
         where: { key: "zoteroApiKey" },

@@ -3,10 +3,15 @@
  *
  * 让 AI 助手能够执行实际操作（搜索文献、查看数据、创建假设等）
  * 而非仅限于文本回复。
+ *
+ * 支持两种 LLM 后端：
+ * - OpenAI 兼容 API（getOpenAIClient() 可用时）
+ * - Anthropic CCS 网关（兜底）
  */
 
 import { prisma } from "@/lib/db-server";
 import { invalidateContextCache } from "@/lib/llm/context-builder";
+import { trackTokenUsage } from "@/lib/token-tracker";
 
 // ===== 工具定义（Anthropic tool_use 格式） =====
 
@@ -207,6 +212,201 @@ function maybeInvalidateCache(toolName: string, input: Record<string, unknown>) 
     const projectId = input.projectId as string;
     if (projectId) invalidateContextCache(projectId);
   }
+}
+
+// ===== OpenAI 兼容工具定义 =====
+
+/** OpenAI function tool 格式 */
+interface OpenAIFunctionTool {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+/**
+ * 将 CHAT_TOOLS（Anthropic 格式）转换为 OpenAI function tool 格式
+ */
+export function convertToolsForOpenAI(
+  tools: typeof CHAT_TOOLS
+): OpenAIFunctionTool[] {
+  return tools.map((tool) => ({
+    type: "function" as const,
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.input_schema,
+    },
+  }));
+}
+
+/**
+ * 将 OpenAI function tool 格式转换回 Anthropic 格式
+ */
+export function convertToolsForAnthropic(
+  tools: OpenAIFunctionTool[]
+): Array<{ name: string; description: string; input_schema: Record<string, unknown> }> {
+  return tools.map((t) => ({
+    name: t.function.name,
+    description: t.function.description,
+    input_schema: { ...t.function.parameters, type: "object" },
+  }));
+}
+
+/** 预构建的 OpenAI 格式工具列表（惰性初始化，避免重复转换） */
+let _openaiTools: OpenAIFunctionTool[] | null = null;
+export function getOpenAITools(): OpenAIFunctionTool[] {
+  if (!_openaiTools) {
+    _openaiTools = convertToolsForOpenAI(CHAT_TOOLS);
+  }
+  return _openaiTools;
+}
+
+// ===== OpenAI 兼容流式工具调用 =====
+
+export interface OpenAIChatToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface OpenAIChatStreamResult {
+  text: string;
+  toolCalls: OpenAIChatToolCall[];
+  usage: { inputTokens: number; outputTokens: number };
+}
+
+/**
+ * 使用 OpenAI 兼容 API 流式调用，支持 tool calls
+ *
+ * 实时发送文本增量到 emit 回调，同时收集 tool calls。
+ * 返回文本 + 工具调用列表。
+ *
+ * @param openai - OpenAI 客户端实例
+ * @param params - 调用参数（messages, system, tools, model, maxTokens）
+ * @param emit - SSE 事件发送回调
+ * @param feature - 功能标识（用于 token 追踪）
+ */
+export async function streamChatWithOpenAI(
+  openai: import("openai").default,
+  params: {
+    model: string;
+    system: string;
+    messages: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
+    tools?: OpenAIFunctionTool[];
+    maxTokens?: number;
+  },
+  emit: (event: Record<string, unknown>) => void,
+  feature = "chat"
+): Promise<OpenAIChatStreamResult> {
+  const { model, system, messages, tools, maxTokens = 4096 } = params;
+  const start = Date.now();
+
+  // 构建 OpenAI messages（带 system prompt）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const openaiMessages: any[] = [
+    { role: "system", content: system },
+    ...messages.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content:
+        typeof m.content === "string"
+          ? m.content
+          : Array.isArray(m.content)
+            ? m.content
+              .filter((b): b is { type: string; text: string } => b.type === "text")
+              .map((b) => b.text)
+              .join("\n")
+            : String(m.content),
+    })),
+  ];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const streamParams: any = {
+    model,
+    max_tokens: maxTokens,
+    messages: openaiMessages,
+    stream: true,
+  };
+  if (tools && tools.length > 0) {
+    streamParams.tools = tools;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream = (await openai.chat.completions.create(streamParams)) as any;
+
+  let fullText = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  // OpenAI streaming tool calls 收集器：index → { id, name, arguments }
+  const toolCallAccumulators = new Map<
+    number,
+    { id: string; name: string; arguments: string }
+  >();
+
+  for await (const chunk of stream) {
+    const choice = chunk.choices?.[0];
+    if (!choice) continue;
+
+    const delta = choice.delta;
+
+    // 文本增量
+    if (delta?.content) {
+      fullText += delta.content;
+      emit({ type: "text", text: delta.content });
+    }
+
+    // 工具调用增量（可能跨多个 chunk 到达）
+    if (delta?.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        const idx = tc.index;
+        if (!toolCallAccumulators.has(idx)) {
+          toolCallAccumulators.set(idx, {
+            id: tc.id || "",
+            name: tc.function?.name || "",
+            arguments: "",
+          });
+        }
+        const acc = toolCallAccumulators.get(idx)!;
+        if (tc.id) acc.id = tc.id;
+        if (tc.function?.name) acc.name = tc.function.name;
+        if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+      }
+    }
+
+    // usage（某些 API 在最后一个 chunk 返回）
+    if (chunk.usage) {
+      inputTokens = chunk.usage.prompt_tokens;
+      outputTokens = chunk.usage.completion_tokens;
+    }
+  }
+
+  // 解析收集到的工具调用
+  const toolCalls: OpenAIChatToolCall[] = [];
+  for (const acc of toolCallAccumulators.values()) {
+    try {
+      const input = JSON.parse(acc.arguments || "{}");
+      toolCalls.push({ id: acc.id, name: acc.name, input });
+    } catch {
+      // malformed JSON, skip
+    }
+  }
+
+  // 追踪 token 用量
+  const duration = Date.now() - start;
+  if (inputTokens > 0 || outputTokens > 0) {
+    trackTokenUsage({
+      feature,
+      model,
+      inputTokens,
+      outputTokens,
+      durationMs: duration,
+      isRetry: false,
+    });
+  }
+
+  return { text: fullText, toolCalls, usage: { inputTokens, outputTokens } };
 }
 
 // ===== 工具实现 =====

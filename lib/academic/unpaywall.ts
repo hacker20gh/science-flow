@@ -52,31 +52,36 @@ export async function findOaPdf(doi: string): Promise<OaResult> {
 }
 
 /**
- * 批量查询 DOI 的 OA 状态
- * （Unpaywall 没有批量 API，需要逐个查询，加延迟避免限流）
+ * 批量查询 DOI 的 OA 状态（并发 5 通道，200ms 延迟避免限流）
  */
 export async function batchFindOa(
   dois: string[]
 ): Promise<Map<string, OaResult>> {
   const results = new Map<string, OaResult>();
+  const CONCURRENCY = 5;
+  let idx = 0;
 
-  for (const doi of dois) {
-    try {
-      const result = await findOaPdf(doi);
-      results.set(doi, result);
-    } catch {
-      // 单个失败不影响整体
-      results.set(doi, {
-        doi,
-        isOpenAccess: false,
-        bestOaUrl: null,
-        bestOaPdfUrl: null,
-        oaStatus: "unknown",
-      });
+  async function worker() {
+    while (idx < dois.length) {
+      const i = idx++;
+      try {
+        const result = await findOaPdf(dois[i]);
+        results.set(dois[i], result);
+      } catch {
+        results.set(dois[i], {
+          doi: dois[i],
+          isOpenAccess: false,
+          bestOaUrl: null,
+          bestOaPdfUrl: null,
+          oaStatus: "unknown",
+        });
+      }
+      if (idx < dois.length) await sleep(200);
     }
-    // 速率限制：~5 req/s
-    await sleep(200);
   }
 
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, dois.length) }, () => worker())
+  );
   return results;
 }

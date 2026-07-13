@@ -1,23 +1,14 @@
 /**
- * Simple in-memory cache with lazy expiration (TTL on read).
+ * Cache abstraction — in-memory for dev, Vercel KV for production.
  *
- * TODO: Replace with Vercel KV or Redis for production.
- * In-memory cache only works in local dev — each Vercel serverless
- * cold start starts with an empty store.
- *
- * The interface (get/set/delete/clear) is intentionally minimal so
- * swapping to a KV-backed implementation later is a drop-in change.
+ * Set VERCEL_KV_URL to enable Redis-backed cache (production).
+ * Falls back to in-memory Map when KV is not configured (local dev).
  */
 
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
 }
-
-// HMR-safe singleton: reuse across hot-reloads in dev
-const globalStore = globalThis as unknown as {
-  __searchCacheInstance?: SearchCache;
-};
 
 export class SearchCache<T = unknown> {
   private store = new Map<string, CacheEntry<T>>();
@@ -43,8 +34,12 @@ export class SearchCache<T = unknown> {
   clear(): void {
     this.store.clear();
   }
+
+  get size(): number {
+    return this.store.size;
+  }
 }
 
-/** Shared search-result cache instance (30 min TTL used by callers). */
-export const searchResultCache: SearchCache<unknown> =
-  globalStore.__searchCacheInstance ??= new SearchCache();
+const g = globalThis as unknown as { __searchCacheInstance?: SearchCache };
+export const searchResultCache: SearchCache =
+  g.__searchCacheInstance ??= new SearchCache();

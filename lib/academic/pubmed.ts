@@ -131,7 +131,15 @@ function parsePubmedXml(xml: string): PubMedPaper[] {
   for (const block of articleBlocks) {
     const pmid = extractTag(block, "PMID");
     const title = extractTag(block, "ArticleTitle");
-    const abstract = extractTag(block, "AbstractText");
+    // Extract all AbstractText sections (structured abstracts have multiple)
+    const abstractParts: string[] = [];
+    const abstractRegex = /<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/gi;
+    let abstractMatch;
+    while ((abstractMatch = abstractRegex.exec(block)) !== null) {
+      const text = cleanXmlText(abstractMatch[1]);
+      if (text) abstractParts.push(text);
+    }
+    const abstract = abstractParts.length > 0 ? abstractParts.join(" ") : null;
     const journal = extractTag(block, "Title") || extractTag(block, "MedlineTA");
     const yearStr = extractTag(block, "Year");
     const doi = extractDoi(block);
@@ -161,7 +169,7 @@ function parsePubmedXml(xml: string): PubMedPaper[] {
         authors,
         journal: cleanXmlText(journal || ""),
         year: yearStr ? parseInt(yearStr) : 0,
-        abstract: cleanXmlText(abstract || ""),
+        abstract: abstract || "",
         doi,
         publicationTypes: pubTypes,
       });

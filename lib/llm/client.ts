@@ -1,7 +1,10 @@
 /**
  * LLM 客户端
  *
- * 通过 CCS 代理接入模型
+ * 支持两种模式：
+ * 1. 通用 OpenAI 兼容 API（推荐）：设置 LLM_BASE_URL + LLM_API_KEY，可用任意供应商
+ * 2. CCS 代理网关（兜底）：设置 CCS_BASE_URL + CCS_API_KEY
+ *
  * 配置可由前端设置页传入，不依赖 .env
  *
  * 包含：
@@ -11,6 +14,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { trackTokenUsage } from "@/lib/token-tracker";
 import { startLLMGeneration, finishLLMGeneration, failLLMGeneration } from "./langfuse";
 import { AsyncLocalStorage } from "async_hooks";
@@ -40,6 +44,7 @@ let currentBaseUrl: string = "";
 
 interface CachedConfig {
   baseUrl: string;
+  apiKey?: string;
   models: Record<string, string>;
   cachedAt: number;
 }
@@ -47,7 +52,7 @@ interface CachedConfig {
 let cachedDBConfig: CachedConfig | null = null;
 const CONFIG_CACHE_TTL = 60_000; // 60 秒缓存
 
-async function getDBConfig(): Promise<{ baseUrl: string; models: Record<string, string> } | null> {
+async function getDBConfig(): Promise<{ baseUrl: string; models: Record<string, string>; apiKey?: string } | null> {
   // 缓存有效期内直接返回
   if (cachedDBConfig && Date.now() - cachedDBConfig.cachedAt < CONFIG_CACHE_TTL) {
     return cachedDBConfig;
@@ -63,7 +68,38 @@ async function getDBConfig(): Promise<{ baseUrl: string; models: Record<string, 
     });
 
     if (settings?.value) {
-      const config = settings.value as { baseUrl?: string; models?: Record<string, string> };
+      const config = settings.value as {
+        mode?: string;
+        provider?: string;
+        apiBaseUrl?: string;
+        apiKey?: string;
+        ccsBaseUrl?: string;
+        baseUrl?: string;
+        models?: Record<string, string>;
+      };
+
+      // 新格式：直连 API 模式
+      if (config.mode === "direct" && config.apiBaseUrl && config.apiKey) {
+        cachedDBConfig = {
+          baseUrl: config.apiBaseUrl,
+          apiKey: config.apiKey,
+          models: config.models || {},
+          cachedAt: Date.now(),
+        };
+        return cachedDBConfig;
+      }
+
+      // 新格式：CCS 代理模式
+      if (config.mode === "ccs" && config.ccsBaseUrl) {
+        cachedDBConfig = {
+          baseUrl: config.ccsBaseUrl,
+          models: config.models || {},
+          cachedAt: Date.now(),
+        };
+        return cachedDBConfig;
+      }
+
+      // 旧格式兼容
       cachedDBConfig = {
         baseUrl: config.baseUrl || DEFAULT_BASE_URL,
         models: config.models || {},
@@ -185,12 +221,151 @@ export function getModelName(
 
 export { DEFAULT_BASE_URL, DEFAULT_MODELS };
 
+// ===== 通用 OpenAI 兼容客户端（推荐） =====
+
+let openaiClient: OpenAI | null = null;
+let currentOpenAIBaseUrl: string = "";
+
+/**
+ * 获取 OpenAI 兼容客户端
+ *
+ * 优先级：LLM_BASE_URL + LLM_API_KEY > DB 设置中的直连 API 配置
+ * 可对接 DeepSeek、Qwen、GPT、Gemini 等任意 OpenAI 兼容 API
+ */
+export function getOpenAIClient(): OpenAI | null {
+  const baseUrl = process.env.LLM_BASE_URL;
+  const apiKey = process.env.LLM_API_KEY;
+
+  // 环境变量优先
+  if (baseUrl && apiKey) {
+    if (!openaiClient || currentOpenAIBaseUrl !== baseUrl) {
+      openaiClient = new OpenAI({ baseURL: baseUrl, apiKey });
+      currentOpenAIBaseUrl = baseUrl;
+    }
+    return openaiClient;
+  }
+
+  // 从 DB 配置读取（异步，但用缓存）
+  if (cachedDBConfig?.apiKey && cachedDBConfig.baseUrl) {
+    const url = cachedDBConfig.baseUrl;
+    if (!openaiClient || currentOpenAIBaseUrl !== url) {
+      openaiClient = new OpenAI({ baseURL: url, apiKey: cachedDBConfig.apiKey });
+      currentOpenAIBaseUrl = url;
+    }
+    return openaiClient;
+  }
+
+  return null;
+}
+
+/**
+ * 统一 LLM 调用接口（用于提取、预处理等结构化任务）
+ *
+ * 自动选择：OpenAI 兼容 API > CCS 代理 > 降级
+ * 返回 Anthropic Message 格式，兼容现有 extractStructuredOutput
+ */
+export async function callExtractionLLM(params: {
+  system: string;
+  messages: Array<{ role: string; content: string }>;
+  maxTokens?: number;
+  model?: string;
+  feature?: string;
+}): Promise<import("@anthropic-ai/sdk/resources/messages").Message> {
+  const { system, messages, maxTokens = 2048, feature = "extraction" } = params;
+
+  // 确保 DB 配置已加载（填充缓存供 getOpenAIClient 使用）
+  const dbConfig = await getDBConfig();
+
+  // 模型名优先级：传入参数 > DB 配置 > 环境变量 > 默认值
+  const model = params.model
+    || dbConfig?.models?.[feature as keyof typeof dbConfig.models]
+    || MODELS.extraction;
+
+  const start = Date.now();
+
+  // 优先使用 OpenAI 兼容 API
+  const openai = getOpenAIClient();
+  if (openai) {
+    try {
+      const response = await openai.chat.completions.create({
+        model,
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system" as const, content: system },
+          ...messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+        ],
+        temperature: 0,
+      });
+
+      const duration = Date.now() - start;
+      const text = response.choices[0]?.message?.content || "";
+      const responseId = response.id;
+      const finishReason = response.choices[0]?.finish_reason;
+      const responseUsage = response.usage;
+
+      // 追踪 token 用量
+      if (response.usage) {
+        trackTokenUsage({
+          feature,
+          model,
+          inputTokens: response.usage.prompt_tokens,
+          outputTokens: response.usage.completion_tokens,
+          durationMs: duration,
+          isRetry: getIsRetryMode(),
+        });
+      }
+
+      // 转换为 Anthropic Message 格式
+      const anthropicResponse = {
+        id: responseId,
+        type: "message" as const,
+        role: "assistant" as const,
+        model,
+        content: [{ type: "text" as const, text }],
+        stop_reason: finishReason === "stop" ? "end_turn" : "max_tokens",
+        usage: {
+          input_tokens: responseUsage?.prompt_tokens || 0,
+          output_tokens: responseUsage?.completion_tokens || 0,
+        },
+      } as unknown as import("@anthropic-ai/sdk/resources/messages").Message;
+
+      // Debug: log response content type
+      console.log(`[LLM] ${feature} response: text_len=${text.length}, first_100=${text.slice(0, 100)}`);
+
+      return anthropicResponse;
+    } catch (error) {
+      console.error("[LLM] OpenAI API 调用失败，降级到 CCS:", (error as Error)?.message);
+      // 降级到 CCS
+    }
+  }
+
+  // 降级：使用 Anthropic SDK + CCS 网关
+  const client = getLLMClient();
+  return client.messages.create({
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages,
+    _sciflowFeature: feature,
+  } as never) as Promise<import("@anthropic-ai/sdk/resources/messages").Message>;
+}
+
 // 兼容导出（供各 LLM 引擎使用 .env 中的模型名）
+// 优先使用 LLM_MODEL_* 环境变量（通用 API），否则降级到 CCS_MODEL_*（CCS 网关）
 export const MODELS = {
-  extraction: process.env.CCS_MODEL_EXTRACTION || DEFAULT_MODELS.extraction,
-  chat: process.env.CCS_MODEL_CHAT || DEFAULT_MODELS.chat,
-  analysis: process.env.CCS_MODEL_ANALYSIS || DEFAULT_MODELS.analysis,
+  extraction: process.env.LLM_MODEL_EXTRACTION || process.env.CCS_MODEL_EXTRACTION || DEFAULT_MODELS.extraction,
+  chat: process.env.LLM_MODEL_CHAT || process.env.CCS_MODEL_CHAT || DEFAULT_MODELS.chat,
+  analysis: process.env.LLM_MODEL_ANALYSIS || process.env.CCS_MODEL_ANALYSIS || DEFAULT_MODELS.analysis,
 } as const;
+
+/**
+ * 获取指定功能的模型名（优先从 DB 配置读取）
+ * 用于需要动态获取模型名的场景（streaming、extraction 等）
+ */
+export async function getModelForFeature(feature: "extraction" | "chat" | "analysis"): Promise<string> {
+  const dbConfig = await getDBConfig();
+  return dbConfig?.models?.[feature] || MODELS[feature];
+}
 
 // ===== 重试 + 指数退避 =====
 
