@@ -256,20 +256,24 @@ export default function ProjectPaperSearchPage() {
   }
 
   async function handleDiscoverRelated(selectedKeys: Set<string>) {
-    // 从当前结果中找到选中论文的 S2 IDs
     if (!results) return;
     const selectedPapersList = results.papers.filter((p) => {
       const key = p.doi || p.pmid || p.title;
       return selectedKeys.has(key);
     });
 
-    // 需要有 S2 paperId 才能查引用网络
+    // 收集 S2 IDs 和 DOI（DOI 作为 fallback）
     const paperIds = selectedPapersList
       .map((p) => p.s2Id)
       .filter((id): id is string => !!id);
 
-    if (paperIds.length === 0) {
-      setError("选中的论文没有 Semantic Scholar ID，无法查询引用网络。请尝试用英文关键词搜索以获取 S2 数据。");
+    const dois = selectedPapersList
+      .filter((p) => !p.s2Id && p.doi)
+      .map((p) => p.doi!)
+      .filter(Boolean);
+
+    if (paperIds.length === 0 && dois.length === 0) {
+      setError("选中的论文没有 S2 ID 或 DOI，无法查询引用网络。请尝试用英文关键词搜索。");
       return;
     }
 
@@ -280,7 +284,7 @@ export default function ProjectPaperSearchPage() {
       const res = await fetch("/api/papers/citation-network", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paperIds, maxResults: 30 }),
+        body: JSON.stringify({ paperIds, dois, maxResults: 30 }),
       });
       if (!res.ok) throw new Error("引用网络查询失败");
       const data = await res.json();
