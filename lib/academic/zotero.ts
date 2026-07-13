@@ -9,6 +9,9 @@
 
 const ZOTERO_API_BASE = "https://api.zotero.org";
 
+// Cache Zotero user IDs — they don't change for a given API key
+const userIdCache = new Map<string, number>();
+
 interface ZoteroCreator {
   creatorType: string;
   firstName?: string;
@@ -63,15 +66,17 @@ export interface ZoteroCollection {
 }
 
 /**
- * 获取 Zotero API Key 对应的用户 ID
+ * 获取 Zotero API Key 对应的用户 ID（带缓存）
  * 调用 /keys/current 端点
  */
 export async function getZoteroUserId(apiKey: string): Promise<number> {
+  if (userIdCache.has(apiKey)) return userIdCache.get(apiKey)!;
   const resp = await fetch(`${ZOTERO_API_BASE}/keys/current`, {
     headers: { "Zotero-API-Key": apiKey },
   });
   if (!resp.ok) throw new Error(`Zotero API key 无效 (${resp.status})`);
   const data = await resp.json();
+  userIdCache.set(apiKey, data.userID);
   return data.userID;
 }
 

@@ -10,6 +10,7 @@
 import { getLLMClient, MODELS, withLLMRetry } from "./client";
 import { extractStructuredOutput, createRetryFunction } from "./json-extractor";
 import { z } from "zod";
+import { SearchCache } from "@/lib/cache";
 
 export interface ProcessedQuery {
   optimizedQuery: string;
@@ -49,20 +50,8 @@ const ProcessedQuerySchema = z.object({
   subQueries: z.array(SubQuerySchema).optional(),
 });
 
-// 10 分钟 TTL 缓存，带自动清理
-const queryCache = new Map<string, { result: ProcessedQuery; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
-
-// 每 5 分钟清理过期缓存（HMR-safe 防止重复注册）
-const gQuery = globalThis as unknown as { __queryCacheCleanup?: ReturnType<typeof setInterval> };
-if (!gQuery.__queryCacheCleanup) {
-  gQuery.__queryCacheCleanup = setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of queryCache) {
-      if (now - entry.ts >= CACHE_TTL) queryCache.delete(key);
-    }
-  }, 5 * 60 * 1000);
-}
+const queryCache = new SearchCache<ProcessedQuery>();
 
 const PREPROCESS_PROMPT = `You are a biomedical literature search expert. Convert the user's research query into optimized search strategies for PubMed, Semantic Scholar, and OpenAlex.
 
@@ -94,8 +83,8 @@ export async function preprocessQuery(userInput: string): Promise<ProcessedQuery
   // 缓存命中直接返回
   const cacheKey = userInput.trim().toLowerCase();
   const cached = queryCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) {
-    return cached.result;
+  if (cached) {
+    return cached;
   }
 
   try {
@@ -125,7 +114,7 @@ export async function preprocessQuery(userInput: string): Promise<ProcessedQuery
     }, { label: "query-preprocess", maxRetries: 1 });
 
     // 写入缓存
-    queryCache.set(cacheKey, { result, ts: Date.now() });
+    queryCache.set(cacheKey, result, CACHE_TTL);
     return result;
   } catch (error) {
     console.error("Query preprocessing failed:", error);

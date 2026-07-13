@@ -55,7 +55,7 @@ export async function getBioRxivByDoi(doi: string): Promise<BioRxivPaper | null>
     year: paper.date ? new Date(paper.date).getFullYear() : 0,
     abstract: paper.abstract || "",
     category: paper.category || "",
-    pdfUrl: `https://www.biorxiv.org/content/${paper.doi}v${paper.version}.full.pdf`,
+    pdfUrl: `https://www.biorxiv.org/content/${paper.doi.replace(/^10\.1101\//, "")}v${paper.version}.full.pdf`,
     version: paper.version || "1",
   };
 }

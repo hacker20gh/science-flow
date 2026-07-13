@@ -8,6 +8,9 @@ import { searchOpenAlex, type OpenAlexPaper } from "./openalex";
 import { findOaPdf } from "./unpaywall";
 import { checkBioRxiv } from "./biorxiv";
 
+/** 聚合搜索全局超时（毫秒） */
+const AGGREGATOR_TIMEOUT = 15_000;
+
 export interface UnifiedPaper {
   pmid: string | null;
   doi: string | null;
@@ -62,17 +65,44 @@ export async function aggregateSearch(
   } = options;
 
   // 并行搜索 3 个数据库，每个用最适合的查询
-  const [pubmedResults, s2Results, openalexResults] = await Promise.allSettled([
-    searchPubMed({ query: pubmedQuery || query, maxResults, minYear, maxYear, articleTypes }),
-    searchSemanticScholar({
-      query: s2Query || query,
-      maxResults,
-      minYear,
-      maxYear,
-      minCitationCount,
-    }),
-    searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear }),
+  // 全局 15 秒超时：超时后返回已完成源的 partial results
+  const pubmedPromise = searchPubMed({ query: pubmedQuery || query, maxResults, minYear, maxYear, articleTypes });
+  const s2Promise = searchSemanticScholar({
+    query: s2Query || query,
+    maxResults,
+    minYear,
+    maxYear,
+    minCitationCount,
+    articleTypes,
+  });
+  const openalexPromise = searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear, articleTypes, minCitationCount });
+
+  // 独立追踪每个 promise 的结果
+  const results: Array<PromiseSettledResult<PubMedPaper[] | S2Paper[] | OpenAlexPaper[]> | null> = [null, null, null];
+  const tracked = [
+    pubmedPromise.then((v) => { results[0] = { status: "fulfilled", value: v }; return v; }),
+    s2Promise.then((v) => { results[1] = { status: "fulfilled", value: v }; return v; }),
+    openalexPromise.then((v) => { results[2] = { status: "fulfilled", value: v }; return v; }),
+  ];
+
+  // 等全部完成或超时
+  await Promise.race([
+    Promise.allSettled(tracked),
+    new Promise<void>((resolve) => setTimeout(resolve, AGGREGATOR_TIMEOUT)),
   ]);
+
+  // 将未完成的 promise 标记为 rejected（后续取值时会 fallback 到空数组）
+  for (let i = 0; i < results.length; i++) {
+    if (!results[i]) {
+      results[i] = { status: "rejected", reason: new Error("timeout") };
+    }
+  }
+
+  const [pubmedResults, s2Results, openalexResults] = results as [
+    PromiseSettledResult<PubMedPaper[]>,
+    PromiseSettledResult<S2Paper[]>,
+    PromiseSettledResult<OpenAlexPaper[]>,
+  ];
 
   const pubmedPapers =
     pubmedResults.status === "fulfilled" ? pubmedResults.value : [];
@@ -89,8 +119,8 @@ export async function aggregateSearch(
 
   const deduped = deduplicate(unified);
 
-  // 排序
-  sortPapers(deduped, sortBy);
+  // 排序：如果有引用数过滤，满足条件的排前面，其余排后面（不删除）
+  sortPapers(deduped, sortBy, minCitationCount);
 
   return deduped;
 }
@@ -186,6 +216,25 @@ export async function enrichWithBioRxiv(
 }
 
 function sortPapers(
+  papers: UnifiedPaper[],
+  sortBy: SearchOptions["sortBy"],
+  minCitationCount?: number
+): void {
+  // 如果有引用数过滤，先按"是否满足阈值"分组（满足的排前面）
+  // 再在每组内按 sortBy 排序
+  if (minCitationCount && minCitationCount > 0) {
+    const meetsThreshold = papers.filter((p) => (p.citationCount || 0) >= minCitationCount);
+    const belowThreshold = papers.filter((p) => (p.citationCount || 0) < minCitationCount);
+    sortGroup(meetsThreshold, sortBy);
+    sortGroup(belowThreshold, sortBy);
+    papers.length = 0;
+    papers.push(...meetsThreshold, ...belowThreshold);
+  } else {
+    sortGroup(papers, sortBy);
+  }
+}
+
+function sortGroup(
   papers: UnifiedPaper[],
   sortBy: SearchOptions["sortBy"]
 ): void {
@@ -288,35 +337,31 @@ export function deduplicate(papers: UnifiedPaper[]): UnifiedPaper[] {
   const result: UnifiedPaper[] = [];
 
   for (const paper of papers) {
-    // 1. DOI 去重（最可靠）
-    if (paper.doi) {
-      const doiKey = `doi:${paper.doi.toLowerCase()}`;
-      if (byKey.has(doiKey)) {
-        mergePaper(byKey.get(doiKey)!, paper);
-        continue;
-      }
-      byKey.set(doiKey, paper);
-    }
-
-    // 2. PMID 去重
-    if (paper.pmid) {
-      const pmidKey = `pmid:${paper.pmid}`;
-      if (byKey.has(pmidKey)) {
-        mergePaper(byKey.get(pmidKey)!, paper);
-        continue;
-      }
-      byKey.set(pmidKey, paper);
-    }
-
-    // 3. 标题去重（归一化）
+    // 1. Collect all keys this paper could match on
+    const doiKey = paper.doi ? `doi:${paper.doi.toLowerCase()}` : null;
+    const pmidKey = paper.pmid ? `pmid:${paper.pmid}` : null;
     const titleKey = `title:${normalizeTitle(paper.title)}`;
-    if (byKey.has(titleKey)) {
-      mergePaper(byKey.get(titleKey)!, paper);
-      continue;
-    }
-    byKey.set(titleKey, paper);
 
-    result.push(paper);
+    // 2. Find the first existing entry that matches on any key
+    const existing =
+      (doiKey && byKey.get(doiKey)) ||
+      (pmidKey && byKey.get(pmidKey)) ||
+      byKey.get(titleKey);
+
+    if (existing) {
+      // Merge new data into the existing entry
+      mergePaper(existing, paper);
+      // Register any NEW keys so future papers can match via those keys
+      if (doiKey && !byKey.has(doiKey)) byKey.set(doiKey, existing);
+      if (pmidKey && !byKey.has(pmidKey)) byKey.set(pmidKey, existing);
+      if (!byKey.has(titleKey)) byKey.set(titleKey, existing);
+    } else {
+      // New unique paper — register all keys and add to result
+      if (doiKey) byKey.set(doiKey, paper);
+      if (pmidKey) byKey.set(pmidKey, paper);
+      byKey.set(titleKey, paper);
+      result.push(paper);
+    }
   }
 
   return result;

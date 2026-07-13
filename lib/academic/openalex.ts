@@ -30,7 +30,18 @@ interface SearchOptions {
   maxResults?: number;
   minYear?: number;
   maxYear?: number;
+  articleTypes?: string[];
+  minCitationCount?: number;
 }
+
+/** SciFlow 文献类型 → OpenAlex type filter 值 */
+const OPENALEX_TYPE_FILTER_MAP: Record<string, string> = {
+  "journal-article": "article",
+  "review": "review",
+  "meta-analysis": "article", // OpenAlex 无独立 meta-analysis 类型
+  "clinical-trial": "article",
+  "preprint": "article",
+};
 
 /**
  * 搜索 OpenAlex
@@ -38,7 +49,7 @@ interface SearchOptions {
 export async function searchOpenAlex(
   options: SearchOptions
 ): Promise<OpenAlexPaper[]> {
-  const { query, maxResults = 20, minYear, maxYear } = options;
+  const { query, maxResults = 20, minYear, maxYear, articleTypes, minCitationCount } = options;
 
   const params = new URLSearchParams({
     search: query,
@@ -58,13 +69,38 @@ export async function searchOpenAlex(
     ].join(","),
   });
 
+  // OpenAlex polite pool: 带 mailto 参数可获得更快的响应和更低的限流
+  const email = process.env.OPENALEX_EMAIL || process.env.NCBI_EMAIL;
+  if (email) params.set("mailto", email);
+
+  // 构建 filter 参数（OpenAlex 用逗号分隔多个 filter 条件）
+  const filters: string[] = [];
   if (minYear || maxYear) {
     const from = minYear || 0;
     const to = maxYear || new Date().getFullYear();
-    params.set("filter", `publication_year:${from}-${to}`);
+    filters.push(`publication_year:${from}-${to}`);
+  }
+  // 文献类型过滤
+  if (articleTypes && articleTypes.length > 0) {
+    const openAlexTypes = articleTypes
+      .map((t) => OPENALEX_TYPE_FILTER_MAP[t])
+      .filter(Boolean);
+    if (openAlexTypes.length > 0) {
+      // OpenAlex type filter 用 OR 逻辑（竖线分隔）
+      filters.push(`type:${openAlexTypes.join("|")}`);
+    }
+  }
+  // 引用数过滤（OpenAlex 原生支持）
+  if (minCitationCount && minCitationCount > 0) {
+    filters.push(`cited_by_count:>${minCitationCount}`);
+  }
+  if (filters.length > 0) {
+    params.set("filter", filters.join(","));
   }
 
-  const res = await fetch(`${BASE_URL}/works?${params}`);
+  const res = await fetch(`${BASE_URL}/works?${params}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) throw new Error(`OpenAlex search failed: ${res.status}`);
 
   const data = await res.json();

@@ -7,6 +7,7 @@
  */
 
 import { sleep } from "@/lib/utils/sleep";
+import { withRetry, type RetryOptions } from "@/lib/utils/retry";
 
 const BASE_URL = "https://api.semanticscholar.org/graph/v1";
 const S2_API_KEY = process.env.S2_API_KEY;
@@ -16,6 +17,27 @@ function s2Headers(): HeadersInit {
   if (S2_API_KEY) headers["x-api-key"] = S2_API_KEY;
   return headers;
 }
+
+/**
+ * Semantic Scholar 专用重试策略：
+ * - 429 限流 → 强制 5 秒延迟后重试（S2 限流窗口较长）
+ * - 5xx / 网络错误 → 指数退避重试
+ */
+const S2_RETRY_OPTS: RetryOptions = {
+  maxRetries: 2,
+  baseDelay: 1000,
+  retryOn: (error: unknown) => {
+    if (!error || typeof error !== "object") return false;
+    const err = error as Record<string, unknown>;
+    const msg = typeof err.message === "string" ? err.message : "";
+    // 429 / 5xx / 网络错误 → 重试
+    if (msg.includes(": 429") || msg.includes(": 5")) return true;
+    if (err.name === "AbortError" || err.name === "TimeoutError") return true;
+    if (err.code === "ECONNRESET" || err.code === "ETIMEDOUT" || err.code === "ENOTFOUND") return true;
+    if (msg.includes("fetch failed") || msg.includes("network")) return true;
+    return false;
+  },
+};
 
 export interface S2Paper {
   paperId: string;
@@ -40,7 +62,17 @@ interface SearchOptions {
   minYear?: number;
   maxYear?: number;
   minCitationCount?: number;
+  articleTypes?: string[];
 }
+
+/** SciFlow 文献类型 → S2 publicationTypes 参数 */
+const S2_TYPE_FILTER_MAP: Record<string, string> = {
+  "journal-article": "JournalArticle",
+  "review": "Review",
+  "meta-analysis": "MetaAnalysis",
+  "clinical-trial": "ClinicalTrial",
+  "preprint": "Review", // S2 无 Preprint 类型，用 Review 近似
+};
 
 const FIELDS = [
   "title",
@@ -59,6 +91,7 @@ const FIELDS = [
 
 /**
  * 搜索 Semantic Scholar
+ * 包含 10s 请求超时 + 自动重试（429 用 5s 延迟，其他用指数退避）
  */
 export async function searchSemanticScholar(
   options: SearchOptions
@@ -69,32 +102,54 @@ export async function searchSemanticScholar(
     minYear,
     maxYear,
     minCitationCount,
+    articleTypes,
   } = options;
 
-  const params = new URLSearchParams({
-    query,
-    limit: String(maxResults),
-    fields: FIELDS,
-  });
+  return withRetry(async () => {
+    const params = new URLSearchParams({
+      query,
+      limit: String(maxResults),
+      fields: FIELDS,
+    });
 
-  if (minYear) params.set("year", `${minYear}-${maxYear || new Date().getFullYear()}`);
-  if (minCitationCount) params.set("minCitationCount", String(minCitationCount));
+    // 年份过滤：S2 的 year 参数格式为 "start-end"，任一端存在即可
+    if (minYear || maxYear) {
+      const from = minYear || 1900;
+      const to = maxYear || new Date().getFullYear();
+      params.set("year", `${from}-${to}`);
+    }
+    if (minCitationCount) params.set("minCitationCount", String(minCitationCount));
 
-  const res = await fetch(`${BASE_URL}/paper/search?${params}`, { headers: s2Headers() });
-  if (!res.ok) {
+    // 文献类型过滤
+    if (articleTypes && articleTypes.length > 0) {
+      const s2Types = articleTypes
+        .map((t) => S2_TYPE_FILTER_MAP[t])
+        .filter(Boolean);
+      if (s2Types.length > 0) {
+        params.set("publicationTypes", s2Types.join(","));
+      }
+    }
+
+    // 429 特殊处理：S2 限流窗口较长，强制等 5 秒
+    const res = await fetch(`${BASE_URL}/paper/search?${params}`, {
+      headers: s2Headers(),
+      signal: AbortSignal.timeout(10_000),
+    });
     if (res.status === 429) {
-      // 限流，等待后重试
       await sleep(5000);
-      const retry = await fetch(`${BASE_URL}/paper/search?${params}`, { headers: s2Headers() });
+      const retry = await fetch(`${BASE_URL}/paper/search?${params}`, {
+        headers: s2Headers(),
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!retry.ok) throw new Error(`S2 search failed after retry: ${retry.status}`);
       const retryData = await retry.json();
       return (retryData.data || []).map(mapS2Paper);
     }
-    throw new Error(`S2 search failed: ${res.status}`);
-  }
+    if (!res.ok) throw new Error(`S2 search failed: ${res.status}`);
 
-  const data = await res.json();
-  return (data.data || []).map(mapS2Paper);
+    const data = await res.json();
+    return (data.data || []).map(mapS2Paper);
+  }, S2_RETRY_OPTS);
 }
 
 /**
@@ -104,15 +159,26 @@ export async function getPaperById(
   id: string,
   idType: "paperId" | "DOI" | "PMID" = "DOI"
 ): Promise<S2Paper | null> {
-  const identifier = idType === "DOI" ? `DOI:${id}` :
-                     idType === "PMID" ? `PMID:${id}` : id;
+  return withRetry(async () => {
+    const identifier = idType === "DOI" ? `DOI:${id}` :
+                       idType === "PMID" ? `PMID:${id}` : id;
 
-  const res = await fetch(`${BASE_URL}/paper/${identifier}?fields=${FIELDS}`, { headers: s2Headers() });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`S2 getPaper failed: ${res.status}`);
+    const res = await fetch(`${BASE_URL}/paper/${identifier}?fields=${FIELDS}`, {
+      headers: s2Headers(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`S2 getPaper failed: ${res.status}`);
 
-  const data = await res.json();
-  return mapS2Paper(data);
+    const data = await res.json();
+    return mapS2Paper(data);
+  }, { ...S2_RETRY_OPTS, retryOn: (error: unknown) => {
+    // 不重试 404（null 是正常返回值，已在上方处理）
+    if (!error || typeof error !== "object") return false;
+    const msg = (error as Record<string, unknown>).message;
+    if (typeof msg === "string" && msg.includes(": 404")) return false;
+    return S2_RETRY_OPTS.retryOn?.(error) ?? false;
+  }});
 }
 
 /**
@@ -122,16 +188,18 @@ export async function getCitations(
   paperId: string,
   maxResults: number = 10
 ): Promise<S2Paper[]> {
-  const res = await fetch(
-    `${BASE_URL}/paper/${paperId}/citations?fields=${FIELDS}&limit=${maxResults}`,
-    { headers: s2Headers() }
-  );
-  if (!res.ok) throw new Error(`S2 citations failed: ${res.status}`);
+  return withRetry(async () => {
+    const res = await fetch(
+      `${BASE_URL}/paper/${paperId}/citations?fields=${FIELDS}&limit=${maxResults}`,
+      { headers: s2Headers(), signal: AbortSignal.timeout(10_000) }
+    );
+    if (!res.ok) throw new Error(`S2 citations failed: ${res.status}`);
 
-  const data = await res.json();
-  return (data.data || []).map((item: { citedPaper: Record<string, unknown> }) =>
-    mapS2Paper(item.citedPaper)
-  );
+    const data = await res.json();
+    return (data.data || []).map((item: { citedPaper: Record<string, unknown> }) =>
+      mapS2Paper(item.citedPaper)
+    );
+  }, S2_RETRY_OPTS);
 }
 
 /**
@@ -141,16 +209,18 @@ export async function getReferences(
   paperId: string,
   maxResults: number = 10
 ): Promise<S2Paper[]> {
-  const res = await fetch(
-    `${BASE_URL}/paper/${paperId}/references?fields=${FIELDS}&limit=${maxResults}`,
-    { headers: s2Headers() }
-  );
-  if (!res.ok) throw new Error(`S2 references failed: ${res.status}`);
+  return withRetry(async () => {
+    const res = await fetch(
+      `${BASE_URL}/paper/${paperId}/references?fields=${FIELDS}&limit=${maxResults}`,
+      { headers: s2Headers(), signal: AbortSignal.timeout(10_000) }
+    );
+    if (!res.ok) throw new Error(`S2 references failed: ${res.status}`);
 
-  const data = await res.json();
-  return (data.data || []).map((item: { citedPaper: Record<string, unknown> }) =>
-    mapS2Paper(item.citedPaper)
-  );
+    const data = await res.json();
+    return (data.data || []).map((item: { citedPaper: Record<string, unknown> }) =>
+      mapS2Paper(item.citedPaper)
+    );
+  }, S2_RETRY_OPTS);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -166,7 +236,7 @@ function mapS2Paper(raw: any): S2Paper {
     citationCount: raw.citationCount || 0,
     influenceScore: raw.influentialCitationCount ?? null,
     isOpenAccess: raw.isOpenAccess || false,
-    oaUrl: null, // S2 openAccessPdf.url 是 PDF 链接，不是 landing page
+    oaUrl: raw.openAccessPdf?.url ?? null,
     oaPdfUrl: raw.openAccessPdf?.url || null,
     tldr: raw.tldr?.text || null,
     publicationTypes: raw.publicationTypes || [],

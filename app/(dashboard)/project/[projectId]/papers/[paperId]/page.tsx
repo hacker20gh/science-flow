@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -144,6 +144,7 @@ export default function PaperDetailPage() {
   const { projectId, paperId } = useParams<{ projectId: string; paperId: string }>();
   const [paper, setPaper] = useState<Paper | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     title: "",
@@ -154,9 +155,17 @@ export default function PaperDetailPage() {
   });
   const [expandedExtraction, setExpandedExtraction] = useState<string | null>(null);
 
-  useEffect(() => {
+  // NOTE: This fetches ALL papers then finds the one we need (N+1 pattern).
+  // Should be optimized with a single-paper API endpoint (e.g., GET /api/projects/:id/papers/:paperId).
+  // Not changing the data fetching pattern now as it requires a new API route.
+  const fetchPaper = useCallback(() => {
+    setLoading(true);
+    setError(null);
     fetch(`/api/projects/${projectId}/papers`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d) => {
         const found = (d.papers || []).find((p: Paper) => p.id === paperId);
         if (found) {
@@ -170,9 +179,16 @@ export default function PaperDetailPage() {
           });
         }
       })
-      .catch(() => toast.error("加载文献失败"))
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "加载文献失败");
+        toast.error("加载文献失败");
+      })
       .finally(() => setLoading(false));
   }, [projectId, paperId]);
+
+  useEffect(() => {
+    fetchPaper();
+  }, [fetchPaper]);
 
   async function handleSaveMetadata() {
     try {
@@ -218,6 +234,21 @@ export default function PaperDetailPage() {
           <div className="h-4 bg-gray-100 rounded w-2/3" />
           <div className="h-32 bg-gray-100 rounded" />
         </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="p-8 max-w-4xl mx-auto text-center py-20">
+        <p className="text-red-500 text-lg mb-4">加载文献失败</p>
+        <p className="text-gray-400 text-sm mb-4">{error}</p>
+        <button
+          onClick={fetchPaper}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+        >
+          重试
+        </button>
       </main>
     );
   }
