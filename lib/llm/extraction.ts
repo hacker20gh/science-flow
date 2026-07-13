@@ -247,16 +247,6 @@ function extractSections(text: string): SectionInfo[] {
   return sections;
 }
 
-/**
- * 从全文中提取 Abstract 段落
- * 复用 extractSections 的逻辑，返回 null 如果没找到
- */
-function extractAbstract(text: string): string | null {
-  const sections = extractSections(text);
-  const abstract = sections.find((s) => s.name === "abstract");
-  return abstract?.text || null;
-}
-
 // ===== 提取函数 =====
 
 export async function extractFromText(
@@ -323,6 +313,16 @@ export async function extractFromText(
 }
 
 /**
+ * 从全文中提取 Abstract 段落
+ * 复用 extractSections 的逻辑，返回 null 如果没找到
+ */
+function extractAbstract(text: string): string | null {
+  const sections = extractSections(text);
+  const abstract = sections.find((s) => s.name === "abstract");
+  return abstract?.text || null;
+}
+
+/**
  * 通用提取函数：接受自定义 system prompt
  * 核心逻辑与 extractFromText 相同，但 system prompt 可定制
  */
@@ -349,7 +349,6 @@ export async function extractWithPrompt(
     };
 
     if (options?.onToken) {
-      // 流式路径：手动追踪 token
       const streamStart = Date.now();
       const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, options.onToken);
       trackTokenUsage({
@@ -368,7 +367,6 @@ export async function extractWithPrompt(
       throw new Error("No tool_use block in streaming response");
     }
 
-    // 阻塞式路径：monkey-patch 自动追踪
     const response = await client.messages.create({
       ...llmParams,
       _sciflowFeature: "extraction",
@@ -418,10 +416,157 @@ export async function extractWithFallback(
   const result2 = await extractWithPrompt(text, title, RELAXED_PROMPT, options);
   if (result2.experiments.length > 0) return result2;
 
-  // 最后一次尝试：用最小 prompt 只处理摘要部分
   const abstractText = extractAbstract(text) || text.slice(0, 2000);
   console.log(`[Extraction] 二次空结果，使用最小 prompt + 摘要重试: ${title}`);
   return extractWithPrompt(abstractText, title, MINIMAL_PROMPT, options);
+}
+
+// ===== 长文档分段提取 =====
+
+/**
+ * 将 sections 按优先级组装为多个 chunk，每个 chunk ≤ MAX_CHARS
+ *
+ * - 单个 section 超过 MAX_CHARS 时，按段落边界拆分
+ * - 每个 chunk 前附加 context_prefix（标题 + 摘要片段）
+ */
+function buildChunks(sections: SectionInfo[], title: string, abstractSnippet: string): string[] {
+  const chunks: string[] = [];
+  const contextPrefix = `[CONTEXT: Paper "${title}"\nAbstract snippet: ${abstractSnippet}]\n\n`;
+
+  for (const section of sections) {
+    const sectionText = `\n\n=== ${section.label} ===\n${section.text}`;
+    const fullText = contextPrefix + sectionText;
+
+    if (fullText.length <= MAX_CHARS) {
+      chunks.push(fullText);
+    } else {
+      // 拆分大 section：按段落边界切分
+      const paragraphs = section.text.split(/\n\n+/);
+      let currentChunk = contextPrefix + `\n\n=== ${section.label} ===\n`;
+
+      for (const para of paragraphs) {
+        if (currentChunk.length + para.length + 2 > MAX_CHARS) {
+          if (currentChunk.length > contextPrefix.length + 50) {
+            chunks.push(currentChunk);
+          }
+          currentChunk = contextPrefix + `\n\n=== ${section.label} (continued) ===\n`;
+        }
+        currentChunk += para + "\n\n";
+      }
+
+      if (currentChunk.length > contextPrefix.length + 50) {
+        chunks.push(currentChunk);
+      }
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * 合并多个分段提取结果，按 drug_name + cell_line + primary_pathway 去重
+ * 重复的实验取 evidence_quote 更长或 confidence 更高的版本
+ */
+function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
+  const allExperiments: ExperimentResult[] = [];
+  const seen = new Set<string>();
+
+  for (const result of results) {
+    for (const exp of result.experiments) {
+      // 去重 key：drug_name + cell_line + first pathway
+      const drugName = exp.drug_intervention.name.toLowerCase().trim();
+      const cellLine = (exp.model.cell_line || "").toLowerCase().trim();
+      const primaryPathway = exp.pathway_effects[0]?.pathway?.toLowerCase().trim() || "";
+      const key = `${drugName}|${cellLine}|${primaryPathway}`;
+
+      if (seen.has(key)) {
+        // 已存在：取 evidence_quote 更长、confidence 更高的版本
+        const existingIdx = allExperiments.findIndex(e => {
+          const eKey = `${e.drug_intervention.name.toLowerCase().trim()}|${(e.model.cell_line || "").toLowerCase().trim()}|${e.pathway_effects[0]?.pathway?.toLowerCase().trim() || ""}`;
+          return eKey === key;
+        });
+        if (existingIdx >= 0) {
+          const existing = allExperiments[existingIdx];
+          // 保留更完整的版本
+          if (exp.evidence_quote.length > existing.evidence_quote.length ||
+              (exp.confidence || 0) > (existing.confidence || 0)) {
+            allExperiments[existingIdx] = exp;
+          }
+        }
+      } else {
+        seen.add(key);
+        allExperiments.push(exp);
+      }
+    }
+  }
+
+  return { experiments: allExperiments };
+}
+
+/**
+ * 长文档分段提取：对超过 MAX_CHARS 的文档按章节拆分后分别提取再合并
+ *
+ * 策略：
+ * 1. extractSections() 拆分为 sections
+ * 2. 短文本直接调用 extractFromText
+ * 3. 长文本按 sections 构建 chunks（每个 ≤ MAX_CHARS），附加上下文前缀
+ * 4. 并发提取所有 chunks（最多 3 个并发）
+ * 5. 合并所有 chunk 的 experiments，去重
+ */
+export async function extractFromLongText(
+  text: string,
+  title: string,
+  options?: { maxTokens?: number; onToken?: (event: SSEEvent) => void }
+): Promise<ExtractionResult> {
+  // 短文本直接用标准提取
+  if (text.length <= MAX_CHARS) {
+    return extractFromText(text, title, options);
+  }
+
+  console.log(`[Extraction] 长文档分段提取: ${title} (${text.length} 字符)`);
+
+  // 拆分 sections
+  const sections = extractSections(text);
+
+  if (sections.length === 0) {
+    // 无法识别章节结构，回退到 smartTruncate + 标准提取
+    return extractFromText(text, title, options);
+  }
+
+  // 获取摘要片段作为上下文
+  const abstractSection = sections.find(s => s.name === "abstract");
+  const abstractSnippet = (abstractSection?.text || "").slice(0, 500);
+
+  // 构建 chunks
+  const chunks = buildChunks(sections, title, abstractSnippet);
+
+  console.log(`[Extraction] 拆分为 ${chunks.length} 个 chunk`);
+
+  // 并发提取所有 chunks（最多 3 个并发）
+  const CONCURRENCY = 3;
+  const results: ExtractionResult[] = [];
+  const queue = [...chunks];
+
+  async function worker() {
+    while (queue.length > 0) {
+      const chunk = queue.shift()!;
+      try {
+        const result = await extractFromText(chunk, title);
+        results.push(result);
+      } catch (error) {
+        console.warn(`[Extraction] Chunk 提取失败:`, (error as Error)?.message);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+
+  // 合并结果
+  const merged = mergeExtractionResults(results);
+
+  console.log(`[Extraction] 分段提取完成: ${merged.experiments.length} 个实验 (来自 ${chunks.length} 个 chunk)`);
+
+  return merged;
 }
 
 // ===== 批量提取 =====

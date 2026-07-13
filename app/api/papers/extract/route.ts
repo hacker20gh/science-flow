@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { extractWithFallback, type ExtractionResult } from "@/lib/llm/extraction";
+import { validateExtraction } from "@/lib/llm/extraction-validator";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
 import { sleep } from "@/lib/utils/sleep";
 
@@ -157,7 +158,15 @@ export async function POST(req: NextRequest) {
             }
 
             emit({ type: "progress", step: `正在提取: ${paper.title}`, current: results.length, total: papers.length });
-            const extraction = await extractWithFallback(text, paper.title);
+            const rawExtraction = await extractWithFallback(text, paper.title);
+
+            // 质量校验 + 自动修正
+            const validation = validateExtraction(rawExtraction);
+            const extraction = validation.cleaned;
+            if (validation.autoFixedCount > 0) {
+              console.log(`[Extract] ${paper.title}: 自动修正 ${validation.autoFixedCount} 处 (${validation.overallQuality}, ${validation.averageScore}分)`);
+            }
+
             if (extraction.experiments.length === 0) {
               const warning = text.length < 500
                 ? "文本过短（仅摘要），缺少实验细节"

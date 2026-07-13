@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { AlertTriangle } from "lucide-react";
+import { getStrengthLevel } from "@/lib/matrix/generator";
 import type { MatrixCell, MatrixRow, MatrixColumn } from "@/lib/matrix/generator";
 
 interface CellEditorProps {
@@ -10,6 +12,8 @@ interface CellEditorProps {
   anchorRect: DOMRect | null;
   onSave: (updatedCell: Partial<MatrixCell>) => void;
   onClose: () => void;
+  projectId?: string;
+  extractionId?: string;
 }
 
 const DIRECTION_OPTIONS = [
@@ -18,11 +22,13 @@ const DIRECTION_OPTIONS = [
   { value: "no_change" as const, label: "— 无变化", color: "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200" },
 ];
 
-export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: CellEditorProps) {
+export function CellEditor({ cell, row, column, anchorRect, onSave, onClose, projectId, extractionId }: CellEditorProps) {
   const [direction, setDirection] = useState<MatrixCell["direction"]>(cell.direction);
   const [significance, setSignificance] = useState(cell.significance ?? "");
   const [note, setNote] = useState(cell.detail ?? "");
   const [saving, setSaving] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click
@@ -84,6 +90,26 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: C
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  // 标记为已验证
+  async function handleVerify() {
+    if (!projectId || !extractionId) return;
+    setVerifying(true);
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/extractions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: extractionId, verified: true }),
+      });
+      if (res.ok) {
+        setVerified(true);
+      }
+    } catch (err) {
+      console.error("验证标记失败:", err);
+    } finally {
+      setVerifying(false);
     }
   }
 
@@ -177,28 +203,43 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: C
               <span className="text-gray-700">{cell.method}</span>
             </div>
           )}
+          {/* 证据强度进度条 */}
           <div>
             <span className="text-gray-400">证据强度：</span>
-            <span className={`inline-flex items-center gap-1 font-medium ${
-              (cell.evidenceStrength ?? 0) >= 80
-                ? "text-green-700"
-                : (cell.evidenceStrength ?? 0) >= 60
-                  ? "text-green-600"
-                  : (cell.evidenceStrength ?? 0) >= 40
-                    ? "text-amber-600"
-                    : "text-gray-500"
-            }`}>
-              <span className={`w-2 h-2 rounded-full ${
+            <div className="flex items-center gap-2 mt-1">
+              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    (cell.evidenceStrength ?? 0) >= 80
+                      ? "bg-green-500"
+                      : (cell.evidenceStrength ?? 0) >= 60
+                        ? "bg-green-400"
+                        : (cell.evidenceStrength ?? 0) >= 40
+                          ? "bg-amber-400"
+                          : "bg-red-400"
+                  }`}
+                  style={{ width: `${cell.evidenceStrength ?? 0}%` }}
+                />
+              </div>
+              <span className={`text-xs font-medium whitespace-nowrap ${
                 (cell.evidenceStrength ?? 0) >= 80
-                  ? "bg-green-500"
+                  ? "text-green-700"
                   : (cell.evidenceStrength ?? 0) >= 60
-                    ? "bg-green-300"
+                    ? "text-green-600"
                     : (cell.evidenceStrength ?? 0) >= 40
-                      ? "bg-amber-400"
-                      : "bg-gray-300"
-              }`} />
-              {cell.evidenceStrength ?? "?"}/100
-            </span>
+                      ? "text-amber-600"
+                      : "text-red-500"
+              }`}>
+                {cell.evidenceStrength ?? 0}/100 · {getStrengthLevel(cell.evidenceStrength ?? 0).label}
+              </span>
+            </div>
+            {/* 低置信度警告 */}
+            {(cell.evidenceStrength ?? 0) < 40 && (
+              <p className="text-xs text-amber-600 flex items-center gap-1 mt-1">
+                <AlertTriangle size={12} />
+                此证据较弱，建议人工验证或补充实验数据
+              </p>
+            )}
           </div>
           {cell.evidenceQuote && (
             <div>
@@ -211,20 +252,36 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: C
         </div>
 
         {/* Actions */}
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {saving ? "保存中..." : "保存"}
-          </button>
+        <div className="flex justify-between items-center gap-2">
+          {/* 验证按钮 — 仅当有 projectId 和 extractionId 时显示 */}
+          {projectId && extractionId && (
+            <button
+              onClick={handleVerify}
+              disabled={verified || verifying}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                verified
+                  ? "border-green-300 text-green-600 bg-green-50 cursor-default"
+                  : "border-green-300 text-green-600 hover:bg-green-50"
+              } disabled:opacity-50`}
+            >
+              {verified ? "✓ 已验证" : verifying ? "标记中..." : "✓ 标记为已验证"}
+            </button>
+          )}
+          <div className="flex gap-2 ml-auto">
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {saving ? "保存中..." : "保存"}
+            </button>
+          </div>
         </div>
       </div>
     </>

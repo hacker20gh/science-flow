@@ -604,8 +604,16 @@ export function MechanismMatrix({
                                 : "text-gray-500 hover:bg-gray-100"
                           }
                           ${hasConflict && cell ? "ring-1 ring-inset ring-amber-300 animate-pulse-subtle" : ""}
+                          ${cell && cell.direction && (cell.evidenceStrength ?? 0) < 40 ? "border border-dashed border-amber-400" : ""}
                         `}
                       >
+                        {/* 低置信度警告图标 */}
+                        {cell && cell.direction && (cell.evidenceStrength ?? 0) < 40 && (
+                          <AlertTriangle
+                            size={10}
+                            className="absolute bottom-0.5 right-0.5 text-amber-500"
+                          />
+                        )}
                         {/* 证据强度指示点 */}
                         {cell && cell.direction && strength && (
                           <span
@@ -768,6 +776,12 @@ export function MechanismMatrix({
                   <span className="italic text-gray-400 line-clamp-2">&ldquo;{cell.evidenceQuote}&rdquo;</span>
                 </div>
               )}
+              {/* 低置信度警告 */}
+              {(cell.evidenceStrength ?? 0) < 40 && (
+                <div className="mt-1.5 pt-1.5 border-t border-amber-700/50 text-amber-300">
+                  ⚠️ 此证据需要验证 (强度: {cell.evidenceStrength}/100)
+                </div>
+              )}
             </div>
           </div>
         );
@@ -793,6 +807,7 @@ export function MechanismMatrix({
           anchorRect={editingCell.anchorRect}
           onSave={handleSaveCell}
           onClose={() => setEditingCell(null)}
+          projectId={projectId}
         />
       )}
 
