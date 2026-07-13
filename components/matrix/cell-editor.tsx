@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { AlertTriangle } from "lucide-react";
-import { getStrengthLevel } from "@/lib/matrix/generator";
 import type { MatrixCell, MatrixRow, MatrixColumn } from "@/lib/matrix/generator";
 
 interface CellEditorProps {
@@ -83,6 +81,19 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose, pro
   async function handleSave() {
     setSaving(true);
     try {
+      // 记录编辑操作到审核轨迹
+      if (projectId && extractionId) {
+        if (direction !== cell.direction) {
+          await handleEdit("direction", cell.direction ?? "", direction ?? "");
+        }
+        if (significance !== (cell.significance ?? "")) {
+          await handleEdit("significance", cell.significance ?? "", significance);
+        }
+        if (note !== (cell.detail ?? "")) {
+          await handleEdit("note", cell.detail ?? "", note);
+        }
+      }
+
       onSave({
         direction,
         significance: significance || null,
@@ -93,24 +104,45 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose, pro
     }
   }
 
-  // 标记为已验证
+  // 标记为已验证（先记录审核，再更新 extraction）
   async function handleVerify() {
     if (!projectId || !extractionId) return;
     setVerifying(true);
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/extractions`, {
-        method: "PATCH",
+      // 记录审核操作
+      await fetch(`/api/projects/${encodeURIComponent(projectId)}/extractions/audit`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: extractionId, verified: true }),
+        body: JSON.stringify({
+          extractionId,
+          action: "verify",
+          note: "用户手动标记为已验证",
+        }),
       });
-      if (res.ok) {
-        setVerified(true);
-      }
-    } catch (err) {
-      console.error("验证标记失败:", err);
+
+      setVerified(true);
+    } catch (error) {
+      console.error("验证失败:", error);
     } finally {
       setVerifying(false);
     }
+  }
+
+  // 记录编辑操作到审核轨迹
+  async function handleEdit(field: string, oldValue: string, newValue: string) {
+    if (!projectId || !extractionId) return;
+
+    await fetch(`/api/projects/${encodeURIComponent(projectId)}/extractions/audit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        extractionId,
+        action: "edit_" + field,
+        field,
+        oldValue,
+        newValue,
+      }),
+    });
   }
 
   return (
@@ -203,43 +235,28 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose, pro
               <span className="text-gray-700">{cell.method}</span>
             </div>
           )}
-          {/* 证据强度进度条 */}
           <div>
             <span className="text-gray-400">证据强度：</span>
-            <div className="flex items-center gap-2 mt-1">
-              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    (cell.evidenceStrength ?? 0) >= 80
-                      ? "bg-green-500"
-                      : (cell.evidenceStrength ?? 0) >= 60
-                        ? "bg-green-400"
-                        : (cell.evidenceStrength ?? 0) >= 40
-                          ? "bg-amber-400"
-                          : "bg-red-400"
-                  }`}
-                  style={{ width: `${cell.evidenceStrength ?? 0}%` }}
-                />
-              </div>
-              <span className={`text-xs font-medium whitespace-nowrap ${
+            <span className={`inline-flex items-center gap-1 font-medium ${
+              (cell.evidenceStrength ?? 0) >= 80
+                ? "text-green-700"
+                : (cell.evidenceStrength ?? 0) >= 60
+                  ? "text-green-600"
+                  : (cell.evidenceStrength ?? 0) >= 40
+                    ? "text-amber-600"
+                    : "text-gray-500"
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${
                 (cell.evidenceStrength ?? 0) >= 80
-                  ? "text-green-700"
+                  ? "bg-green-500"
                   : (cell.evidenceStrength ?? 0) >= 60
-                    ? "text-green-600"
+                    ? "bg-green-300"
                     : (cell.evidenceStrength ?? 0) >= 40
-                      ? "text-amber-600"
-                      : "text-red-500"
-              }`}>
-                {cell.evidenceStrength ?? 0}/100 · {getStrengthLevel(cell.evidenceStrength ?? 0).label}
-              </span>
-            </div>
-            {/* 低置信度警告 */}
-            {(cell.evidenceStrength ?? 0) < 40 && (
-              <p className="text-xs text-amber-600 flex items-center gap-1 mt-1">
-                <AlertTriangle size={12} />
-                此证据较弱，建议人工验证或补充实验数据
-              </p>
-            )}
+                      ? "bg-amber-400"
+                      : "bg-gray-300"
+              }`} />
+              {cell.evidenceStrength ?? "?"}/100
+            </span>
           </div>
           {cell.evidenceQuote && (
             <div>

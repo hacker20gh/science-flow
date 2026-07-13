@@ -116,7 +116,7 @@ model Extraction {
   pathwayEffects  Json?   // [{ pathway, direction, significance, method }] — 向后兼容
   phenotypeEffects Json?  // [{ phenotype, direction, fold_change }] — 向后兼容
 
-  // 关系型存储（新增，支持跨论文聚合查询）
+  // 关系型存储（支持跨论文聚合查询）
   pathwayEffectsRelational  PathwayEffect[]
   phenotypeEffectsRelational PhenotypeEffect[]
 
@@ -125,27 +125,28 @@ model Extraction {
   confidence Float?    // LLM 提取置信度 0-1
   verified   Boolean   @default(false)
 
+  audits ExtractionAudit[]
+
   createdAt DateTime @default(now())
 
   @@index([paperId])
   @@index([verified])
 }
 
-// ===== 关系型通路/表型效果（支持跨论文聚合查询） =====
+// ===== 关系型通路/表型效果 =====
 
 model PathwayEffect {
   id           String    @id @default(cuid())
   extractionId String
   extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
 
-  pathway      String    // 归一化后的标准名（如 NF-κB）
-  direction    String    // up, down, no_change
-  significance String?   // p<0.01 等
-  method       String?   // Western blot 等实验方法
+  pathway      String
+  direction    String
+  significance String?
+  method       String?
 
   @@index([extractionId])
   @@index([pathway])
-  @@index([direction])
 }
 
 model PhenotypeEffect {
@@ -153,13 +154,32 @@ model PhenotypeEffect {
   extractionId String
   extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
 
-  phenotype    String    // 归一化后的标准名（如 Apoptosis）
-  direction    String    // up, down, no_change
-  foldChange   String?   // 2.5-fold 等
+  phenotype    String
+  direction    String
+  foldChange   String?
 
   @@index([extractionId])
   @@index([phenotype])
-  @@index([direction])
+}
+
+// ===== 提取审核轨迹 =====
+
+model ExtractionAudit {
+  id           String    @id @default(cuid())
+  extractionId String
+  extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+
+  action       String    // "verify" | "edit_direction" | "edit_pathway" | "edit_note"
+  field        String?   // 被修改的字段名，如 "pathwayEffects[0].direction"
+  oldValue     String?   // 修改前的值
+  newValue     String?   // 修改后的值
+  note         String?   // 用户添加的注释
+  userId       String?   // 操作用户
+
+  createdAt    DateTime  @default(now())
+
+  @@index([extractionId])
+  @@index([createdAt])
 }
 
 // ===== 假设 =====

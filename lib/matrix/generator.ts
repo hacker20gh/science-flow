@@ -34,6 +34,7 @@ export interface MatrixRow {
   drugConc: string; // 药物+浓度
   cellLine: string;
   species: string;
+  duration?: string; // 处理时间
   year?: number;
   cells: Record<string, MatrixCell>;
 }
@@ -75,6 +76,7 @@ export function calculateEvidenceStrength(opts: {
   sampleSize?: number | null;
   statisticalMethod?: string | null;
   significance?: string | null;
+  impactFactor?: number | null; // 期刊影响因子
 }): number {
   let score = 30; // 基础分
 
@@ -118,6 +120,14 @@ export function calculateEvidenceStrength(opts: {
     else if (sig !== "ns" && sig !== "n.s." && sig !== "not significant") score += 2;
   }
 
+  // 期刊影响因子评分 (0-10)
+  if (opts.impactFactor != null && opts.impactFactor > 0) {
+    if (opts.impactFactor >= 10) score += 10;
+    else if (opts.impactFactor >= 5) score += 7;
+    else if (opts.impactFactor >= 3) score += 4;
+    else score += 2;
+  }
+
   return Math.min(100, Math.max(0, score));
 }
 
@@ -159,6 +169,7 @@ interface ExtractionInput {
   paperId: string;
   paperTitle: string;
   year?: number;
+  impactFactor?: number | null; // 期刊影响因子
   experiments: ExperimentResult[];
 }
 
@@ -203,6 +214,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
             sampleSize: exp.sample_size,
             statisticalMethod: exp.statistical_test,
             significance: pe.significance,
+            impactFactor: input.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
@@ -227,6 +239,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
             sampleSize: exp.sample_size,
             statisticalMethod: exp.statistical_test,
             significance: null,
+            impactFactor: input.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
@@ -239,6 +252,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         drugConc,
         cellLine,
         species: exp.model.species || "",
+        duration: exp.drug_intervention.duration || "",
         year: input.year,
         cells,
       });
@@ -353,7 +367,7 @@ function incrementCount(counts: Map<string, number>, id: string) {
 export interface DBExtraction {
   id: string;
   paperId: string;
-  paper: { title: string; year: number | null };
+  paper: { title: string; year: number | null; impactFactor?: number | null };
   drugName: string | null;
   drugConc: string | null;
   cellLine: string | null;
@@ -435,6 +449,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
             sampleSize: ext.sampleSize,
             statisticalMethod: ext.method,
             significance: pe.significance,
+            impactFactor: ext.paper.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
@@ -464,6 +479,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
             sampleSize: ext.sampleSize,
             statisticalMethod: ext.method,
             significance: null,
+            impactFactor: ext.paper.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
@@ -477,6 +493,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
       drugConc,
       cellLine,
       species: ext.species || "",
+      duration: ext.duration || "",
       year: ext.paper.year ?? undefined,
       cells,
     });
@@ -544,10 +561,10 @@ function detectSmartConflicts(
     // 预构建 Set，避免循环内 Array.includes
     const upIds = new Set(ups.map(r => r.id));
 
-    // 按 (drugConc, cellLine, species) 分组，检查是否有真冲突
+    // 按 (drugConc, cellLine, species, duration) 分组，检查是否有真冲突
     const conditions = new Map<string, { ups: number; downs: number }>();
     for (const row of [...ups, ...downs]) {
-      const key = `${row.drugConc}|||${row.cellLine}|||${row.species}`;
+      const key = `${row.drugConc}|||${row.cellLine}|||${row.species}|||${row.duration || ""}`;
       const dir = upIds.has(row.id) ? "up" : "down";  // O(1)
       const existing = conditions.get(key) || { ups: 0, downs: 0 };
       if (dir === "up") existing.ups++;
@@ -562,9 +579,9 @@ function detectSmartConflicts(
     for (const [key, counts] of conditions) {
       if (counts.ups > 0 && counts.downs > 0) {
         hasRealConflict = true;
-        const [conc, cell, species] = key.split("|||");
+        const [conc, cell, species, duration] = key.split("|||");
         conditionDetails.push(
-          `${conc || "未知浓度"} ${cell || ""}${species ? ` (${species})` : ""} 中 ${counts.ups}↑ vs ${counts.downs}↓`
+          `${conc || "未知浓度"} ${cell || ""}${species ? ` (${species})` : ""}${duration ? ` ${duration}` : ""} 中 ${counts.ups}↑ vs ${counts.downs}↓`
         );
       }
     }
@@ -586,6 +603,9 @@ function detectSmartConflicts(
       const uniqueSpecies = new Set(
         [...ups, ...downs].map((r) => r.species).filter(Boolean)
       );
+      const uniqueDurations = new Set(
+        [...ups, ...downs].map((r) => r.duration).filter(Boolean)
+      );
 
       let reason = "";
       if (uniqueConcs.size > 1)
@@ -594,6 +614,8 @@ function detectSmartConflicts(
         reason = `细胞系差异（${[...uniqueCells].join(" vs ")}）`;
       else if (uniqueSpecies.size > 1)
         reason = `物种差异（${[...uniqueSpecies].join(" vs ")}）`;
+      else if (uniqueDurations.size > 1)
+        reason = `处理时间差异（${[...uniqueDurations].join(" vs ")}）`;
       else
         reason = `${ups.length} 篇上调 vs ${downs.length} 篇下调`;
 
