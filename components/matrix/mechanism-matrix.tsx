@@ -494,7 +494,7 @@ export function MechanismMatrix({
               <tr>
                 {/* 左上角固定列头 */}
                 <th
-                  className={`${ds.header} text-left font-semibold text-gray-700 sticky left-0 z-30 min-w-[260px] border-r border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100`}
+                  className={`${ds.header} text-left font-semibold text-gray-700 sticky left-0 z-30 w-[200px] max-w-[200px] border-r border-gray-200 bg-gradient-to-b from-gray-50 to-gray-100`}
                 >
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm">📋</span>
@@ -546,7 +546,7 @@ export function MechanismMatrix({
                     {/* 第一列：论文标题+条件（固定列） */}
                     <td
                       className={`
-                        ${ds.cell} sticky left-0 z-10 border-r transition-colors relative
+                        ${ds.cell} sticky left-0 z-10 border-r transition-colors relative w-[200px] max-w-[200px]
                         ${isNewPaper ? "border-r-gray-200" : "border-r-gray-100"}
                         ${isNewPaper ? "bg-white" : "bg-gray-50/30"}
                         ${isHovered ? "bg-blue-50/40 !important" : ""}
