@@ -158,10 +158,18 @@ export async function POST(req: NextRequest) {
 
             emit({ type: "progress", step: `正在提取: ${paper.title}`, current: results.length, total: papers.length });
             const extraction = await extractFromText(text, paper.title);
-            const result = { paperId: paper.paperId, title: paper.title, extraction };
-            results.push(result);
-            // 每篇完成立即发送结果
-            emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
+            if (extraction.experiments.length === 0) {
+              const warning = text.length < 500
+                ? "文本过短（仅摘要），缺少实验细节"
+                : "LLM 未提取到实验数据";
+              const result = { paperId: paper.paperId, title: paper.title, extraction, error: `提取结果为空：${warning}` };
+              results.push(result);
+              emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
+            } else {
+              const result = { paperId: paper.paperId, title: paper.title, extraction };
+              results.push(result);
+              emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
+            }
           } catch (error) {
             const result = { paperId: paper.paperId, title: paper.title, extraction: null, error: error instanceof Error ? error.message : "Extraction failed" };
             results.push(result);
@@ -174,14 +182,16 @@ export async function POST(req: NextRequest) {
       await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
       // 发送最终汇总
-      const successCount = results.filter((r) => r.extraction).length;
+      const successCount = results.filter((r) => r.extraction && r.extraction.experiments.length > 0).length;
+      const emptyCount = results.filter((r) => r.extraction && r.extraction.experiments.length === 0).length;
+      const errorCount = results.filter((r) => !r.extraction).length;
       const totalExperiments = results.reduce((sum, r) => sum + (r.extraction?.experiments?.length || 0), 0);
       emit({
         type: "result",
         data: {
           final: true,
           results,
-          summary: { total: papers.length, success: successCount, errors: results.length - successCount, totalExperiments },
+          summary: { total: papers.length, success: successCount, empty: emptyCount, errors: errorCount, totalExperiments },
         },
       });
     });
