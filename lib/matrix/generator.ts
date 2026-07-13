@@ -495,11 +495,14 @@ function detectSmartConflicts(
 
     if (ups.length === 0 || downs.length === 0) continue;
 
-    // 按 (drugConc, cellLine) 分组，检查是否有真冲突
+    // 预构建 Set，避免循环内 Array.includes
+    const upIds = new Set(ups.map(r => r.id));
+
+    // 按 (drugConc, cellLine, species) 分组，检查是否有真冲突
     const conditions = new Map<string, { ups: number; downs: number }>();
     for (const row of [...ups, ...downs]) {
-      const key = `${row.drugConc}|||${row.cellLine}`;
-      const dir = ups.includes(row) ? "up" : "down";
+      const key = `${row.drugConc}|||${row.cellLine}|||${row.species}`;
+      const dir = upIds.has(row.id) ? "up" : "down";  // O(1)
       const existing = conditions.get(key) || { ups: 0, downs: 0 };
       if (dir === "up") existing.ups++;
       else existing.downs++;
@@ -513,9 +516,9 @@ function detectSmartConflicts(
     for (const [key, counts] of conditions) {
       if (counts.ups > 0 && counts.downs > 0) {
         hasRealConflict = true;
-        const [conc, cell] = key.split("|||");
+        const [conc, cell, species] = key.split("|||");
         conditionDetails.push(
-          `${conc || "未知浓度"} ${cell || ""} 中 ${counts.ups}↑ vs ${counts.downs}↓`
+          `${conc || "未知浓度"} ${cell || ""}${species ? ` (${species})` : ""} 中 ${counts.ups}↑ vs ${counts.downs}↓`
         );
       }
     }
@@ -527,12 +530,15 @@ function detectSmartConflicts(
         description: `真冲突：${conditionDetails.join("；")}`,
       });
     } else if (ups.length > 0 && downs.length > 0) {
-      // 可解释差异：不同剂量或不同细胞系
+      // 可解释差异：不同剂量、不同细胞系或不同物种
       const uniqueConcs = new Set(
         [...ups, ...downs].map((r) => r.drugConc).filter(Boolean)
       );
       const uniqueCells = new Set(
         [...ups, ...downs].map((r) => r.cellLine).filter(Boolean)
+      );
+      const uniqueSpecies = new Set(
+        [...ups, ...downs].map((r) => r.species).filter(Boolean)
       );
 
       let reason = "";
@@ -540,6 +546,8 @@ function detectSmartConflicts(
         reason = `剂量依赖关系（${[...uniqueConcs].join(" vs ")}）`;
       else if (uniqueCells.size > 1)
         reason = `细胞系差异（${[...uniqueCells].join(" vs ")}）`;
+      else if (uniqueSpecies.size > 1)
+        reason = `物种差异（${[...uniqueSpecies].join(" vs ")}）`;
       else
         reason = `${ups.length} 篇上调 vs ${downs.length} 篇下调`;
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { extractFromText, type ExtractionResult } from "@/lib/llm/extraction";
+import { extractWithFallback, type ExtractionResult } from "@/lib/llm/extraction";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
 import { sleep } from "@/lib/utils/sleep";
 
@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
             }
 
             emit({ type: "progress", step: `正在提取: ${paper.title}`, current: results.length, total: papers.length });
-            const extraction = await extractFromText(text, paper.title);
+            const extraction = await extractWithFallback(text, paper.title);
             if (extraction.experiments.length === 0) {
               const warning = text.length < 500
                 ? "文本过短（仅摘要），缺少实验细节"

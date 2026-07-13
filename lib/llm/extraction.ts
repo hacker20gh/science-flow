@@ -77,8 +77,16 @@ ANTI-HALLUCINATION (hard rules):
 - Sample size: set to null if not explicitly stated.
 
 NAMING CONVENTIONS:
-- Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, mTOR, Wnt, Notch, TGF-β, p53, HIF-1α, AMPK, PD-1/PD-L1.
-- Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Metastasis, Drug Resistance.
+STANDARD PATHWAY NAMES (you MUST use one of these exact names):
+NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
+
+If the paper uses a variant name (e.g. "NF-kappaB", "PI3K-Akt pathway"), output the standard name above.
+
+STANDARD PHENOTYPE NAMES (you MUST use one of these exact names):
+Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50
+
+If the paper uses a variant (e.g. "programmed cell death", "cell survival"), output the standard name.
+
 - pathway_effects[].method: experimental technique (e.g. "Western blot", "qPCR"), NOT statistical method.
 - Confidence (0-1): 1.0 = explicitly stated, 0.8 = strongly implied, 0.5 = inferred, 0.3 = uncertain.
 
@@ -99,6 +107,62 @@ Expected output:
     "confidence": 0.95
   }]
 }`;
+
+// ===== 摘要专用 Prompt =====
+
+const ABSTRACT_PROMPT = `You are analyzing a paper ABSTRACT (not full text).
+Many experimental details will be unavailable - this is expected and OK.
+
+RELAXED RULES:
+- drug_intervention.concentration/duration/co_treatment: use null if not explicitly stated in the abstract
+- model.passage: almost always unavailable in abstracts, use null
+- statistical_test/sample_size: often not in abstract, use null
+- controls: empty array if not mentioned
+- confidence: cap at 0.6 (abstract extraction is inherently less complete)
+- Focus on what IS available: drug name, cell line, pathway direction, phenotype direction
+- For evidence_quote: use the EXACT sentence from the abstract
+
+NAMING CONVENTIONS (same as standard - use exact names):
+Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
+Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50
+
+Keep all anti-hallucination rules. Only extract what is explicitly stated.`;
+
+// ===== 空结果重试 Prompts =====
+
+/**
+ * 宽松 Prompt：首次提取为空时的重试
+ * 降低提取门槛，允许不完整字段
+ */
+const RELAXED_PROMPT = `You are extracting experimental data from a biomedical paper.
+This is a RETRY because the previous extraction returned no results.
+Be MORE LENIENT in extraction:
+- Extract even when fields are incomplete (set missing fields to null)
+- Focus on identifying ANY pathway direction changes (up/down/no_change)
+- Focus on identifying ANY phenotype effects
+- Drug name and cell line are the MOST important fields
+- If the paper mentions results but lacks specific numbers, still extract them with null for numeric fields
+- confidence can be 0.4-0.7 (acknowledging this is less certain)
+Keep: anti-hallucination rules (evidence_quote required), naming conventions
+
+NAMING CONVENTIONS (use exact names):
+Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
+Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50`;
+
+/**
+ * 最小 Prompt：最后一次尝试，仅提取最关键信息
+ */
+const MINIMAL_PROMPT = `You are extracting MINIMAL experimental data from a paper abstract.
+Focus ONLY on:
+- Drug/intervention name (REQUIRED)
+- Pathway names and their direction (up/down) (REQUIRED)
+- Phenotype names and their direction (up/down) (REQUIRED)
+Everything else can be null. Set confidence to 0.4.
+Keep: evidence_quote required, naming conventions.
+
+STANDARD NAMES (use exact names):
+Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
+Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50`;
 
 // ===== 智能截断 =====
 
@@ -183,6 +247,16 @@ function extractSections(text: string): SectionInfo[] {
   return sections;
 }
 
+/**
+ * 从全文中提取 Abstract 段落
+ * 复用 extractSections 的逻辑，返回 null 如果没找到
+ */
+function extractAbstract(text: string): string | null {
+  const sections = extractSections(text);
+  const abstract = sections.find((s) => s.name === "abstract");
+  return abstract?.text || null;
+}
+
 // ===== 提取函数 =====
 
 export async function extractFromText(
@@ -246,6 +320,108 @@ export async function extractFromText(
       }),
     });
   }, { label: "extraction" });
+}
+
+/**
+ * 通用提取函数：接受自定义 system prompt
+ * 核心逻辑与 extractFromText 相同，但 system prompt 可定制
+ */
+export async function extractWithPrompt(
+  text: string,
+  title: string,
+  systemPrompt: string,
+  options?: { maxTokens?: number; onToken?: (event: SSEEvent) => void }
+): Promise<ExtractionResult> {
+  return withLLMRetry(async () => {
+    const client = getLLMClient();
+    const maxTokens = options?.maxTokens || 8192;
+    const extractionModel = await getModelForFeature("extraction");
+
+    const userMessage = `Extract all experimental findings from this paper:\n\nTitle: ${title}\n\nContent:\n${text}`;
+
+    const llmParams = {
+      model: extractionModel,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [{ role: "user" as const, content: userMessage }],
+      tools: [EXTRACTION_TOOL],
+      tool_choice: { type: "tool" as const, name: "extract_paper_data" },
+    };
+
+    if (options?.onToken) {
+      // 流式路径：手动追踪 token
+      const streamStart = Date.now();
+      const { toolUseBlocks, usage } = await streamLLMWithToolUse(client, llmParams, options.onToken);
+      trackTokenUsage({
+        feature: "extraction",
+        model: extractionModel,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cachedTokens: usage.cachedTokens,
+        durationMs: Date.now() - streamStart,
+        isRetry: getIsRetryMode(),
+      });
+      const toolResult = toolUseBlocks.find((t) => t.name === "extract_paper_data");
+      if (toolResult) {
+        return ExtractionResultSchema.parse(toolResult.input);
+      }
+      throw new Error("No tool_use block in streaming response");
+    }
+
+    // 阻塞式路径：monkey-patch 自动追踪
+    const response = await client.messages.create({
+      ...llmParams,
+      _sciflowFeature: "extraction",
+    } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
+
+    return await extractStructuredOutput(response, ExtractionResultSchema, {
+      label: "extraction",
+      retryFn: createRetryFunction(client, {
+        model: MODELS.extraction,
+        maxTokens,
+        system: systemPrompt,
+        userMessage,
+        originalContent: userMessage,
+        schema: ExtractionResultSchema,
+        feature: "extraction",
+      }),
+    });
+  }, { label: "extraction" });
+}
+
+/**
+ * 带智能重试的提取函数
+ *
+ * - 短文本（<800 字符，通常为摘要）：用 ABSTRACT_PROMPT → MINIMAL_PROMPT
+ * - 长文本（全文）：标准提取 → RELAXED_PROMPT 重试 → MINIMAL_PROMPT + 摘要重试
+ * - 每次重试都有 console.log 日志，方便排查
+ */
+export async function extractWithFallback(
+  text: string,
+  title: string,
+  options?: { maxTokens?: number; onToken?: (event: SSEEvent) => void }
+): Promise<ExtractionResult> {
+  // 短文本（通常为摘要）：用摘要专用 prompt，然后最小 prompt
+  if (text.length < 800) {
+    const result = await extractWithPrompt(text, title, ABSTRACT_PROMPT, options);
+    if (result.experiments.length > 0) return result;
+
+    console.log(`[Extraction] 摘要提取为空，使用最小 prompt 重试: ${title}`);
+    return extractWithPrompt(text, title, MINIMAL_PROMPT, options);
+  }
+
+  // 长文本（全文）：标准 → 宽松 → 最小
+  const result1 = await extractFromText(text, title, options);
+  if (result1.experiments.length > 0) return result1;
+
+  console.log(`[Extraction] 空结果，使用宽松 prompt 重试: ${title}`);
+  const result2 = await extractWithPrompt(text, title, RELAXED_PROMPT, options);
+  if (result2.experiments.length > 0) return result2;
+
+  // 最后一次尝试：用最小 prompt 只处理摘要部分
+  const abstractText = extractAbstract(text) || text.slice(0, 2000);
+  console.log(`[Extraction] 二次空结果，使用最小 prompt + 摘要重试: ${title}`);
+  return extractWithPrompt(abstractText, title, MINIMAL_PROMPT, options);
 }
 
 // ===== 批量提取 =====
