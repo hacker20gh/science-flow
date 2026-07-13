@@ -249,15 +249,14 @@ export default function ProjectPaperSearchPage() {
   async function handleSelect(papers: Paper[]) {
     setSelectedPapers(papers);
 
-    // 1. 保存论文到 DB
+    // 1. 保存论文到 DB（批量）
     const dbIdMap = new Map<string, string>();
-    for (const p of papers) {
-      const searchId = p.doi || p.pmid || p.title;
-      try {
-        const res = await fetch(`/api/projects/${projectId}/papers`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+    try {
+      const res = await fetch(`/api/projects/${projectId}/papers/batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          papers: papers.map((p) => ({
             title: p.title,
             doi: p.doi || null,
             pmid: p.pmid || null,
@@ -267,23 +266,22 @@ export default function ProjectPaperSearchPage() {
             abstract: p.abstract,
             source: p.sources?.[0] || "semantic_scholar",
             oaUrl: p.oaPdfUrl || null,
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.paper?.id) dbIdMap.set(searchId, data.paper.id);
-        } else if (res.status === 409) {
-          const listRes = await fetch(`/api/projects/${projectId}/papers`);
-          if (listRes.ok) {
-            const listData = await listRes.json();
-            const existing = listData.papers?.find(
-              (pp: { doi?: string; pmid?: string; id: string }) => pp.doi === p.doi || pp.pmid === p.pmid
-            );
-            if (existing) dbIdMap.set(searchId, existing.id);
-          }
+          })),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Map created papers by DOI
+        for (const created of (data.papers || []) as Array<{ id: string; doi?: string | null; pmid?: string | null }>) {
+          if (created.doi) dbIdMap.set(created.doi, created.id);
         }
-      } catch { /* fallback */ }
-    }
+        // Map skipped (existing) papers by DOI
+        const skippedIds = (data.skippedPaperIds || {}) as Record<string, string>;
+        for (const [doi, id] of Object.entries(skippedIds)) {
+          dbIdMap.set(doi, id);
+        }
+      }
+    } catch { /* fallback: papers will use searchId as paperId */ }
 
     // 1b. 加入 store
     const stored: StoredPaper[] = papers.map((p) => {
