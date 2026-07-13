@@ -1,10 +1,16 @@
 import { NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return Response.json({ error: "未登录" }, { status: 401 });
+  }
+
   if (!prisma) {
     return Response.json({ error: "数据库未配置", history: [] }, { status: 503 });
   }
@@ -12,6 +18,11 @@ export async function GET(
   const { projectId } = await params;
 
   try {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || project.userId !== session.user.id) {
+      return Response.json({ error: "无权访问该项目" }, { status: 403 });
+    }
+
     const history = await prisma.searchHistory.findMany({
       where: { projectId },
       orderBy: { createdAt: "desc" },
@@ -28,6 +39,11 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return Response.json({ error: "未登录" }, { status: 401 });
+  }
+
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
@@ -35,6 +51,11 @@ export async function DELETE(
   const { projectId } = await params;
 
   try {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || project.userId !== session.user.id) {
+      return Response.json({ error: "无权访问该项目" }, { status: 403 });
+    }
+
     const result = await prisma.searchHistory.deleteMany({
       where: { projectId },
     });

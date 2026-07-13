@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { aggregateSearch, enrichWithOa, enrichWithBioRxiv, deduplicate, type UnifiedPaper } from "@/lib/academic/aggregator";
 import { preprocessQuery, fastPreprocess } from "@/lib/llm/query-preprocessor";
 import { prisma } from "@/lib/db-server";
@@ -23,6 +24,11 @@ function getCacheKey(body: Record<string, unknown>): string {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
+
   try {
     const body = await req.json();
     const {
