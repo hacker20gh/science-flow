@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo } from "react";
 import { Download, Loader2, Check, Upload, ExternalLink, ChevronDown, ChevronUp, Search, Filter } from "lucide-react";
+import { toast } from "sonner";
 
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   pubmed: { label: "PubMed", color: "bg-green-50 text-green-600" },
@@ -114,7 +115,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
         setDownloaded((prev) => new Set(prev).add(key));
       }
     } catch {
-      // 下载失败静默处理
+      toast.error('PDF 下载失败，请稍后重试');
     } finally {
       setDownloading((prev) => {
         const next = new Set(prev);
@@ -153,7 +154,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
         setUploaded((prev) => new Set(prev).add(key));
       }
     } catch {
-      // 上传失败静默处理
+      toast.error('PDF 上传失败，请稍后重试');
     } finally {
       setUploading((prev) => {
         const next = new Set(prev);
@@ -165,7 +166,14 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
     }
   }
 
-  if (papers.length === 0) return null;
+  if (papers.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-lg">📭 未找到相关文献</p>
+        <p className="text-sm mt-2">尝试调整搜索关键词或筛选条件</p>
+      </div>
+    );
+  }
 
   const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0].filter(Boolean).length;
 
@@ -317,7 +325,12 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
       </div>
 
       <div className="space-y-3">
-        {filteredPapers.map((paper) => {
+        {filteredPapers.length === 0 ? (
+          <div className="text-center py-8 text-gray-400 text-sm">
+            筛选后无匹配结果，请调整筛选条件
+          </div>
+        ) : (
+          filteredPapers.map((paper) => {
           const key = paperKey(paper);
           const isSelected = selected.has(key);
 
@@ -496,7 +509,8 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
               </div>
             </div>
           );
-        })}
+        })
+        )}
       </div>
 
       {/* 加载更多 */}
