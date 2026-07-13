@@ -212,14 +212,17 @@ export function MechanismMatrix({
       ? data.columns
       : data.columns.filter((c) => c.type === filterType);
 
-  // 排序后的行
+  // 排序后的行（按论文标题分组 + 用户选择的副排序键）
   const sortedRows = useMemo(() => {
     const rows = [...data.rows];
     const mul = sortDir === "asc" ? 1 : -1;
     rows.sort((a, b) => {
+      // 主排序：按论文标题分组（始终，确保同论文排在一起）
+      let paperCmp = a.paperTitle.localeCompare(b.paperTitle);
+      if (sortKey === "paper") paperCmp *= mul;
+      if (paperCmp !== 0) return paperCmp;
+      // 副排序：同论文内按用户选择的排序键
       switch (sortKey) {
-        case "paper":
-          return mul * a.paperTitle.localeCompare(b.paperTitle);
         case "drug":
           return mul * a.drugConc.localeCompare(b.drugConc);
         case "cellLine":
@@ -516,171 +519,187 @@ export function MechanismMatrix({
               </tr>
             </thead>
 
-          {/* 表体 — paginated */}
+          {/* 表体 — 按论文分组 + 分页 */}
           <tbody>
-            {sortedRows.slice(0, visibleRowCount).map((row, rowIdx) => {
-              const isHovered = hoveredRow === row.id;
-              const prevRow = rowIdx > 0 ? sortedRows[rowIdx - 1] : null;
-              const sameSource = prevRow?.paperId === row.paperId;
-              return (
-                <tr
-                  key={row.id}
-                  onMouseEnter={() => setHoveredRow(row.id)}
-                  onMouseLeave={() => setHoveredRow(null)}
-                  className={`
-                    border-t transition-colors
-                    ${sameSource ? "border-t-blue-100" : "border-t-gray-100"}
-                    ${rowIdx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
-                    ${isHovered ? "bg-blue-50/40 !important" : ""}
-                  `}
-                >
-                  {/* 文献+实验条件（固定列） */}
-                  <td
+            {(() => {
+              // 按论文分组排序
+              const displayRows = sortedRows.slice(0, visibleRowCount);
+              let lastPaperTitle = "";
+
+              return displayRows.map((row, i) => {
+                const isNewPaper = row.paperTitle !== lastPaperTitle;
+                lastPaperTitle = row.paperTitle;
+                const isHovered = hoveredRow === row.id;
+
+                return (
+                  <tr
+                    key={row.id}
+                    onMouseEnter={() => setHoveredRow(row.id)}
+                    onMouseLeave={() => setHoveredRow(null)}
                     className={`
-                      ${ds.cell} sticky left-0 z-10 border-r transition-colors relative
-                      ${sameSource ? "border-l-2 border-l-blue-400 border-r-gray-200" : "border-r-gray-200"}
-                      ${rowIdx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
+                      border-t transition-colors
+                      ${isNewPaper && i > 0 ? "border-t-2 border-t-gray-200" : "border-t-gray-50"}
+                      ${isNewPaper ? "bg-white" : "bg-gray-50/30"}
                       ${isHovered ? "bg-blue-50/40 !important" : ""}
                     `}
                   >
-                    <div className="space-y-0.5 min-w-0">
-                      {/* 第一层：药物+浓度（主标识，粗体） */}
-                      <div className="font-semibold text-gray-900 text-[13px] truncate" title={row.drugConc}>
-                        {row.drugConc || "—"}
-                      </div>
-                      {/* 第二层：细胞系 · 物种 */}
-                      <div className="flex items-center gap-1 text-xs">
-                        <span className="text-gray-600 truncate">{row.cellLine}</span>
-                        {row.species && (
-                          <>
-                            <span className="text-gray-300">·</span>
-                            <span className="text-gray-500 truncate">{row.species}</span>
-                          </>
-                        )}
-                      </div>
-                      {/* 第三层：论文来源（2行截断） */}
-                      <div className="text-[11px] text-gray-400 leading-tight line-clamp-2" title={row.paperTitle}>
-                        {row.paperTitle}
-                      </div>
-                      {/* 年份标签 */}
-                      {row.year && (
-                        <span className="inline-block text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded mt-0.5">
-                          {row.year}
-                        </span>
+                    {/* 第一列：论文标题+条件（固定列） */}
+                    <td
+                      className={`
+                        ${ds.cell} sticky left-0 z-10 border-r transition-colors relative
+                        ${isNewPaper ? "border-r-gray-200" : "border-r-gray-100"}
+                        ${isNewPaper ? "bg-white" : "bg-gray-50/30"}
+                        ${isHovered ? "bg-blue-50/40 !important" : ""}
+                      `}
+                    >
+                      {isNewPaper ? (
+                        <div className="space-y-0.5 min-w-0">
+                          {/* 论文标题（仅新论文组首行显示） */}
+                          <div className="text-[13px] font-semibold text-gray-800 truncate" title={row.paperTitle}>
+                            {row.paperTitle}
+                          </div>
+                          {/* 实验条件 */}
+                          <div className="text-[10px] text-gray-400">
+                            {row.drugConc && <span>{row.drugConc}</span>}
+                            {row.cellLine && <span> · {row.cellLine}</span>}
+                            {row.species && <span> · {row.species}</span>}
+                          </div>
+                        </div>
+                      ) : (
+                        /* 同论文后续行：缩进，仅显示条件 */
+                        <div className="text-[10px] text-gray-400 pl-2">
+                          {row.drugConc && <span>{row.drugConc}</span>}
+                          {row.cellLine && <span> · {row.cellLine}</span>}
+                          {row.species && <span> · {row.species}</span>}
+                        </div>
                       )}
-                    </div>
-                  </td>
+                    </td>
 
-                  {/* 数据单元格 */}
-                  {visibleColumns.map((col) => {
-                    const cell = row.cells[col.id];
-                    const hasConflict = isConflictColumn(col.id);
-                    const isUp = cell?.direction === "up";
-                    const isDown = cell?.direction === "down";
-                    const isEmpty = !cell || (!cell.direction && !cell.significance);
-                    const strength = cell?.evidenceStrength != null
-                      ? getStrengthLevel(cell.evidenceStrength)
-                      : null;
+                    {/* 数据单元格 — 保持现有渲染逻辑 */}
+                    {visibleColumns.map((col) => {
+                      const cell = row.cells[col.id];
+                      const hasConflict = isConflictColumn(col.id);
+                      const isUp = cell?.direction === "up";
+                      const isDown = cell?.direction === "down";
+                      const isEmpty = !cell || (!cell.direction && !cell.significance);
+                      const strength = cell?.evidenceStrength != null
+                        ? getStrengthLevel(cell.evidenceStrength)
+                        : null;
 
-                    return (
-                      <td
-                        key={col.id}
-                        onClick={(e) => handleCellClick(row, col, e.currentTarget, cell || undefined)}
-                        onMouseEnter={(e) => {
-                          if (cell?.direction) {
-                            setHoveredCell({ row, col, cell, rect: e.currentTarget.getBoundingClientRect() });
-                          }
-                        }}
-                        onMouseLeave={() => setHoveredCell(null)}
-                        title={undefined}
-                        className={`
-                          ${ds.cell} text-center cursor-pointer transition-all relative group
-                          ${isEmpty
-                            ? "hover:bg-blue-50"
-                            : isUp
-                              ? "text-green-700 hover:bg-green-50"
-                              : isDown
-                                ? "text-red-700 hover:bg-red-50"
-                                : "text-gray-500 hover:bg-gray-100"
-                          }
-                          ${hasConflict && cell ? "ring-1 ring-inset ring-amber-300 animate-pulse-subtle" : ""}
-                          ${cell && cell.direction && (cell.evidenceStrength ?? 0) < 40 ? "border border-dashed border-amber-400" : ""}
-                        `}
-                      >
-                        {/* 低置信度警告图标 */}
-                        {cell && cell.direction && (cell.evidenceStrength ?? 0) < 40 && (
-                          <AlertTriangle
-                            size={10}
-                            className="absolute bottom-0.5 right-0.5 text-amber-500"
-                          />
-                        )}
-                        {/* 证据强度指示点 */}
-                        {cell && cell.direction && strength && (
-                          <span
-                            className={`absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ${
-                              (cell.evidenceStrength ?? 0) >= 80
-                                ? "bg-green-500"
-                                : (cell.evidenceStrength ?? 0) >= 60
-                                  ? "bg-green-300"
-                                  : (cell.evidenceStrength ?? 0) >= 40
-                                    ? "bg-amber-400"
-                                    : "bg-gray-300"
-                            }`}
-                          />
-                        )}
-                        {cell && cell.direction ? (
-                          <span className="inline-flex flex-col items-center gap-0.5">
+                      return (
+                        <td
+                          key={col.id}
+                          onClick={(e) => handleCellClick(row, col, e.currentTarget, cell || undefined)}
+                          onMouseEnter={(e) => {
+                            if (cell?.direction) {
+                              setHoveredCell({ row, col, cell, rect: e.currentTarget.getBoundingClientRect() });
+                            }
+                          }}
+                          onMouseLeave={() => setHoveredCell(null)}
+                          title={undefined}
+                          className={`
+                            ${ds.cell} text-center cursor-pointer transition-all relative group
+                            ${isEmpty
+                              ? "hover:bg-blue-50"
+                              : isUp
+                                ? "text-green-700 hover:bg-green-50"
+                                : isDown
+                                  ? "text-red-700 hover:bg-red-50"
+                                  : "text-gray-500 hover:bg-gray-100"
+                            }
+                            ${hasConflict && cell ? "ring-1 ring-inset ring-amber-300 animate-pulse-subtle" : ""}
+                            ${cell && cell.direction && (cell.evidenceStrength ?? 0) < 40 ? "border border-dashed border-amber-400" : ""}
+                          `}
+                        >
+                          {/* 低置信度警告图标 */}
+                          {cell && cell.direction && (cell.evidenceStrength ?? 0) < 40 && (
+                            <AlertTriangle
+                              size={10}
+                              className="absolute bottom-0.5 right-0.5 text-amber-500"
+                            />
+                          )}
+                          {/* 证据强度指示点 */}
+                          {cell && cell.direction && strength && (
                             <span
-                              className={`text-lg font-bold leading-none ${
-                                isUp ? "text-green-600" : isDown ? "text-red-600" : "text-gray-400"
+                              className={`absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ${
+                                (cell.evidenceStrength ?? 0) >= 80
+                                  ? "bg-green-500"
+                                  : (cell.evidenceStrength ?? 0) >= 60
+                                    ? "bg-green-300"
+                                    : (cell.evidenceStrength ?? 0) >= 40
+                                      ? "bg-amber-400"
+                                      : "bg-gray-300"
                               }`}
-                            >
-                              {isUp ? "↑" : isDown ? "↓" : "—"}
-                            </span>
-                            {cell.significance && (
+                            />
+                          )}
+                          {cell && cell.direction ? (
+                            <span className="inline-flex flex-col items-center gap-0.5">
                               <span
-                                className={`text-[10px] font-medium px-1 rounded ${
-                                  isUp
-                                    ? "text-green-600 bg-green-50"
-                                    : isDown
-                                      ? "text-red-600 bg-red-50"
-                                      : "text-gray-500 bg-gray-100"
+                                className={`text-lg font-bold leading-none ${
+                                  isUp ? "text-green-600" : isDown ? "text-red-600" : "text-gray-400"
                                 }`}
                               >
-                                {cell.significance}
+                                {isUp ? "↑" : isDown ? "↓" : "—"}
                               </span>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded border border-dashed border-gray-300 text-gray-300 group-hover:border-blue-400 group-hover:text-blue-400 transition-colors">
-                            <Plus size={12} />
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+                              {cell.significance && (
+                                <span
+                                  className={`text-[10px] font-medium px-1 rounded ${
+                                    isUp
+                                      ? "text-green-600 bg-green-50"
+                                      : isDown
+                                        ? "text-red-600 bg-red-50"
+                                        : "text-gray-500 bg-gray-100"
+                                  }`}
+                                >
+                                  {cell.significance}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded border border-dashed border-gray-300 text-gray-300 group-hover:border-blue-400 group-hover:text-blue-400 transition-colors">
+                              <Plus size={12} />
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              });
+            })()}
           </tbody>
 
-          {/* 汇总统计行 */}
+          {/* 汇总统计行：每列的方向分布 + 一致率 */}
           <tfoot className="sticky bottom-0 z-10">
-            <tr className="bg-gray-100 border-t-2 border-gray-300">
-              <td className={`${ds.cell} sticky left-0 z-20 font-semibold text-gray-600 bg-gray-100 border-r border-gray-200`}>
+            <tr className="bg-gray-50 border-t-2 border-gray-200 font-medium text-xs">
+              <td className={`${ds.cell} sticky left-0 z-20 text-gray-500 bg-gray-50 border-r border-gray-200`}>
                 汇总
               </td>
               {visibleColumns.map((col) => {
-                const s = summary.get(col.id);
-                if (!s) return <td key={col.id} className={`${ds.cell} text-center text-gray-400`}>—</td>;
-                const total = s.up + s.down + s.noChange;
-                if (total === 0) return <td key={col.id} className={`${ds.cell} text-center text-gray-400`}>—</td>;
+                const ups = data.rows.filter(r => r.cells[col.id]?.direction === "up").length;
+                const downs = data.rows.filter(r => r.cells[col.id]?.direction === "down").length;
+                const noChange = data.rows.filter(r => r.cells[col.id]?.direction === "no_change").length;
+                const total = ups + downs + noChange;
+                const consensus = total > 0 ? Math.round(Math.max(ups, downs) / total * 100) : 0;
+
                 return (
-                  <td key={col.id} className={`${ds.cell} text-center font-medium`}>
-                    {s.up > 0 && <span className="text-green-600">{s.up}↑</span>}
-                    {s.up > 0 && s.down > 0 && <span className="text-gray-300 mx-0.5"> </span>}
-                    {s.down > 0 && <span className="text-red-600">{s.down}↓</span>}
-                    {s.noChange > 0 && <span className="text-gray-400 ml-1">{s.noChange}—</span>}
+                  <td key={col.id} className={`${ds.cell} text-center border-l border-gray-100`}>
+                    {total > 0 ? (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <div className="flex items-center gap-1 text-[10px]">
+                          <span className="text-green-600">↑{ups}</span>
+                          <span className="text-red-600">↓{downs}</span>
+                          <span className="text-gray-400">—{noChange}</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${
+                          consensus >= 80 ? "text-green-700" : consensus >= 60 ? "text-amber-600" : "text-red-600"
+                        }`}>
+                          一致率 {consensus}%
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
                 );
               })}
@@ -776,12 +795,6 @@ export function MechanismMatrix({
                   <span className="italic text-gray-400 line-clamp-2">&ldquo;{cell.evidenceQuote}&rdquo;</span>
                 </div>
               )}
-              {/* 低置信度警告 */}
-              {(cell.evidenceStrength ?? 0) < 40 && (
-                <div className="mt-1.5 pt-1.5 border-t border-amber-700/50 text-amber-300">
-                  ⚠️ 此证据需要验证 (强度: {cell.evidenceStrength}/100)
-                </div>
-              )}
             </div>
           </div>
         );
@@ -807,7 +820,6 @@ export function MechanismMatrix({
           anchorRect={editingCell.anchorRect}
           onSave={handleSaveCell}
           onClose={() => setEditingCell(null)}
-          projectId={projectId}
         />
       )}
 
