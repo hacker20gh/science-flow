@@ -80,9 +80,9 @@ export function calculateEvidenceStrength(opts: {
 
   // 实验方法评分 (0-25)
   if (opts.expMethod) {
-    const method = opts.expMethod.toLowerCase();
-    const goldStandard = ["western blot", "wb", "qpcr", "rt-pcr", "flow cytometry", "facs", "elisa", "immunofluorescence", "if", "confocal"];
-    const goodMethod = ["luciferase", "co-ip", "coimmunoprecipitation", "chip", "pull-down", "mass spec", "sequencing", "rna-seq"];
+    const method = normalizeMethodName(opts.expMethod);
+    const goldStandard = ["western blot", "wb", "qpcr", "rt-pcr", "rt-qpcr", "flow cytometry", "facs", "elisa", "immunofluorescence", "if", "confocal", "immunohistochemistry", "ihc", "immunocytochemistry", "icc"];
+    const goodMethod = ["luciferase", "co-ip", "coimmunoprecipitation", "chip", "pull-down", "mass spec", "mass spectrometry", "sequencing", "rna-seq", "scrnaseq", "atac-seq", "chromatin immunoprecipitation"];
     if (goldStandard.some(m => method.includes(m))) score += 25;
     else if (goodMethod.some(m => method.includes(m))) score += 20;
     else score += 10;
@@ -96,9 +96,17 @@ export function calculateEvidenceStrength(opts: {
     else score += 5;
   }
 
-  // 统计方法评分 (0-15)
+  // 统计方法评分 (0-15 基础 + 10 高级奖励)
   if (opts.statisticalMethod) {
     score += 15;
+    // 高级统计方法额外加分
+    const stat = opts.statisticalMethod.toLowerCase();
+    if (/(?:two-way|multi)\s*(?:anova|factorial)/.test(stat) ||
+        /mixed[\s-]effects?/.test(stat) ||
+        /cox\s*(?:proportional|regression|model)/.test(stat) ||
+        /kaplan[\s-]meier/.test(stat)) {
+      score += 10;
+    }
   }
 
   // 显著性标记评分 (0-5)
@@ -111,6 +119,24 @@ export function calculateEvidenceStrength(opts: {
   }
 
   return Math.min(100, Math.max(0, score));
+}
+
+/**
+ * 归一化实验方法名称（展开常见缩写）
+ */
+function normalizeMethodName(method: string): string {
+  const lower = method.toLowerCase().trim();
+  const ABBREVIATIONS: Record<string, string> = {
+    "wb": "western blot",
+    "ihc": "immunohistochemistry",
+    "icc": "immunocytochemistry",
+    "if": "immunofluorescence",
+    "facs": "flow cytometry",
+    "co-ip": "coimmunoprecipitation",
+    "chip": "chromatin immunoprecipitation",
+    "ms": "mass spectrometry",
+  };
+  return ABBREVIATIONS[lower] || lower;
 }
 
 /**
@@ -158,10 +184,11 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
       const rowId = `${input.paperId}-${i}`;
       const cells: Record<string, MatrixCell> = {};
 
-      // 通路变化 → 列
+      // 通路变化 → 列（归一化名称）
       for (const pe of exp.pathway_effects) {
-        const colId = `pathway:${pe.pathway}`;
-        ensureColumn(allColumns, colId, pe.pathway, "pathway", columnCounts);
+        const normalizedName = normalizePathway(pe.pathway);
+        const colId = `pathway:${normalizedName}`;
+        ensureColumn(allColumns, colId, normalizedName, "pathway", columnCounts);
 
         cells[colId] = {
           direction: pe.direction,
@@ -181,10 +208,11 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         incrementCount(columnCounts, colId);
       }
 
-      // 表型变化 → 列
+      // 表型变化 → 列（归一化名称）
       for (const ph of exp.phenotype_effects) {
-        const colId = `phenotype:${ph.phenotype}`;
-        ensureColumn(allColumns, colId, ph.phenotype, "phenotype", columnCounts);
+        const normalizedName = normalizePhenotype(ph.phenotype);
+        const colId = `phenotype:${normalizedName}`;
+        ensureColumn(allColumns, colId, normalizedName, "phenotype", columnCounts);
 
         cells[colId] = {
           direction: ph.direction,
@@ -222,11 +250,11 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
     (a, b) => b.count - a.count
   );
 
-  // 检测冲突
-  const conflicts = detectConflicts(rows, columns);
+  // 使用智能冲突检测（区分真冲突与可解释差异）
+  const conflicts = detectSmartConflicts(rows, columns);
 
-  // 检测空白
-  const gaps = detectGaps(rows, columns);
+  // 使用智能空白检测（仅标记有意义的空白）
+  const gaps = detectSmartGaps(rows, columns);
 
   return {
     rows,

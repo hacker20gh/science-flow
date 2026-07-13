@@ -4,7 +4,7 @@
  * 将 LLM 返回的原始名称映射到标准名称，
  * 避免 "NF-κB" / "NF-kB" / "NF-kappaB" 产生多列。
  *
- * 策略：精确匹配别名表 + 后缀剥离 + Title Case 兜底
+ * 策略：精确匹配别名表 + 后缀剥离 + 模糊匹配（编辑距离）+ Title Case 兜底
  */
 
 // ===== 通路名称归一化 =====
@@ -250,12 +250,60 @@ const PHENOTYPE_SUFFIXES = [
   " capacity",
 ];
 
+// ===== 模糊匹配工具函数 =====
+
+/**
+ * 计算两个字符串的 Levenshtein 编辑距离
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+
+  return dp[m][n];
+}
+
+/**
+ * 从别名表中找最接近的匹配
+ * 返回匹配的标准名称，或 null 如果没有足够接近的
+ *
+ * @param input 输入名称（小写）
+ * @param aliases 别名表
+ * @param maxDistance 最大允许编辑距离（默认 3）
+ */
+function fuzzyMatch(input: string, aliases: Record<string, string>, maxDistance = 3): string | null {
+  let bestMatch: string | null = null;
+  let bestDistance = maxDistance + 1;
+
+  for (const alias of Object.keys(aliases)) {
+    const dist = levenshteinDistance(input, alias);
+    if (dist < bestDistance) {
+      bestDistance = dist;
+      bestMatch = aliases[alias]; // 返回标准名称
+    }
+  }
+
+  return bestDistance <= maxDistance ? bestMatch : null;
+}
+
 /**
  * 归一化通路名称
  *
  * 1. 精确匹配别名表
  * 2. 剥离常见后缀后重试
- * 3. 兜底：Title Case
+ * 3. 模糊匹配（编辑距离 ≤ 3）
+ * 4. 兜底：Title Case
  */
 export function normalizePathway(raw: string): string {
   if (!raw) return raw;
@@ -272,12 +320,24 @@ export function normalizePathway(raw: string): string {
     }
   }
 
-  // 兜底：Title Case（保持原样但规范化大小写）
+  // 3. 模糊匹配 — 编辑距离 ≤ 3
+  const fuzzyPathwayResult = fuzzyMatch(lower, PATHWAY_ALIASES, 3);
+  if (fuzzyPathwayResult) {
+    console.log(`[Normalize] Fuzzy match pathway: "${raw}" → "${fuzzyPathwayResult}"`);
+    return fuzzyPathwayResult;
+  }
+
+  // 4. 兜底：Title Case（保持原样但规范化大小写）
   return smartTitleCase(raw.trim());
 }
 
 /**
  * 归一化表型名称
+ *
+ * 1. 精确匹配别名表
+ * 2. 剥离常见后缀后重试
+ * 3. 模糊匹配（编辑距离 ≤ 3）
+ * 4. 兜底：Title Case
  */
 export function normalizePhenotype(raw: string): string {
   if (!raw) return raw;
@@ -294,7 +354,14 @@ export function normalizePhenotype(raw: string): string {
     }
   }
 
-  // 兜底
+  // 3. 模糊匹配 — 编辑距离 ≤ 3
+  const fuzzyPhenotypeResult = fuzzyMatch(lower, PHENOTYPE_ALIASES, 3);
+  if (fuzzyPhenotypeResult) {
+    console.log(`[Normalize] Fuzzy match phenotype: "${raw}" → "${fuzzyPhenotypeResult}"`);
+    return fuzzyPhenotypeResult;
+  }
+
+  // 4. 兜底
   return smartTitleCase(raw.trim());
 }
 
