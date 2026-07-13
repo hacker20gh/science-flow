@@ -6,6 +6,7 @@
  */
 
 import { sleep } from "@/lib/utils/sleep";
+import { withRetry } from "@/lib/utils/retry";
 
 const BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
@@ -84,7 +85,9 @@ async function searchIds(
   const email = process.env.NCBI_EMAIL;
   if (email) params.set("email", email);
 
-  const res = await fetch(`${BASE_URL}/esearch.fcgi?${params}`);
+  const res = await fetch(`${BASE_URL}/esearch.fcgi?${params}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) throw new Error(`PubMed search failed: ${res.status}`);
 
   const data = await res.json();
@@ -107,7 +110,9 @@ async function fetchDetails(pmids: string[]): Promise<PubMedPaper[]> {
   const email = process.env.NCBI_EMAIL;
   if (email) params.set("email", email);
 
-  const res = await fetch(`${BASE_URL}/efetch.fcgi?${params}`);
+  const res = await fetch(`${BASE_URL}/efetch.fcgi?${params}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) throw new Error(`PubMed fetch failed: ${res.status}`);
 
   const xml = await res.text();
@@ -197,15 +202,21 @@ function cleanXmlText(text: string): string {
 
 /**
  * 主搜索函数：搜索 + 获取详情
+ * 包含 10s 请求超时 + 2 次重试（指数退避）
  */
 export async function searchPubMed(options: SearchOptions): Promise<PubMedPaper[]> {
-  const { query, maxResults = 20, minYear, maxYear, articleTypes } = options;
+  return withRetry(
+    async () => {
+      const { query, maxResults = 20, minYear, maxYear, articleTypes } = options;
 
-  // 速率控制：PubMed 限制 3 req/s（无 API Key）
-  const pmids = await searchIds(query, maxResults, minYear, maxYear, articleTypes);
-  if (pmids.length === 0) return [];
+      // 速率控制：PubMed 限制 3 req/s（无 API Key）
+      const pmids = await searchIds(query, maxResults, minYear, maxYear, articleTypes);
+      if (pmids.length === 0) return [];
 
-  await sleep(350); // 速率限制
+      await sleep(350); // 速率限制
 
-  return fetchDetails(pmids);
+      return fetchDetails(pmids);
+    },
+    { maxRetries: 2, baseDelay: 1000 }
+  );
 }

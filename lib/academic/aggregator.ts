@@ -8,6 +8,9 @@ import { searchOpenAlex, type OpenAlexPaper } from "./openalex";
 import { findOaPdf } from "./unpaywall";
 import { checkBioRxiv } from "./biorxiv";
 
+/** 聚合搜索全局超时（毫秒） */
+const AGGREGATOR_TIMEOUT = 15_000;
+
 export interface UnifiedPaper {
   pmid: string | null;
   doi: string | null;
@@ -62,17 +65,43 @@ export async function aggregateSearch(
   } = options;
 
   // 并行搜索 3 个数据库，每个用最适合的查询
-  const [pubmedResults, s2Results, openalexResults] = await Promise.allSettled([
-    searchPubMed({ query: pubmedQuery || query, maxResults, minYear, maxYear, articleTypes }),
-    searchSemanticScholar({
-      query: s2Query || query,
-      maxResults,
-      minYear,
-      maxYear,
-      minCitationCount,
-    }),
-    searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear }),
+  // 全局 15 秒超时：超时后返回已完成源的 partial results
+  const pubmedPromise = searchPubMed({ query: pubmedQuery || query, maxResults, minYear, maxYear, articleTypes });
+  const s2Promise = searchSemanticScholar({
+    query: s2Query || query,
+    maxResults,
+    minYear,
+    maxYear,
+    minCitationCount,
+  });
+  const openalexPromise = searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear });
+
+  // 独立追踪每个 promise 的结果
+  const results: Array<PromiseSettledResult<PubMedPaper[] | S2Paper[] | OpenAlexPaper[]> | null> = [null, null, null];
+  const tracked = [
+    pubmedPromise.then((v) => { results[0] = { status: "fulfilled", value: v }; return v; }),
+    s2Promise.then((v) => { results[1] = { status: "fulfilled", value: v }; return v; }),
+    openalexPromise.then((v) => { results[2] = { status: "fulfilled", value: v }; return v; }),
+  ];
+
+  // 等全部完成或超时
+  await Promise.race([
+    Promise.allSettled(tracked),
+    new Promise<void>((resolve) => setTimeout(resolve, AGGREGATOR_TIMEOUT)),
   ]);
+
+  // 将未完成的 promise 标记为 rejected（后续取值时会 fallback 到空数组）
+  for (let i = 0; i < results.length; i++) {
+    if (!results[i]) {
+      results[i] = { status: "rejected", reason: new Error("timeout") };
+    }
+  }
+
+  const [pubmedResults, s2Results, openalexResults] = results as [
+    PromiseSettledResult<PubMedPaper[]>,
+    PromiseSettledResult<S2Paper[]>,
+    PromiseSettledResult<OpenAlexPaper[]>,
+  ];
 
   const pubmedPapers =
     pubmedResults.status === "fulfilled" ? pubmedResults.value : [];

@@ -58,13 +58,19 @@ export async function searchOpenAlex(
     ].join(","),
   });
 
+  // OpenAlex polite pool: 带 mailto 参数可获得更快的响应和更低的限流
+  const email = process.env.OPENALEX_EMAIL || process.env.NCBI_EMAIL;
+  if (email) params.set("mailto", email);
+
   if (minYear || maxYear) {
     const from = minYear || 0;
     const to = maxYear || new Date().getFullYear();
     params.set("filter", `publication_year:${from}-${to}`);
   }
 
-  const res = await fetch(`${BASE_URL}/works?${params}`);
+  const res = await fetch(`${BASE_URL}/works?${params}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) throw new Error(`OpenAlex search failed: ${res.status}`);
 
   const data = await res.json();
