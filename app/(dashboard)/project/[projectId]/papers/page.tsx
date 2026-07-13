@@ -222,6 +222,7 @@ export default function PapersPage() {
             paperId: p.id,
             title: p.title,
             abstract: p.abstract,
+            fullText: p.fullText || undefined,
           })),
         }),
       });
@@ -256,7 +257,7 @@ export default function PapersPage() {
       }
       clearSelection();
       toast.success("批量提取完成", {
-        description: `成功提取 ${finalData?.summary?.success || 0} 篇文献的实验数据`,
+        description: `成功 ${finalData?.summary?.success || 0} 篇${finalData?.summary?.empty ? `，${finalData.summary.empty} 篇提取为空（可能仅含摘要）` : ""}${finalData?.summary?.errors ? `，${finalData.summary.errors} 篇失败` : ""}`,
       });
     } catch {
       toast.error("批量提取失败", { description: "请稍后重试" });
@@ -681,7 +682,7 @@ function PaperCard({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          papers: [{ paperId: paper.id, title: paper.title, abstract: paper.abstract }],
+          papers: [{ paperId: paper.id, title: paper.title, abstract: paper.abstract, fullText: paper.fullText || undefined }],
         }),
       });
       if (!res.ok) throw new Error("提取请求失败");
