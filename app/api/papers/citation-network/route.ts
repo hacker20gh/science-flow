@@ -16,17 +16,37 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { paperIds, maxResults = 30 } = body;
+    const { paperIds = [], dois = [], maxResults = 30 } = body;
 
-    if (!paperIds || !Array.isArray(paperIds) || paperIds.length === 0) {
+    if (paperIds.length === 0 && dois.length === 0) {
       return NextResponse.json(
-        { error: "paperIds array is required" },
+        { error: "paperIds or dois array is required" },
         { status: 400 }
       );
     }
 
+    // 通过 DOI 解析 S2 ID（如果有 dois 但没有 paperIds）
+    let allIds = [...paperIds];
+    if (dois.length > 0 && allIds.length < 5) {
+      const doisToResolve = dois.slice(0, 5 - allIds.length);
+      for (const doi of doisToResolve) {
+        try {
+          const s2Res = await fetch(
+            `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(doi)}?fields=paperId`,
+            { signal: AbortSignal.timeout(8000) }
+          );
+          if (s2Res.ok) {
+            const data = await s2Res.json();
+            if (data?.paperId) allIds.push(data.paperId);
+          }
+        } catch {
+          // 忽略单个 DOI 解析失败
+        }
+      }
+    }
+
     // 限制种子论文数量
-    const seedIds = paperIds.slice(0, 5);
+    const seedIds = allIds.slice(0, 5);
     const perSeedLimit = 15;
 
     // 并行获取每篇种子论文的引用和被引
@@ -84,6 +104,7 @@ export async function POST(req: NextRequest) {
       total: papers.length,
       papers,
       seedCount: seedIds.length,
+      resolvedIds: seedIds.length,
     });
   } catch (error) {
     console.error("Citation network error:", error);

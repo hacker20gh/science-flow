@@ -7,6 +7,7 @@ import { searchSemanticScholar, type S2Paper } from "./semantic-scholar";
 import { searchOpenAlex, type OpenAlexPaper } from "./openalex";
 import { findOaPdf } from "./unpaywall";
 import { checkBioRxiv } from "./biorxiv";
+import { getCachedOA, setCachedOA } from "@/lib/cache";
 
 /** 聚合搜索全局超时（毫秒） */
 const AGGREGATOR_TIMEOUT = 15_000;
@@ -154,11 +155,19 @@ export async function enrichWithOa(
 
   await parallelLimit(needOa.slice(0, 50), 5, async (paper) => {
     try {
+      // 检查 OA 缓存
+      const cached = getCachedOA(paper.doi!);
+      if (cached) {
+        paper.isOpenAccess = cached.isOpenAccess;
+        paper.oaPdfUrl = cached.oaPdfUrl;
+        return;
+      }
       const oa = await findOaPdf(paper.doi!);
       paper.isOpenAccess = oa.isOpenAccess;
       paper.oaUrl = oa.bestOaUrl;
       paper.oaPdfUrl = oa.bestOaPdfUrl;
       paper.oaStatus = oa.oaStatus;
+      setCachedOA(paper.doi!, { isOpenAccess: oa.isOpenAccess, oaPdfUrl: oa.bestOaPdfUrl });
     } catch {
       // ignore
     }

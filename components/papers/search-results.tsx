@@ -63,6 +63,24 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   // 客户端排序
   const [sortBy, setSortBy] = useState<"relevance" | "citation" | "date">("relevance");
 
+  // 期刊指标
+  const [journalMetrics, setJournalMetrics] = useState<Record<string, { impactFactor: number | null; jcrQuartile: string | null; casZone: string | null; isWarning: boolean }>>({});
+
+  // 获取期刊指标
+  useEffect(() => {
+    const journals = [...new Set(papers.map(p => p.journal).filter(Boolean))];
+    if (journals.length === 0) return;
+
+    fetch("/api/journal-metrics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ journals }),
+    })
+      .then(r => r.json())
+      .then(data => { if (data.metrics) setJournalMetrics(data.metrics); })
+      .catch(() => {});
+  }, [papers]);
+
   // 客户端分页
   const [currentPage, setCurrentPage] = useState(0);
   const PAGE_SIZE = pageSize ?? 20;
@@ -435,6 +453,44 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
 
                   {/* 标签栏 */}
                   <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                    {/* 期刊指标 */}
+                    {journalMetrics[paper.journal] && (
+                      <>
+                        {journalMetrics[paper.journal].jcrQuartile && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                            journalMetrics[paper.journal].jcrQuartile === "Q1"
+                              ? "bg-amber-50 text-amber-700 border border-amber-200"
+                              : journalMetrics[paper.journal].jcrQuartile === "Q2"
+                                ? "bg-blue-50 text-blue-600 border border-blue-200"
+                                : "bg-gray-100 text-gray-500 border border-gray-200"
+                          }`}>
+                            {journalMetrics[paper.journal].jcrQuartile}
+                          </span>
+                        )}
+                        {journalMetrics[paper.journal].casZone && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            journalMetrics[paper.journal].casZone === "1区"
+                              ? "bg-red-50 text-red-600"
+                              : journalMetrics[paper.journal].casZone === "2区"
+                                ? "bg-orange-50 text-orange-600"
+                                : "bg-gray-100 text-gray-500"
+                          }`}>
+                            中科院{journalMetrics[paper.journal].casZone}
+                          </span>
+                        )}
+                        {journalMetrics[paper.journal].impactFactor && journalMetrics[paper.journal].impactFactor! > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-600">
+                            IF {journalMetrics[paper.journal].impactFactor}
+                          </span>
+                        )}
+                        {journalMetrics[paper.journal].isWarning && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+                            ⚠ 预警
+                          </span>
+                        )}
+                      </>
+                    )}
+
                     {/* 年份 */}
                     {paper.year > 0 && (
                       <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">

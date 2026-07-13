@@ -43,3 +43,15 @@ export class SearchCache<T = unknown> {
 const g = globalThis as unknown as { __searchCacheInstance?: SearchCache };
 export const searchResultCache: SearchCache =
   g.__searchCacheInstance ??= new SearchCache();
+
+/** OA enrichment 缓存（按 DOI，24 小时 TTL） */
+const oaCache = new SearchCache<{ isOpenAccess: boolean; oaPdfUrl: string | null }>();
+const OA_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+export function getCachedOA(doi: string) {
+  return oaCache.get(`oa:${doi}`);
+}
+
+export function setCachedOA(doi: string, data: { isOpenAccess: boolean; oaPdfUrl: string | null }) {
+  oaCache.set(`oa:${doi}`, data, OA_CACHE_TTL);
+}
