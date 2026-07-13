@@ -3,21 +3,10 @@ import { auth } from "@/lib/auth";
 import { aggregateSearch, enrichWithOa, enrichWithBioRxiv, deduplicate, type UnifiedPaper } from "@/lib/academic/aggregator";
 import { preprocessQuery, fastPreprocess } from "@/lib/llm/query-preprocessor";
 import { prisma } from "@/lib/db-server";
+import { SearchCache } from "@/lib/cache";
 
-// 30 分钟结果缓存，带自动清理
-const resultCache = new Map<string, { data: unknown; ts: number }>();
 const RESULT_CACHE_TTL = 30 * 60 * 1000;
-
-// 每 5 分钟清理过期缓存（HMR-safe 防止重复注册）
-const gSearch = globalThis as unknown as { __searchCacheCleanup?: ReturnType<typeof setInterval> };
-if (!gSearch.__searchCacheCleanup) {
-  gSearch.__searchCacheCleanup = setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of resultCache) {
-      if (now - entry.ts >= RESULT_CACHE_TTL) resultCache.delete(key);
-    }
-  }, 5 * 60 * 1000);
-}
+const resultCache = new SearchCache();
 
 function getCacheKey(body: Record<string, unknown>): string {
   return JSON.stringify({ q: body.query, m: body.maxResults, mi: body.minYear, ma: body.maxYear, c: body.minCitationCount, s: body.sortBy, t: body.articleTypes, o: body.onlyOpenAccess, f: body.fastMode });
@@ -54,9 +43,9 @@ export async function POST(req: NextRequest) {
     // 缓存命中检查
     const cacheKey = getCacheKey(body);
     const cached = resultCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < RESULT_CACHE_TTL) {
+    if (cached) {
       console.log("[Search] 缓存命中");
-      return NextResponse.json(cached.data);
+      return NextResponse.json(cached);
     }
 
     // 1. LLM 预处理：自然语言 → 优化的英文搜索查询（快速模式跳过 LLM）
@@ -224,7 +213,7 @@ export async function POST(req: NextRequest) {
     };
 
     // 写入结果缓存
-    resultCache.set(cacheKey, { data: responseData, ts: Date.now() });
+    resultCache.set(cacheKey, responseData, RESULT_CACHE_TTL);
 
     return NextResponse.json(responseData);
   } catch (error) {
