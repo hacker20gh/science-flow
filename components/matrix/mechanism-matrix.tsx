@@ -45,27 +45,60 @@ function SortableColumnHeader({
   col,
   hasConflict,
   ds,
+  width,
+  onResize,
 }: {
   col: MatrixColumn;
   hasConflict: boolean;
   ds: { header: string };
+  width?: number;
+  onResize?: (colId: string, newWidth: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: col.id,
   });
+
+  const resizeRef = useRef<HTMLDivElement>(null);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
     position: "relative",
+    width: width,
+    minWidth: width,
   };
+
+  // 拖拽调整列宽
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = width || 110;
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const newWidth = Math.max(60, Math.min(400, startWidth + delta));
+      onResize?.(col.id, newWidth);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [col.id, width, onResize]);
 
   return (
     <th
       ref={setNodeRef}
       style={style}
-      className={`${ds.header} text-center font-semibold min-w-[110px] border-b-2 group ${
+      className={`${ds.header} text-center font-semibold border-b-2 group relative ${
         hasConflict
           ? "border-b-amber-400 bg-amber-50"
           : "border-b-gray-200 bg-gradient-to-b from-gray-50 to-gray-100"
@@ -100,6 +133,14 @@ function SortableColumnHeader({
       <div className="text-[10px] text-gray-400 font-normal">
         {col.type === "pathway" ? "通路" : "表型"} · {col.count} 篇
       </div>
+
+      {/* 列宽调整把手 — 右边缘 */}
+      <div
+        ref={resizeRef}
+        onMouseDown={handleResizeStart}
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400/40 transition-colors z-10"
+        title="拖拽调整列宽"
+      />
     </th>
   );
 }
@@ -144,6 +185,8 @@ export function MechanismMatrix({
 
   const [filterType, setFilterType] = useState<"all" | "pathway" | "phenotype">("all");
   const [density, setDensity] = useState<Density>("comfortable");
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const DEFAULT_COL_WIDTH = 110;
   const [showConflicts, setShowConflicts] = useState(true);
   const [data, setData] = useState<MatrixData>(initialData);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
@@ -273,6 +316,11 @@ export function MechanismMatrix({
   }
 
   /* ---------- Column Drag End ---------- */
+  // 列宽调整
+  function handleColumnResize(colId: string, newWidth: number) {
+    setColumnWidths((prev) => ({ ...prev, [colId]: newWidth }));
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -513,6 +561,8 @@ export function MechanismMatrix({
                       col={col}
                       hasConflict={isConflictColumn(col.id)}
                       ds={ds}
+                      width={columnWidths[col.id] || DEFAULT_COL_WIDTH}
+                      onResize={handleColumnResize}
                     />
                   ))}
                 </SortableContext>
@@ -597,6 +647,7 @@ export function MechanismMatrix({
                           }}
                           onMouseLeave={() => setHoveredCell(null)}
                           title={undefined}
+                          style={{ width: columnWidths[col.id] || DEFAULT_COL_WIDTH, minWidth: columnWidths[col.id] || DEFAULT_COL_WIDTH }}
                           className={`
                             ${ds.cell} text-center cursor-pointer transition-all relative group
                             ${isEmpty
@@ -683,7 +734,7 @@ export function MechanismMatrix({
                 const consensus = total > 0 ? Math.round(Math.max(ups, downs) / total * 100) : 0;
 
                 return (
-                  <td key={col.id} className={`${ds.cell} text-center border-l border-gray-100`}>
+                  <td key={col.id} style={{ width: columnWidths[col.id] || DEFAULT_COL_WIDTH }} className={`${ds.cell} text-center border-l border-gray-100`}>
                     {total > 0 ? (
                       <div className="flex flex-col items-center gap-0.5">
                         <div className="flex items-center gap-1 text-[10px]">
