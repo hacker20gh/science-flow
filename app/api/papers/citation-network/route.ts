@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 通过 DOI 解析 S2 ID（如果有 dois 但没有 paperIds）
-    let allIds = [...paperIds];
+    const allIds = [...paperIds];
     if (dois.length > 0 && allIds.length < 5) {
       const doisToResolve = dois.slice(0, 5 - allIds.length);
       for (const doi of doisToResolve) {
