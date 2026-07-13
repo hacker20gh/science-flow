@@ -345,6 +345,7 @@ model MechanismMatrix {
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   data      Json     // MatrixData 的 JSON 序列化（rows, columns, conflicts, gaps）
+  analysisReport Json? // 缓存的文献分析报告（LLM 生成）
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
