@@ -134,9 +134,12 @@ export function AnalysisReportPanel({
   return (
     <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl overflow-hidden">
       {/* 标题栏 */}
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-indigo-100/30 transition-colors"
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded(!expanded); }}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-indigo-100/30 transition-colors cursor-pointer"
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-indigo-800">
           <FileText size={16} className="text-indigo-600" />
@@ -166,7 +169,7 @@ export function AnalysisReportPanel({
             <ChevronDown size={14} />
           )}
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="px-4 pb-4 space-y-4">
