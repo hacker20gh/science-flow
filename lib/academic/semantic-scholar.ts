@@ -62,7 +62,17 @@ interface SearchOptions {
   minYear?: number;
   maxYear?: number;
   minCitationCount?: number;
+  articleTypes?: string[];
 }
+
+/** SciFlow 文献类型 → S2 publicationTypes 参数 */
+const S2_TYPE_FILTER_MAP: Record<string, string> = {
+  "journal-article": "JournalArticle",
+  "review": "Review",
+  "meta-analysis": "MetaAnalysis",
+  "clinical-trial": "ClinicalTrial",
+  "preprint": "Review", // S2 无 Preprint 类型，用 Review 近似
+};
 
 const FIELDS = [
   "title",
@@ -92,6 +102,7 @@ export async function searchSemanticScholar(
     minYear,
     maxYear,
     minCitationCount,
+    articleTypes,
   } = options;
 
   return withRetry(async () => {
@@ -101,8 +112,23 @@ export async function searchSemanticScholar(
       fields: FIELDS,
     });
 
-    if (minYear) params.set("year", `${minYear}-${maxYear || new Date().getFullYear()}`);
+    // 年份过滤：S2 的 year 参数格式为 "start-end"，任一端存在即可
+    if (minYear || maxYear) {
+      const from = minYear || 1900;
+      const to = maxYear || new Date().getFullYear();
+      params.set("year", `${from}-${to}`);
+    }
     if (minCitationCount) params.set("minCitationCount", String(minCitationCount));
+
+    // 文献类型过滤
+    if (articleTypes && articleTypes.length > 0) {
+      const s2Types = articleTypes
+        .map((t) => S2_TYPE_FILTER_MAP[t])
+        .filter(Boolean);
+      if (s2Types.length > 0) {
+        params.set("publicationTypes", s2Types.join(","));
+      }
+    }
 
     // 429 特殊处理：S2 限流窗口较长，强制等 5 秒
     const res = await fetch(`${BASE_URL}/paper/search?${params}`, {

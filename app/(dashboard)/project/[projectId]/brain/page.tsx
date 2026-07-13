@@ -373,7 +373,7 @@ export default function BrainPage() {
         </div>
         {useDemo && (
           <a
-            href="papers/search"
+            href={`/project/${projectId}/papers/search`}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1.5"
           >
             <Search size={14} />

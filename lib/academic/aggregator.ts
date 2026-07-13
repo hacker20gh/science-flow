@@ -73,8 +73,9 @@ export async function aggregateSearch(
     minYear,
     maxYear,
     minCitationCount,
+    articleTypes,
   });
-  const openalexPromise = searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear });
+  const openalexPromise = searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear, articleTypes });
 
   // 独立追踪每个 promise 的结果
   const results: Array<PromiseSettledResult<PubMedPaper[] | S2Paper[] | OpenAlexPaper[]> | null> = [null, null, null];
@@ -118,10 +119,16 @@ export async function aggregateSearch(
 
   const deduped = deduplicate(unified);
 
-  // 排序
-  sortPapers(deduped, sortBy);
+  // 后置过滤：跨所有源统一应用引用数过滤（源级过滤可能不完整）
+  let filtered = deduped;
+  if (minCitationCount && minCitationCount > 0) {
+    filtered = deduped.filter((p) => (p.citationCount || 0) >= minCitationCount);
+  }
 
-  return deduped;
+  // 排序
+  sortPapers(filtered, sortBy);
+
+  return filtered;
 }
 
 /**
