@@ -116,6 +116,7 @@ export default function ProjectPaperSearchPage() {
     status: "pending" | "running" | "done" | "error";
     experiments: number;
     error?: string;
+    suggestModelSwitch?: boolean;
   }>>([]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -391,8 +392,13 @@ export default function ProjectPaperSearchPage() {
             // 单篇完成，更新进度
             setExtractionDetails((prev) => prev.map((item, i) => {
               if (i === d.completed! - 1) {
-                const single = d.single as { extraction?: { experiments?: unknown[] } };
-                return { ...item, status: single.extraction ? "done" as const : "error" as const, experiments: single.extraction?.experiments?.length || 0 };
+                const single = d.single as { extraction?: { experiments?: unknown[] }; suggestModelSwitch?: boolean };
+                return {
+                  ...item,
+                  status: single.extraction?.experiments?.length ? "done" as const : "error" as const,
+                  experiments: single.extraction?.experiments?.length || 0,
+                  suggestModelSwitch: single.suggestModelSwitch,
+                };
               }
               return item;
             }));
@@ -410,13 +416,14 @@ export default function ProjectPaperSearchPage() {
 
       // 更新进度详情
       setExtractionDetails((prev) => prev.map((d, i) => {
-        const result = (results as Array<{ extraction?: { experiments?: unknown[] }; error?: string }>)?.[i];
+        const result = (results as Array<{ extraction?: { experiments?: unknown[] }; error?: string; suggestModelSwitch?: boolean }>)?.[i];
         if (!result) return d;
         return {
           ...d,
-          status: result.extraction ? "done" as const : "error" as const,
+          status: result.extraction?.experiments?.length ? "done" as const : "error" as const,
           experiments: result.extraction?.experiments?.length || 0,
           error: result.error,
+          suggestModelSwitch: result.suggestModelSwitch,
         };
       }));
 
@@ -568,6 +575,14 @@ export default function ProjectPaperSearchPage() {
               </div>
             ))}
           </div>
+
+          {/* 模型切换提示 */}
+          {doneCount >= extractionDetails.length && extractionDetails.some(d => d.suggestModelSwitch) && (
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              <p className="font-medium mb-1">💡 {extractionDetails.filter(d => d.suggestModelSwitch).length} 篇论文提取失败</p>
+              <p>当前模型可能不适合这些论文。可以尝试在<strong>设置</strong>中切换到更强的模型后重新提取。</p>
+            </div>
+          )}
 
           <p className="text-xs text-gray-400">这可能需要 1-2 分钟，PDF 全文提取会更准确</p>
         </div>

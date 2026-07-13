@@ -170,8 +170,14 @@ export async function POST(req: NextRequest) {
             if (extraction.experiments.length === 0) {
               const warning = text.length < 500
                 ? "文本过短（仅摘要），缺少实验细节"
-                : "LLM 未提取到实验数据";
-              const result = { paperId: paper.paperId, title: paper.title, extraction, error: `提取结果为空：${warning}` };
+                : "LLM 未提取到实验数据（已尝试3种不同策略）";
+              const result = {
+                paperId: paper.paperId,
+                title: paper.title,
+                extraction,
+                error: `提取结果为空：${warning}`,
+                suggestModelSwitch: true,
+              };
               results.push(result);
               emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
             } else {
