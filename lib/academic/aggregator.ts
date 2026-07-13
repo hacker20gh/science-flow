@@ -75,7 +75,7 @@ export async function aggregateSearch(
     minCitationCount,
     articleTypes,
   });
-  const openalexPromise = searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear, articleTypes });
+  const openalexPromise = searchOpenAlex({ query: openAlexQuery || query, maxResults, minYear, maxYear, articleTypes, minCitationCount });
 
   // 独立追踪每个 promise 的结果
   const results: Array<PromiseSettledResult<PubMedPaper[] | S2Paper[] | OpenAlexPaper[]> | null> = [null, null, null];
@@ -119,16 +119,10 @@ export async function aggregateSearch(
 
   const deduped = deduplicate(unified);
 
-  // 后置过滤：跨所有源统一应用引用数过滤（源级过滤可能不完整）
-  let filtered = deduped;
-  if (minCitationCount && minCitationCount > 0) {
-    filtered = deduped.filter((p) => (p.citationCount || 0) >= minCitationCount);
-  }
+  // 排序：如果有引用数过滤，满足条件的排前面，其余排后面（不删除）
+  sortPapers(deduped, sortBy, minCitationCount);
 
-  // 排序
-  sortPapers(filtered, sortBy);
-
-  return filtered;
+  return deduped;
 }
 
 /**
@@ -222,6 +216,25 @@ export async function enrichWithBioRxiv(
 }
 
 function sortPapers(
+  papers: UnifiedPaper[],
+  sortBy: SearchOptions["sortBy"],
+  minCitationCount?: number
+): void {
+  // 如果有引用数过滤，先按"是否满足阈值"分组（满足的排前面）
+  // 再在每组内按 sortBy 排序
+  if (minCitationCount && minCitationCount > 0) {
+    const meetsThreshold = papers.filter((p) => (p.citationCount || 0) >= minCitationCount);
+    const belowThreshold = papers.filter((p) => (p.citationCount || 0) < minCitationCount);
+    sortGroup(meetsThreshold, sortBy);
+    sortGroup(belowThreshold, sortBy);
+    papers.length = 0;
+    papers.push(...meetsThreshold, ...belowThreshold);
+  } else {
+    sortGroup(papers, sortBy);
+  }
+}
+
+function sortGroup(
   papers: UnifiedPaper[],
   sortBy: SearchOptions["sortBy"]
 ): void {

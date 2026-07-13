@@ -31,6 +31,7 @@ interface SearchOptions {
   minYear?: number;
   maxYear?: number;
   articleTypes?: string[];
+  minCitationCount?: number;
 }
 
 /** SciFlow 文献类型 → OpenAlex type filter 值 */
@@ -48,7 +49,7 @@ const OPENALEX_TYPE_FILTER_MAP: Record<string, string> = {
 export async function searchOpenAlex(
   options: SearchOptions
 ): Promise<OpenAlexPaper[]> {
-  const { query, maxResults = 20, minYear, maxYear, articleTypes } = options;
+  const { query, maxResults = 20, minYear, maxYear, articleTypes, minCitationCount } = options;
 
   const params = new URLSearchParams({
     search: query,
@@ -88,6 +89,10 @@ export async function searchOpenAlex(
       // OpenAlex type filter 用 OR 逻辑（竖线分隔）
       filters.push(`type:${openAlexTypes.join("|")}`);
     }
+  }
+  // 引用数过滤（OpenAlex 原生支持）
+  if (minCitationCount && minCitationCount > 0) {
+    filters.push(`cited_by_count:>${minCitationCount}`);
   }
   if (filters.length > 0) {
     params.set("filter", filters.join(","));
