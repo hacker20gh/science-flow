@@ -370,6 +370,18 @@ export interface DBExtraction {
     direction: string;
     fold_change?: string | null;
   }> | null;
+  // 关系型数据（新增，优先使用）
+  pathwayEffectsRelational?: Array<{
+    pathway: string;
+    direction: string;
+    significance?: string | null;
+    method?: string | null;
+  }> | null;
+  phenotypeEffectsRelational?: Array<{
+    phenotype: string;
+    direction: string;
+    foldChange?: string | null;
+  }> | null;
   method: string | null;
   expMethod: string | null;
   sampleSize: number | null;
@@ -397,9 +409,12 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
 
     const cells: Record<string, MatrixCell> = {};
 
-    // 通路效果 → 列（使用 normalize 归一化名称）
-    if (ext.pathwayEffects) {
-      for (const pe of ext.pathwayEffects) {
+    // 通路效果 → 列（优先关系型数据，回退 JSON）
+    const pathwayData = ext.pathwayEffectsRelational?.length
+      ? ext.pathwayEffectsRelational
+      : ext.pathwayEffects;
+    if (pathwayData) {
+      for (const pe of pathwayData) {
         const normalizedName = normalizePathway(pe.pathway);
         const colId = `pathway:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "pathway", columnCounts);
@@ -426,9 +441,12 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
       }
     }
 
-    // 表型效果 → 列（使用 normalize 归一化名称）
-    if (ext.phenotypeEffects) {
-      for (const ph of ext.phenotypeEffects) {
+    // 表型效果 → 列（优先关系型数据，回退 JSON）
+    const phenotypeData = ext.phenotypeEffectsRelational?.length
+      ? ext.phenotypeEffectsRelational
+      : ext.phenotypeEffects;
+    if (phenotypeData) {
+      for (const ph of phenotypeData) {
         const normalizedName = normalizePhenotype(ph.phenotype);
         const colId = `phenotype:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "phenotype", columnCounts);
@@ -437,7 +455,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
           direction: ph.direction as "up" | "down" | "no_change" | null,
           significance: null,
           method: null,
-          detail: ph.fold_change || "",
+          detail: String((ph as Record<string, unknown>).foldChange || (ph as Record<string, unknown>).fold_change || ""),
           paperTitle: ext.paper.title,
           evidenceQuote: ext.rawText || ext.conclusion || "",
           experimentIndex: 0,

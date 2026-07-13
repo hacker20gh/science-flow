@@ -113,8 +113,12 @@ model Extraction {
   rawText      String?  // 原文片段（用于溯源）
 
   // 完整的通路/表型效应（多值）
-  pathwayEffects  Json?   // [{ pathway, direction, significance, method }]
-  phenotypeEffects Json?  // [{ phenotype, direction, fold_change }]
+  pathwayEffects  Json?   // [{ pathway, direction, significance, method }] — 向后兼容
+  phenotypeEffects Json?  // [{ phenotype, direction, fold_change }] — 向后兼容
+
+  // 关系型存储（新增，支持跨论文聚合查询）
+  pathwayEffectsRelational  PathwayEffect[]
+  phenotypeEffectsRelational PhenotypeEffect[]
 
   controls   Json?     // 对照组列表 ["Vehicle", "TNF-α positive"]
   sampleSize Int?      // 样本量（生物学重复数）
@@ -125,6 +129,37 @@ model Extraction {
 
   @@index([paperId])
   @@index([verified])
+}
+
+// ===== 关系型通路/表型效果（支持跨论文聚合查询） =====
+
+model PathwayEffect {
+  id           String    @id @default(cuid())
+  extractionId String
+  extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+
+  pathway      String    // 归一化后的标准名（如 NF-κB）
+  direction    String    // up, down, no_change
+  significance String?   // p<0.01 等
+  method       String?   // Western blot 等实验方法
+
+  @@index([extractionId])
+  @@index([pathway])
+  @@index([direction])
+}
+
+model PhenotypeEffect {
+  id           String    @id @default(cuid())
+  extractionId String
+  extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+
+  phenotype    String    // 归一化后的标准名（如 Apoptosis）
+  direction    String    // up, down, no_change
+  foldChange   String?   // 2.5-fold 等
+
+  @@index([extractionId])
+  @@index([phenotype])
+  @@index([direction])
 }
 
 // ===== 假设 =====

@@ -4,7 +4,7 @@ import path from "path";
 import { auth } from "@/lib/auth";
 import { extractFromText, smartTruncate } from "@/lib/llm/extraction";
 import { prisma } from "@/lib/db-server";
-import { mapExtractionToDB } from "@/lib/extraction-mapper";
+import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
@@ -52,9 +52,35 @@ export async function POST(req: NextRequest) {
         if (paper) {
           await prisma.$transaction(async (tx: any) => {
             for (const exp of extraction.experiments) {
-              await tx.extraction.create({
+              const record = await tx.extraction.create({
                 data: mapExtractionToDB(exp, paperId),
               });
+
+              // 创建关联的关系型通路/表型效果
+              const { pathwayEffects, phenotypeEffects } = extractRelationalEffects(exp);
+
+              if (pathwayEffects.length > 0) {
+                await tx.pathwayEffect.createMany({
+                  data: pathwayEffects.map(pe => ({
+                    extractionId: record.id,
+                    pathway: pe.pathway,
+                    direction: pe.direction,
+                    significance: pe.significance,
+                    method: pe.method,
+                  })),
+                });
+              }
+
+              if (phenotypeEffects.length > 0) {
+                await tx.phenotypeEffect.createMany({
+                  data: phenotypeEffects.map(ph => ({
+                    extractionId: record.id,
+                    phenotype: ph.phenotype,
+                    direction: ph.direction,
+                    foldChange: ph.foldChange,
+                  })),
+                });
+              }
             }
 
             await tx.timelineEvent.create({
