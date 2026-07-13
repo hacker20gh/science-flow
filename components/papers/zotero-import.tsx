@@ -137,7 +137,7 @@ export default function ZoteroImport({ projectId, onClose, onImported }: ZoteroI
   // ===== 未配置 =====
   if (!configured) {
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose} onKeyDown={(e) => e.key === 'Escape' && onClose()} role="dialog" aria-modal="true" tabIndex={-1}>
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
           <h3 className="text-lg font-semibold mb-4">📥 从 Zotero 导入</h3>
           <div className="text-center py-8">
@@ -156,7 +156,7 @@ export default function ZoteroImport({ projectId, onClose, onImported }: ZoteroI
   // ===== 导入成功 =====
   if (importResult) {
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose} onKeyDown={(e) => e.key === 'Escape' && onClose()} role="dialog" aria-modal="true" tabIndex={-1}>
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
           <h3 className="text-lg font-semibold mb-4">📥 导入完成</h3>
           <div className="text-center py-6">
@@ -176,7 +176,7 @@ export default function ZoteroImport({ projectId, onClose, onImported }: ZoteroI
 
   // ===== 主界面：左侧库列表 + 右侧文献列表 =====
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose} onKeyDown={(e) => e.key === 'Escape' && onClose()} role="dialog" aria-modal="true" tabIndex={-1}>
       <div
         className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}

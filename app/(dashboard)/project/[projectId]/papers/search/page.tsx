@@ -83,6 +83,10 @@ export default function ProjectPaperSearchPage() {
   const [showQueryDetails, setShowQueryDetails] = useState(false);
   const [historySearchQuery, setHistorySearchQuery] = useState("");
 
+  // Last search params for retry
+  const [lastSearchQuery, setLastSearchQuery] = useState<string | null>(null);
+  const [lastSearchOptions, setLastSearchOptions] = useState<SearchOptions | null>(null);
+
   // 搜索历史
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -175,6 +179,8 @@ export default function ProjectPaperSearchPage() {
     setIsFromCache(false);
     setCachedQuery(null);
     setCachedParams(null);
+    setLastSearchQuery(query);
+    setLastSearchOptions(options);
     setView("search");
 
     try {
@@ -187,6 +193,15 @@ export default function ProjectPaperSearchPage() {
       const data = await res.json();
       setResults(data);
       loadHistory();
+
+      // Partial source failure notification
+      const failedSources: string[] = [];
+      if (data.sources?.pubmed === 0 && data.total > 0) failedSources.push('PubMed');
+      if (data.sources?.semanticScholar === 0 && data.total > 0) failedSources.push('Semantic Scholar');
+      if (data.sources?.openAlex === 0 && data.total > 0) failedSources.push('OpenAlex');
+      if (failedSources.length > 0 && failedSources.length < 3) {
+        toast.warning(`${failedSources.join('、')} 暂时不可用，显示的结果来自其他数据源`);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "搜索失败");
     } finally {
@@ -247,7 +262,12 @@ export default function ProjectPaperSearchPage() {
   }
 
   async function handleSelect(papers: Paper[]) {
-    setSelectedPapers(papers);
+    // Extraction limit warning
+    if (papers.length > 10) {
+      toast.warning('每次最多提取 10 篇文献，将只提取前 10 篇');
+    }
+    const papersToExtract = papers.slice(0, 10);
+    setSelectedPapers(papersToExtract);
 
     // 1. 保存论文到 DB（批量）
     const dbIdMap = new Map<string, string>();
@@ -256,7 +276,7 @@ export default function ProjectPaperSearchPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          papers: papers.map((p) => ({
+          papers: papersToExtract.map((p) => ({
             title: p.title,
             doi: p.doi || null,
             pmid: p.pmid || null,
@@ -284,7 +304,7 @@ export default function ProjectPaperSearchPage() {
     } catch { /* fallback: papers will use searchId as paperId */ }
 
     // 1b. 加入 store
-    const stored: StoredPaper[] = papers.map((p) => {
+    const stored: StoredPaper[] = papersToExtract.map((p) => {
       const searchId = p.doi || p.pmid || p.title;
       const dbId = dbIdMap.get(searchId) || searchId;
       return {
@@ -299,7 +319,7 @@ export default function ProjectPaperSearchPage() {
 
     // 2. 初始化提取进度详情
     setView("extracting");
-    setExtractionDetails(papers.map((p) => ({
+    setExtractionDetails(papersToExtract.map((p) => ({
       title: p.title, status: "pending" as const, experiments: 0,
     })));
 
@@ -309,7 +329,7 @@ export default function ProjectPaperSearchPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          papers: papers.map((p) => {
+          papers: papersToExtract.map((p) => {
             const searchId = p.doi || p.pmid || p.title;
             return { paperId: dbIdMap.get(searchId) || searchId, title: p.title, abstract: p.abstract };
           }),
@@ -449,9 +469,19 @@ export default function ProjectPaperSearchPage() {
 
       {/* 错误提示 */}
       {error && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
-          <AlertCircle size={16} />
-          {error}
+        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} />
+            {error}
+          </div>
+          {lastSearchQuery && lastSearchOptions && (
+            <button
+              onClick={() => handleSearch(lastSearchQuery, lastSearchOptions)}
+              className="shrink-0 px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
+            >
+              重试
+            </button>
+          )}
         </div>
       )}
 
