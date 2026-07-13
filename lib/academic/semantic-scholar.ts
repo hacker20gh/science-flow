@@ -166,7 +166,7 @@ function mapS2Paper(raw: any): S2Paper {
     citationCount: raw.citationCount || 0,
     influenceScore: raw.influentialCitationCount ?? null,
     isOpenAccess: raw.isOpenAccess || false,
-    oaUrl: null, // S2 openAccessPdf.url 是 PDF 链接，不是 landing page
+    oaUrl: raw.openAccessPdf?.url ?? null,
     oaPdfUrl: raw.openAccessPdf?.url || null,
     tldr: raw.tldr?.text || null,
     publicationTypes: raw.publicationTypes || [],
