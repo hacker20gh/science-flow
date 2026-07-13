@@ -288,35 +288,31 @@ export function deduplicate(papers: UnifiedPaper[]): UnifiedPaper[] {
   const result: UnifiedPaper[] = [];
 
   for (const paper of papers) {
-    // 1. DOI 去重（最可靠）
-    if (paper.doi) {
-      const doiKey = `doi:${paper.doi.toLowerCase()}`;
-      if (byKey.has(doiKey)) {
-        mergePaper(byKey.get(doiKey)!, paper);
-        continue;
-      }
-      byKey.set(doiKey, paper);
-    }
-
-    // 2. PMID 去重
-    if (paper.pmid) {
-      const pmidKey = `pmid:${paper.pmid}`;
-      if (byKey.has(pmidKey)) {
-        mergePaper(byKey.get(pmidKey)!, paper);
-        continue;
-      }
-      byKey.set(pmidKey, paper);
-    }
-
-    // 3. 标题去重（归一化）
+    // 1. Collect all keys this paper could match on
+    const doiKey = paper.doi ? `doi:${paper.doi.toLowerCase()}` : null;
+    const pmidKey = paper.pmid ? `pmid:${paper.pmid}` : null;
     const titleKey = `title:${normalizeTitle(paper.title)}`;
-    if (byKey.has(titleKey)) {
-      mergePaper(byKey.get(titleKey)!, paper);
-      continue;
-    }
-    byKey.set(titleKey, paper);
 
-    result.push(paper);
+    // 2. Find the first existing entry that matches on any key
+    const existing =
+      (doiKey && byKey.get(doiKey)) ||
+      (pmidKey && byKey.get(pmidKey)) ||
+      byKey.get(titleKey);
+
+    if (existing) {
+      // Merge new data into the existing entry
+      mergePaper(existing, paper);
+      // Register any NEW keys so future papers can match via those keys
+      if (doiKey && !byKey.has(doiKey)) byKey.set(doiKey, existing);
+      if (pmidKey && !byKey.has(pmidKey)) byKey.set(pmidKey, existing);
+      if (!byKey.has(titleKey)) byKey.set(titleKey, existing);
+    } else {
+      // New unique paper — register all keys and add to result
+      if (doiKey) byKey.set(doiKey, paper);
+      if (pmidKey) byKey.set(pmidKey, paper);
+      byKey.set(titleKey, paper);
+      result.push(paper);
+    }
   }
 
   return result;
