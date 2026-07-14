@@ -26,8 +26,17 @@ export const ExperimentSchema = z.object({
     species: z.string().nullable().describe("物种"),
     passage: z.string().nullable().describe("传代范围"),
   }),
-  experiment_type: z.enum(["in_vitro", "in_vivo", "clinical", "bioinformatics", "unknown"]).describe(
-    "实验类型：in_vitro(体外细胞实验), in_vivo(体内动物实验), clinical(临床研究), bioinformatics(生物信息学分析如RNA-seq/TCGA/GEO), unknown(不确定)"
+  experiment_type: z.enum([
+    "cell_line", "primary_cell", "organoid", "tissue_slice",
+    "animal_model", "patient_sample",
+    "clinical_trial", "clinical_obs",
+    "bioinformatics", "meta_analysis", "review", "unknown",
+  ]).describe(
+    "实验类型: cell_line(细胞系), primary_cell(原代细胞), organoid(类器官/3D培养), " +
+    "tissue_slice(组织切片), animal_model(动物模型), patient_sample(患者样本), " +
+    "clinical_trial(临床试验), clinical_obs(队列/病例对照等观察性研究), " +
+    "bioinformatics(RNA-seq/TCGA/GEO等生信分析), meta_analysis(系统综述/meta分析), " +
+    "review(综述), unknown(不确定)"
   ),
   ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
   pathway_effects: z.array(z.object({
@@ -76,8 +85,17 @@ An experiment is defined as a unique combination of:
 - Cell line / model (different cell line = different experiment)
 - Measured outcome (different pathway measured = different experiment)
 
-For experiment_type: use "bioinformatics" for RNA-seq, scRNA-seq, TCGA/GEO data mining,
-WGCNA, survival analysis, or any computational analysis of public datasets.
+For experiment_type: use the most specific type possible.
+- "cell_line" for immortalized cell lines (HeLa, A549, etc.)
+- "primary_cell" for patient-derived or freshly isolated cells
+- "organoid" for 3D cultures, organoids, spheroids
+- "animal_model" for mice, rats, zebrafish, PDX, xenograft
+- "patient_sample" for patient tissue/blood analyses (not a trial)
+- "clinical_trial" for RCT or interventional clinical studies
+- "clinical_obs" for cohort, case-control, cross-sectional
+- "bioinformatics" for RNA-seq, scRNA-seq, TCGA, GEO mining, WGCNA
+- "meta_analysis" for systematic reviews with quantitative pooling
+- "review" for narrative/literature reviews (no original data)
 
 EXTRACTION RULES:
 - Extract EACH experiment as a separate entry in the experiments array.
