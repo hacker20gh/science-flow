@@ -7,6 +7,8 @@ import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Pl
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
 import { AIInsights } from "@/components/matrix/ai-insights";
 import { AnalysisReportPanel } from "@/components/matrix/analysis-report";
+import { ExperimentCollection } from "@/components/matrix/experiment-collection";
+import { PathwayNetwork, type MechanisticLink } from "@/components/matrix/pathway-network";
 import { ProcessAssistant } from "@/components/assistant/process-assistant";
 import { analyzeProjectState } from "@/lib/assistant/process-assistant";
 import { HypothesisCard } from "@/components/brain/hypothesis-card";
@@ -563,6 +565,38 @@ export default function BrainPage() {
           </div>
         )}
       </motion.section>
+
+      {/* 实验集合视图 + 通路网络 */}
+      {!useDemo && dbExtractions && dbExtractions.length > 0 && (
+        <>
+          <motion.section
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+          >
+            <ExperimentCollection extractions={dbExtractions} projectId={projectId} />
+          </motion.section>
+
+          {/* 通路网络 */}
+          {(() => {
+            const chains: MechanisticLink[] = [];
+            for (const ext of dbExtractions) {
+              const mc = (ext as unknown as Record<string, unknown>).mechanisticChain as MechanisticLink[] | null;
+              if (mc) chains.push(...mc);
+            }
+            if (chains.length === 0) return null;
+            return (
+              <motion.section
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.25 }}
+              >
+                <PathwayNetwork chains={chains} />
+              </motion.section>
+            );
+          })()}
+        </>
+      )}
 
       {/* 待办清单 */}
       <motion.section
