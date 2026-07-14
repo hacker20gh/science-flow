@@ -39,41 +39,45 @@ export const ExperimentSchema = z.object({
   ]).describe(
     "实验系统: cell_line(细胞系), primary_cell(原代细胞), organoid(类器官/3D培养), " +
     "tissue_slice(组织切片), animal_model(动物模型), xenograft(异种移植/PDX), " +
-    "patient_sample(患者样本), " +
-    "clinical_trial(临床试验RCT), clinical_obs(队列/病例对照), case_report(病例报告), " +
-    "bioinformatics(生信分析), omics(组学:蛋白组/代谢组/表观组等), " +
+    "patient_sample(患者样本), clinical_trial(临床试验RCT), clinical_obs(队列/病例对照), " +
+    "case_report(病例报告), bioinformatics(生信分析), omics(组学), " +
     "meta_analysis(系统综述/meta分析), review(综述), unknown(不确定)"
   ),
   experiment_methods: z.array(z.string()).describe(
     "实验方法（可多个）: 如 Western blot, qPCR, RNA-seq, flow cytometry, " +
-    "immunohistochemistry, ELISA, CRISPR screen, ChIP-seq, mass spectrometry, " +
-    "survival analysis, WGCNA, molecular docking 等"
+    "immunohistochemistry, ELISA, CRISPR screen, ChIP-seq, mass spectrometry 等"
   ),
   ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
   dose_response: z.array(z.object({
     concentration: z.string().describe("浓度，如 1 μM"),
     effect_size: z.string().describe("效应大小，如 1.2-fold 或 35%"),
     direction: z.enum(["up", "down", "no_change"]),
-  })).nullable().describe("剂量-反应数据（论文测试多个浓度时填写，null 表示无此数据）"),
+  })).nullable().describe("剂量-反应数据（论文测试多个浓度时填写）"),
   pathway_effects: z.array(z.object({
     pathway: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
     significance: z.string().nullable(),
     method: z.string().nullable(),
-    fold_change: z.string().nullable().describe("通路变化倍数，如 2.3-fold 或 p-AKT/AKT ratio from 1.0 to 3.2"),
-    downstream_of: z.string().nullable().describe("如果此通路是另一个通路的下游，填写上游通路名（如 mTOR downstream_of PI3K/AKT）"),
+    fold_change: z.string().nullable().describe("通路变化倍数，如 2.3-fold"),
+    downstream_of: z.string().nullable().describe("如果此通路是另一个通路的下游，填写上游通路名"),
   })),
   phenotype_effects: z.array(z.object({
     phenotype: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
     fold_change: z.string().nullable(),
-    caused_by: z.string().nullable().describe("哪个通路导致此表型变化（如 Apoptosis caused_by p53）"),
+    caused_by: z.string().nullable().describe("哪个通路导致此表型变化"),
   })),
   mechanistic_chain: z.array(z.object({
     from: z.string().describe("上游通路/分子"),
     to: z.string().describe("下游通路/分子"),
-    relation: z.string().describe("关系: activates, inhibits, phosphorylates, promotes, suppresses, induces 等"),
-  })).nullable().describe("因果链：通路之间的上下游关系（如 p53→activates→Bax→releases→Cytochrome c）"),
+    relation: z.string().describe("关系: activates, inhibits, phosphorylates 等"),
+  })).nullable().describe("因果链：通路之间的上下游关系"),
+  validated_by: z.array(z.string()).nullable().describe(
+    "此实验被哪些其他实验验证/支持。填写验证实验的关键描述。"
+  ),
+  validates: z.string().nullable().describe(
+    "此实验验证/支持哪个假设或发现。"
+  ),
   controls: z.array(z.string()),
   statistical_test: z.string().nullable(),
   sample_size: z.number().nullable(),
@@ -101,43 +105,40 @@ const EXTRACTION_TOOL = createToolFromSchema(
 
 const CORE_PROMPT = `You are a biomedical literature analysis expert.
 
-CRITICAL RULE: Most papers contain 3-10 independent experiments. You MUST extract EVERY experiment separately. Do NOT merge or skip experiments.
-
-An experiment is defined as a unique combination of:
-- Drug/intervention + concentration + duration (different dose = different experiment)
-- Cell line / model (different cell line = different experiment)
-- Measured outcome (different pathway measured = different experiment)
-
-For experiment_type: use the most specific type possible.
-- "cell_line" for immortalized cell lines (HeLa, A549, etc.)
-- "primary_cell" for patient-derived or freshly isolated cells
-- "organoid" for 3D cultures, organoids, spheroids
-- "tissue_slice" for tissue explants, organ perfusion
-- "animal_model" for mice, rats, zebrafish, C. elegans, Drosophila
-- "xenograft" for tumor xenografts and PDX models
-- "patient_sample" for patient tissue/blood analyses (not a trial)
-- "clinical_trial" for RCT or interventional clinical studies
-- "clinical_obs" for cohort, case-control, cross-sectional
-- "case_report" for individual case reports
-- "bioinformatics" for RNA-seq, scRNA-seq, TCGA, GEO mining, WGCNA
-- "omics" for proteomics, metabolomics, epigenomics, ChIP-seq, ATAC-seq
-- "meta_analysis" for systematic reviews with quantitative pooling
-- "review" for narrative/literature reviews (no original data)
-
-For experiment_methods: list ALL techniques used in this experiment.
-Examples: Western blot, qPCR, RT-PCR, RNA-seq, scRNA-seq, flow cytometry, FACS,
-ELISA, immunohistochemistry (IHC), immunofluorescence (IF), confocal microscopy,
-ChIP-seq, ATAC-seq, mass spectrometry, co-IP, luciferase assay, CRISPR/Cas9,
-CCK-8, MTT, wound healing, transwell, colony formation, tube formation,
-survival analysis, Cox regression, WGCNA, GSEA, molecular docking, etc.
+MULTILINGUAL SUPPORT:
+- This paper may be in Chinese, Japanese, or other non-English language.
+- Extract ALL information regardless of the paper's language.
+- Always output in English (translate pathway/phenotype names to standard English).
+- Chinese papers often have: 目的(Objective), 方法(Methods), 结果(Results), 结论(Conclusion)
+- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
 
 EXTRACTION RULES:
-- Extract EACH experiment as a separate entry in the experiments array.
-- If a paper tests 5 different concentrations of the same drug, that's 5 experiments.
-- If a paper tests the same drug on 3 different cell lines, that's 3 experiments.
-- If a paper measures 4 different pathways, that could be 4 experiments (or fewer if measured together).
+- A single paper may contain MULTIPLE independent experiments. Extract each separately.
 - Only extract findings EXPLICITLY stated in the text. Do NOT infer or hallucinate.
 - If information is not available, use null.
+
+NEGATIVE RESULTS ARE IMPORTANT:
+- "not affected", "no significant change", "unchanged", "no effect" = direction "no_change"
+- ALWAYS extract these as experiments with direction "no_change". Do NOT skip them.
+- Negative results are as scientifically valuable as positive results.
+- If a paper states "p53 expression was not affected by treatment X", extract it as:
+  pathway_effects: [{ pathway: "p53", direction: "no_change", ... }]
+
+TABLE HANDLING RULES:
+- When you see a Markdown table, each ROW with numeric data is potentially a SEPARATE experiment.
+- Column headers define what is being measured (e.g., p-AKT, p-mTOR, Apoptosis rate).
+- Each row with different concentration/dose/cell line = separate experiment entry.
+- Extract ALL rows, not just the one with the most significant result.
+- For table data, set evidence_quote to include the table reference (e.g., "Table 1, row 3").
+- If a table shows dose-response data across multiple concentrations, fill the dose_response array AND create a separate experiment for the highest/most significant concentration.
+
+TABLE EXAMPLE:
+| Concentration | p53 (WB) | Apoptosis (%) |
+| 1 μM         | 1.2-fold  | 15%           |
+| 5 μM         | 2.3-fold  | 35%           |
+| 10 μM        | 3.1-fold  | 60%           |
+
+-> Extract 3 experiments (one per concentration), plus fill dose_response array for the concentration series.
 
 ANTI-HALLUCINATION (hard rules):
 - Each field MUST have an evidence_quote from the original text.
@@ -160,118 +161,49 @@ If the paper uses a variant (e.g. "programmed cell death", "cell survival"), out
 - pathway_effects[].method: experimental technique (e.g. "Western blot", "qPCR"), NOT statistical method.
 - Confidence (0-1): 1.0 = explicitly stated, 0.8 = strongly implied, 0.5 = inferred, 0.3 = uncertain.
 
-MULTI-EXPERIMENT EXAMPLE:
-Input: "Cisplatin was tested at 1, 5, and 10 μM on HeLa cells for 24h. Western blot showed dose-dependent p53 upregulation. Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM). In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05). siRNA knockdown of p53 suppressed apoptosis."
-Expected: 4 experiments (different concentrations=2, different cell line=1, gene knockdown=1):
+FEW-SHOT EXAMPLE:
+Input excerpt: "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53 (Western blot, p<0.01, n=3) and increased apoptosis (flow cytometry, 2.5-fold). DMSO was used as vehicle control."
+Expected output:
 {
-  "experiments": [
-    {
-      "intervention": {"type": "drug", "target": "cisplatin", "concentration": "1 μM", "duration": "24h", "method": null, "co_treatment": null},
-      "model": {"cell_line": "HeLa", "species": "human", "passage": null},
-      "experiment_type": "cell_line", "experiment_methods": ["Western blot"],
-      "ic50": null, "dose_response": null,
-      "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": null, "method": "Western blot", "fold_change": null, "downstream_of": null}],
-      "phenotype_effects": [], "mechanistic_chain": null,
-      "controls": [], "statistical_test": null, "sample_size": null,
-      "conclusion": "Low dose cisplatin upregulates p53 in HeLa",
-      "evidence_quote": "Western blot showed dose-dependent p53 upregulation", "confidence": 0.7
-    },
-    {
-      "intervention": {"type": "drug", "target": "cisplatin", "concentration": "10 μM", "duration": "24h", "method": null, "co_treatment": null},
-      "model": {"cell_line": "HeLa", "species": "human", "passage": null},
-      "experiment_type": "cell_line", "experiment_methods": ["flow cytometry"],
-      "ic50": null, "dose_response": [
-        {"concentration": "1 μM", "effect_size": "1.2-fold", "direction": "up"},
-        {"concentration": "5 μM", "effect_size": "1.8-fold", "direction": "up"},
-        {"concentration": "10 μM", "effect_size": "2.5-fold", "direction": "up"}
-      ],
-      "pathway_effects": [],
-      "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold", "caused_by": "p53"}],
-      "mechanistic_chain": [{"from": "p53", "to": "Apoptosis", "relation": "induces"}],
-      "controls": [], "statistical_test": null, "sample_size": null,
-      "conclusion": "High dose cisplatin induces apoptosis in HeLa",
-      "evidence_quote": "Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM)", "confidence": 0.85
-    },
-    {
-      "intervention": {"type": "drug", "target": "cisplatin", "concentration": "5 μM", "duration": "24h", "method": null, "co_treatment": null},
-      "model": {"cell_line": "A549", "species": "human", "passage": null},
-      "experiment_type": "cell_line", "experiment_methods": ["EMSA"],
-      "ic50": null, "dose_response": null,
-      "pathway_effects": [{"pathway": "NF-κB", "direction": "up", "significance": "p<0.05", "method": "EMSA", "fold_change": null, "downstream_of": null}],
-      "phenotype_effects": [], "mechanistic_chain": null,
-      "controls": [], "statistical_test": null, "sample_size": null,
-      "conclusion": "Cisplatin activates NF-κB in A549",
-      "evidence_quote": "In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05)", "confidence": 0.9
-    },
-    {
-      "intervention": {"type": "knockdown", "target": "p53", "concentration": "50 nM", "duration": "48h", "method": "siRNA", "co_treatment": "cisplatin 5 μM"},
-      "model": {"cell_line": "HeLa", "species": "human", "passage": null},
-      "experiment_type": "cell_line", "experiment_methods": ["Western blot", "flow cytometry"],
-      "ic50": null, "dose_response": null,
-      "pathway_effects": [{"pathway": "p53", "direction": "down", "significance": null, "method": "Western blot", "fold_change": null, "downstream_of": null}],
-      "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "down", "fold_change": null, "caused_by": "p53 knockdown"}],
-      "mechanistic_chain": null,
-      "controls": ["scramble siRNA"], "statistical_test": null, "sample_size": null,
-      "conclusion": "p53 knockdown suppresses cisplatin-induced apoptosis",
-      "evidence_quote": "siRNA knockdown of p53 suppressed apoptosis", "confidence": 0.85
-    }
-  ]
+  "experiments": [{
+    "drug_intervention": {"name": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
+    "model": {"cell_line": "HeLa", "species": "human", "passage": null},
+    "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": "p<0.01", "method": "Western blot"}],
+    "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold"}],
+    "controls": ["DMSO vehicle control"],
+    "statistical_test": null,
+    "sample_size": 3,
+    "conclusion": "Cisplatin upregulates p53 and induces apoptosis in HeLa cells",
+    "evidence_quote": "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53",
+    "confidence": 0.95
+  }]
 }`;
-
-// ===== 补充提取：实验数不够时自动触发 =====
-
-/**
- * 判断是否需要补充提取
- * 如果全文长度暗示应该有更多实验但提取数不够，触发第二次提取
- */
-function shouldSupplementExtract(text: string, experimentCount: number): boolean {
-  if (text.length > 20000 && experimentCount <= 3) return true;
-  if (text.length > 8000 && experimentCount <= 1) return true;
-  return false;
-}
-
-/**
- * 补充提取：用更强调多实验的 prompt 再提一次
- */
-async function supplementExtract(
-  text: string,
-  title: string,
-  existingCount: number,
-  options?: { maxTokens?: number; onToken?: (event: SSEEvent) => void }
-): Promise<ExtractionResult> {
-  const SUPPLEMENT_PROMPT = `You are extracting experiments from a biomedical paper.
-The previous extraction only found ${existingCount} experiment(s), but this paper is ${Math.round(text.length / 1000)}k characters long, which suggests there are MORE experiments.
-
-IMPORTANT: Look carefully at the ENTIRE text. Extract experiments from:
-- Results section (all subsections)
-- Figures and tables descriptions
-- Discussion section (may reference additional findings)
-
-Different concentrations, time points, cell lines = SEPARATE experiments.
-Each pathway measured = separate experiment entry.
-Aim for 5-10+ experiments.
-
-NAMING CONVENTIONS (use exact names):
-Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
-Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50
-Keep: evidence_quote required, anti-hallucination rules.`;
-
-  return extractWithPrompt(text, title, SUPPLEMENT_PROMPT, options);
-}
 
 // ===== 摘要专用 Prompt =====
 
 const ABSTRACT_PROMPT = `You are analyzing a paper ABSTRACT (not full text).
 Many experimental details will be unavailable - this is expected and OK.
 
+MULTILINGUAL SUPPORT:
+- This paper may be in Chinese, Japanese, or other non-English language.
+- Extract ALL information regardless of the paper's language.
+- Always output in English (translate pathway/phenotype names to standard English).
+- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
+
 RELAXED RULES:
-- drug_intervention.concentration/duration/co_treatment: use null if not explicitly stated in the abstract
+- intervention.concentration/duration/co_treatment/method: use null if not explicitly stated
 - model.passage: almost always unavailable in abstracts, use null
+- experiment_type: infer from context (cell_line for cell experiments, bioinformatics for data mining, etc.)
+- experiment_methods: list from context, empty array if unknown
 - statistical_test/sample_size: often not in abstract, use null
 - controls: empty array if not mentioned
-- confidence: cap at 0.6 (abstract extraction is inherently less complete)
-- Focus on what IS available: drug name, cell line, pathway direction, phenotype direction
+- confidence: cap at 0.6
+- Focus on what IS available: intervention target, cell line, pathway direction, phenotype direction
 - For evidence_quote: use the EXACT sentence from the abstract
+
+NEGATIVE RESULTS: "no_change" direction is important. Extract "not affected", "no significant change", "unchanged" as experiments with direction "no_change". Do NOT skip them.
+
+TABLE HANDLING: When you see table data, each row with different concentration/dose/cell line = separate experiment entry. Extract ALL rows.
 
 NAMING CONVENTIONS (same as standard - use exact names):
 Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
@@ -288,17 +220,25 @@ Keep all anti-hallucination rules. Only extract what is explicitly stated.`;
 const RELAXED_PROMPT = `You are extracting experimental data from a biomedical paper.
 This is a RETRY because the previous extraction returned no results.
 
-CRITICAL: Most papers have 3-10 experiments. Extract ALL of them separately.
-Different concentration = different experiment. Different cell line = different experiment.
+MULTILINGUAL SUPPORT:
+- This paper may be in Chinese, Japanese, or other non-English language.
+- Extract ALL information regardless of the paper's language.
+- Always output in English (translate pathway/phenotype names to standard English).
+- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
 
-Be MORE LENIENT:
+Be MORE LENIENT in extraction:
 - Extract even when fields are incomplete (set missing fields to null)
 - Focus on identifying ANY pathway direction changes (up/down/no_change)
 - Focus on identifying ANY phenotype effects
 - Drug name and cell line are the MOST important fields
 - If the paper mentions results but lacks specific numbers, still extract them with null for numeric fields
-- confidence can be 0.4-0.7
-Keep: anti-hallucination rules, naming conventions
+- confidence can be 0.4-0.7 (acknowledging this is less certain)
+
+NEGATIVE RESULTS: "no_change" direction is important. Extract "not affected", "no significant change", "unchanged" as experiments with direction "no_change". Do NOT skip them.
+
+TABLE HANDLING: When you see table data, each row with different concentration/dose/cell line = separate experiment entry. Extract ALL rows.
+
+Keep: anti-hallucination rules (evidence_quote required), naming conventions
 
 NAMING CONVENTIONS (use exact names):
 Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
@@ -563,20 +503,8 @@ export async function extractWithFallback(
     return extractWithPrompt(text, title, MINIMAL_PROMPT, options);
   }
 
-  // 长文本（全文）：标准 → 补充提取 → 宽松 → 最小
+  // 长文本（全文）：标准 → 宽松 → 最小
   const result1 = await extractFromText(text, title, options);
-
-  // 补充提取：如果实验数太少且全文够长，用强调多实验的 prompt 再提一次
-  if (result1.experiments.length > 0 && shouldSupplementExtract(text, result1.experiments.length)) {
-    console.log(`[Extraction] 仅提取到 ${result1.experiments.length} 个实验（全文 ${Math.round(text.length/1000)}k），尝试补充提取: ${title}`);
-    const supplement = await supplementExtract(text, title, result1.experiments.length, options);
-    if (supplement.experiments.length > result1.experiments.length) {
-      console.log(`[Extraction] 补充提取新增 ${supplement.experiments.length - result1.experiments.length} 个实验`);
-      // 合并：保留原有的 + 新增的（按 drug+cell+pathway 去重）
-      return mergeExtractionResults([result1, supplement]);
-    }
-  }
-
   if (result1.experiments.length > 0) return result1;
 
   console.log(`[Extraction] 空结果，使用宽松 prompt 重试: ${title}`);
@@ -607,21 +535,35 @@ function buildChunks(sections: SectionInfo[], title: string, abstractSnippet: st
     if (fullText.length <= MAX_CHARS) {
       chunks.push(fullText);
     } else {
-      // 拆分大 section：按段落边界切分
+      // 按段落拆分，但使用"滑动窗口"保持上下文，避免实验描述被截断
       const paragraphs = section.text.split(/\n\n+/);
+
       let currentChunk = contextPrefix + `\n\n=== ${section.label} ===\n`;
+      let prevParagraphTail = ""; // 保留上一段的最后部分作为上下文
 
       for (const para of paragraphs) {
-        if (currentChunk.length + para.length + 2 > MAX_CHARS) {
-          if (currentChunk.length > contextPrefix.length + 50) {
+        const paraWithOverlap = prevParagraphTail
+          ? `[...continued from above]\n${para}`
+          : para;
+
+        if (currentChunk.length + paraWithOverlap.length + 2 > MAX_CHARS) {
+          if (currentChunk.length > contextPrefix.length + 100) {
             chunks.push(currentChunk);
           }
+          // 新 chunk 开始时，带上一段的最后 200 字符作为重叠上下文
           currentChunk = contextPrefix + `\n\n=== ${section.label} (continued) ===\n`;
+          if (prevParagraphTail) {
+            currentChunk += `[...continued from above]\n${prevParagraphTail}\n\n`;
+          }
         }
+
         currentChunk += para + "\n\n";
+
+        // 保留段落的最后 200 字符作为下一段的上下文
+        prevParagraphTail = para.length > 200 ? para.slice(-200) : para;
       }
 
-      if (currentChunk.length > contextPrefix.length + 50) {
+      if (currentChunk.length > contextPrefix.length + 100) {
         chunks.push(currentChunk);
       }
     }
@@ -640,13 +582,14 @@ function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
 
   for (const result of results) {
     for (const exp of result.experiments) {
-      // 去重 key：intervention_target + cell_line + first pathway
+      // 去重 key：drug_name + cell_line + first pathway
       const drugName = exp.intervention.target.toLowerCase().trim();
       const cellLine = (exp.model.cell_line || "").toLowerCase().trim();
       const primaryPathway = exp.pathway_effects[0]?.pathway?.toLowerCase().trim() || "";
       const key = `${drugName}|${cellLine}|${primaryPathway}`;
 
       if (seen.has(key)) {
+        // 已存在：取 evidence_quote 更长、confidence 更高的版本
         const existingIdx = allExperiments.findIndex(e => {
           const eKey = `${e.intervention.target.toLowerCase().trim()}|${(e.model.cell_line || "").toLowerCase().trim()}|${e.pathway_effects[0]?.pathway?.toLowerCase().trim() || ""}`;
           return eKey === key;
