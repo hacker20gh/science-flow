@@ -26,8 +26,8 @@ export const ExperimentSchema = z.object({
     species: z.string().nullable().describe("物种"),
     passage: z.string().nullable().describe("传代范围"),
   }),
-  experiment_type: z.enum(["in_vitro", "in_vivo", "clinical", "unknown"]).describe(
-    "实验类型：in_vitro(体外细胞实验), in_vivo(体内动物实验), clinical(临床研究), unknown(不确定)"
+  experiment_type: z.enum(["in_vitro", "in_vivo", "clinical", "bioinformatics", "unknown"]).describe(
+    "实验类型：in_vitro(体外细胞实验), in_vivo(体内动物实验), clinical(临床研究), bioinformatics(生物信息学分析如RNA-seq/TCGA/GEO), unknown(不确定)"
   ),
   ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
   pathway_effects: z.array(z.object({
@@ -75,6 +75,9 @@ An experiment is defined as a unique combination of:
 - Drug/intervention + concentration + duration (different dose = different experiment)
 - Cell line / model (different cell line = different experiment)
 - Measured outcome (different pathway measured = different experiment)
+
+For experiment_type: use "bioinformatics" for RNA-seq, scRNA-seq, TCGA/GEO data mining,
+WGCNA, survival analysis, or any computational analysis of public datasets.
 
 EXTRACTION RULES:
 - Extract EACH experiment as a separate entry in the experiments array.
