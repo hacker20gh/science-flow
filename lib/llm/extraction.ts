@@ -28,15 +28,21 @@ export const ExperimentSchema = z.object({
   }),
   experiment_type: z.enum([
     "cell_line", "primary_cell", "organoid", "tissue_slice",
-    "animal_model", "patient_sample",
-    "clinical_trial", "clinical_obs",
-    "bioinformatics", "meta_analysis", "review", "unknown",
+    "animal_model", "xenograft", "patient_sample",
+    "clinical_trial", "clinical_obs", "case_report",
+    "bioinformatics", "omics", "meta_analysis", "review", "unknown",
   ]).describe(
-    "实验类型: cell_line(细胞系), primary_cell(原代细胞), organoid(类器官/3D培养), " +
-    "tissue_slice(组织切片), animal_model(动物模型), patient_sample(患者样本), " +
-    "clinical_trial(临床试验), clinical_obs(队列/病例对照等观察性研究), " +
-    "bioinformatics(RNA-seq/TCGA/GEO等生信分析), meta_analysis(系统综述/meta分析), " +
-    "review(综述), unknown(不确定)"
+    "实验系统: cell_line(细胞系), primary_cell(原代细胞), organoid(类器官/3D培养), " +
+    "tissue_slice(组织切片), animal_model(动物模型), xenograft(异种移植/PDX), " +
+    "patient_sample(患者样本), " +
+    "clinical_trial(临床试验RCT), clinical_obs(队列/病例对照), case_report(病例报告), " +
+    "bioinformatics(生信分析), omics(组学:蛋白组/代谢组/表观组等), " +
+    "meta_analysis(系统综述/meta分析), review(综述), unknown(不确定)"
+  ),
+  experiment_methods: z.array(z.string()).describe(
+    "实验方法（可多个）: 如 Western blot, qPCR, RNA-seq, flow cytometry, " +
+    "immunohistochemistry, ELISA, CRISPR screen, ChIP-seq, mass spectrometry, " +
+    "survival analysis, WGCNA, molecular docking 等"
   ),
   ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
   pathway_effects: z.array(z.object({
@@ -89,13 +95,24 @@ For experiment_type: use the most specific type possible.
 - "cell_line" for immortalized cell lines (HeLa, A549, etc.)
 - "primary_cell" for patient-derived or freshly isolated cells
 - "organoid" for 3D cultures, organoids, spheroids
-- "animal_model" for mice, rats, zebrafish, PDX, xenograft
+- "tissue_slice" for tissue explants, organ perfusion
+- "animal_model" for mice, rats, zebrafish, C. elegans, Drosophila
+- "xenograft" for tumor xenografts and PDX models
 - "patient_sample" for patient tissue/blood analyses (not a trial)
 - "clinical_trial" for RCT or interventional clinical studies
 - "clinical_obs" for cohort, case-control, cross-sectional
+- "case_report" for individual case reports
 - "bioinformatics" for RNA-seq, scRNA-seq, TCGA, GEO mining, WGCNA
+- "omics" for proteomics, metabolomics, epigenomics, ChIP-seq, ATAC-seq
 - "meta_analysis" for systematic reviews with quantitative pooling
 - "review" for narrative/literature reviews (no original data)
+
+For experiment_methods: list ALL techniques used in this experiment.
+Examples: Western blot, qPCR, RT-PCR, RNA-seq, scRNA-seq, flow cytometry, FACS,
+ELISA, immunohistochemistry (IHC), immunofluorescence (IF), confocal microscopy,
+ChIP-seq, ATAC-seq, mass spectrometry, co-IP, luciferase assay, CRISPR/Cas9,
+CCK-8, MTT, wound healing, transwell, colony formation, tube formation,
+survival analysis, Cox regression, WGCNA, GSEA, molecular docking, etc.
 
 EXTRACTION RULES:
 - Extract EACH experiment as a separate entry in the experiments array.

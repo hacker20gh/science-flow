@@ -37,7 +37,8 @@ interface ExtractionResult {
     experiments: Array<{
       drug_intervention: { name: string; concentration: string | null; duration: string | null; co_treatment: string | null };
       model: { cell_line: string | null; species: string | null; passage: string | null };
-      experiment_type: "cell_line" | "primary_cell" | "organoid" | "tissue_slice" | "animal_model" | "patient_sample" | "clinical_trial" | "clinical_obs" | "bioinformatics" | "meta_analysis" | "review" | "unknown";
+      experiment_type: "cell_line" | "primary_cell" | "organoid" | "tissue_slice" | "animal_model" | "xenograft" | "patient_sample" | "clinical_trial" | "clinical_obs" | "case_report" | "bioinformatics" | "omics" | "meta_analysis" | "review" | "unknown";
+      experiment_methods: string[];
       ic50: string | null;
       pathway_effects: Array<{ pathway: string; direction: "up" | "down" | "no_change"; significance: string | null; method: string | null; fold_change: string | null }>;
       phenotype_effects: Array<{ phenotype: string; direction: "up" | "down" | "no_change"; fold_change: string | null }>;

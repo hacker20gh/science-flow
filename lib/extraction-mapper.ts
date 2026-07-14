@@ -25,6 +25,7 @@ export function mapExtractionToDB(experiment: Record<string, unknown>, paperId: 
     sampleSize: experiment.sample_size || null,
     confidence: experiment.confidence ?? null,
     experimentType: experiment.experiment_type || null,
+    experimentMethods: experiment.experiment_methods || undefined,
     ic50: experiment.ic50 || null,
   };
 }

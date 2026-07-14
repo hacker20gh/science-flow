@@ -126,8 +126,9 @@ model Extraction {
   verified   Boolean   @default(false)
 
   // 实验类型与定量数据
-  experimentType String?  // in_vitro, in_vivo, clinical, unknown
-  ic50          String?   // IC50/EC50 值，如 "5.2 μM"
+  experimentType  String?   // cell_line, animal_model, clinical_trial, bioinformatics 等
+  experimentMethods Json?   // ["Western blot", "qPCR", "flow cytometry"]
+  ic50            String?   // IC50/EC50 值，如 "5.2 μM"
 
   audits ExtractionAudit[]
 
