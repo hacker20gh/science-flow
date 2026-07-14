@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   if (!prisma) {
@@ -10,13 +10,48 @@ export async function GET(
   }
 
   const { projectId } = await params;
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+  const pageSize = Math.min(100, Math.max(10, parseInt(searchParams.get("pageSize") || "50")));
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
+  const search = searchParams.get("search");
+
+  // 构建查询条件
+  const where: Record<string, unknown> = { projectId };
+
+  // 时间范围过滤
+  if (from || to) {
+    where.createdAt = {};
+    if (from) (where.createdAt as Record<string, Date>).gte = new Date(from);
+    if (to) (where.createdAt as Record<string, Date>).lte = new Date(to);
+  }
+
+  // 文本搜索（匹配 title）
+  if (search) {
+    where.title = { contains: search, mode: "insensitive" };
+  }
 
   try {
-    const events = await prisma.timelineEvent.findMany({
-      where: { projectId },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    const [events, total] = await Promise.all([
+      prisma.timelineEvent.findMany({
+        where,
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.timelineEvent.count({ where }),
+    ]);
+
+    return Response.json({
+      events,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+      },
     });
-    return Response.json({ events });
   } catch (error) {
     console.error("Failed to list timeline:", error);
     return Response.json({ error: "获取时间线失败" }, { status: 500 });

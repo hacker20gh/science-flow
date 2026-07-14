@@ -122,6 +122,8 @@ function mergeEvents(events: TimelineEvent[]): MergedGroup[] {
 export function Timeline({ events, projectId, onEventClick }: TimelineProps) {
   const [filter, setFilter] = useState<TimelineEventType | "all">("all");
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
 
   // 默认点击处理：根据事件类型跳转到对应页面
   const handleEventClick = (event: TimelineEvent) => {
@@ -132,10 +134,36 @@ export function Timeline({ events, projectId, onEventClick }: TimelineProps) {
     }
   };
 
-  const filteredEvents =
-    filter === "all"
-      ? events
-      : events.filter((e) => e.type === filter);
+  // 客户端过滤：类型筛选 + 文本搜索 + 日期范围
+  const filteredEvents = useMemo(() => {
+    let result = events;
+
+    // 类型筛选
+    if (filter !== "all") {
+      result = result.filter(e => e.type === filter);
+    }
+
+    // 文本搜索（匹配 title 和 description）
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(e =>
+        e.title.toLowerCase().includes(q) ||
+        e.description.toLowerCase().includes(q)
+      );
+    }
+
+    // 日期范围过滤
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
+      result = result.filter(e => new Date(e.timestamp) >= from);
+    }
+    if (dateRange.to) {
+      const to = new Date(dateRange.to + "T23:59:59");
+      result = result.filter(e => new Date(e.timestamp) <= to);
+    }
+
+    return result;
+  }, [events, filter, searchQuery, dateRange]);
 
   const groups = useMemo(() => mergeEvents(filteredEvents), [filteredEvents]);
 
@@ -151,42 +179,82 @@ export function Timeline({ events, projectId, onEventClick }: TimelineProps) {
   return (
     <div className="space-y-4">
       {/* 筛选栏 */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          onClick={() => setFilter("all")}
-          className={`px-2 py-1 text-xs rounded ${
-            filter === "all"
-              ? "bg-gray-800 text-white"
-              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-          }`}
-        >
-          全部 ({events.length})
-        </button>
-        {Array.from(typeCounts.entries()).map(([type, count]) => {
-          const config = getConfig(type);
-          return (
-            <button
-              key={type}
-              onClick={() => setFilter(filter === type ? "all" : type as TimelineEventType)}
-              className={`px-2 py-1 text-xs rounded ${
-                filter === type
-                  ? `${config.bgColor} ${config.color} font-medium`
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              {config.icon} {config.label} ({count})
-            </button>
-          );
-        })}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setFilter("all")}
+            className={`px-2 py-1 text-xs rounded ${
+              filter === "all"
+                ? "bg-gray-800 text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            全部 ({events.length})
+          </button>
+          {Array.from(typeCounts.entries()).map(([type, count]) => {
+            const config = getConfig(type);
+            return (
+              <button
+                key={type}
+                onClick={() => setFilter(filter === type ? "all" : type as TimelineEventType)}
+                className={`px-2 py-1 text-xs rounded ${
+                  filter === type
+                    ? `${config.bgColor} ${config.color} font-medium`
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {config.icon} {config.label} ({count})
+              </button>
+            );
+          })}
+          <span className="text-xs text-gray-400 ml-auto">
+            {filteredEvents.length} / {events.length} 条事件
+          </span>
+        </div>
+
+        {/* 搜索框 + 日期范围 */}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="搜索事件..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
+          />
+          <input
+            type="date"
+            value={dateRange.from}
+            onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+            className="px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
+            title="起始日期"
+          />
+          <span className="text-gray-400 text-xs">~</span>
+          <input
+            type="date"
+            value={dateRange.to}
+            onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+            className="px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
+            title="结束日期"
+          />
+        </div>
       </div>
 
       {/* 时间线 */}
       {groups.length === 0 ? (
         <div className="text-center text-gray-400 py-12">
-          <p className="text-sm">还没有记录</p>
-          <p className="text-xs mt-1">
-            搜索文献、设计实验、记录结果，所有事件会自动出现在时间线上
-          </p>
+          {(searchQuery.trim() || dateRange.from || dateRange.to || filter !== "all") ? (
+            <>
+              <p className="text-sm">没有匹配的事件</p>
+              <p className="text-xs mt-1">尝试调整搜索条件或筛选器</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm">还没有记录</p>
+              <p className="text-xs mt-1">
+                搜索文献、设计实验、记录结果，所有事件会自动出现在时间线上
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="relative">
