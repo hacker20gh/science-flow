@@ -113,18 +113,73 @@ model Extraction {
   rawText      String?  // 原文片段（用于溯源）
 
   // 完整的通路/表型效应（多值）
-  pathwayEffects  Json?   // [{ pathway, direction, significance, method }]
-  phenotypeEffects Json?  // [{ phenotype, direction, fold_change }]
+  pathwayEffects  Json?   // [{ pathway, direction, significance, method }] — 向后兼容
+  phenotypeEffects Json?  // [{ phenotype, direction, fold_change }] — 向后兼容
+
+  // 关系型存储（支持跨论文聚合查询）
+  pathwayEffectsRelational  PathwayEffect[]
+  phenotypeEffectsRelational PhenotypeEffect[]
 
   controls   Json?     // 对照组列表 ["Vehicle", "TNF-α positive"]
   sampleSize Int?      // 样本量（生物学重复数）
   confidence Float?    // LLM 提取置信度 0-1
   verified   Boolean   @default(false)
 
+  audits ExtractionAudit[]
+
   createdAt DateTime @default(now())
 
   @@index([paperId])
   @@index([verified])
+}
+
+// ===== 关系型通路/表型效果 =====
+
+model PathwayEffect {
+  id           String    @id @default(cuid())
+  extractionId String
+  extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+
+  pathway      String
+  direction    String
+  significance String?
+  method       String?
+
+  @@index([extractionId])
+  @@index([pathway])
+}
+
+model PhenotypeEffect {
+  id           String    @id @default(cuid())
+  extractionId String
+  extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+
+  phenotype    String
+  direction    String
+  foldChange   String?
+
+  @@index([extractionId])
+  @@index([phenotype])
+}
+
+// ===== 提取审核轨迹 =====
+
+model ExtractionAudit {
+  id           String    @id @default(cuid())
+  extractionId String
+  extraction   Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+
+  action       String    // "verify" | "edit_direction" | "edit_pathway" | "edit_note"
+  field        String?   // 被修改的字段名，如 "pathwayEffects[0].direction"
+  oldValue     String?   // 修改前的值
+  newValue     String?   // 修改后的值
+  note         String?   // 用户添加的注释
+  userId       String?   // 操作用户
+
+  createdAt    DateTime  @default(now())
+
+  @@index([extractionId])
+  @@index([createdAt])
 }
 
 // ===== 假设 =====
@@ -290,6 +345,7 @@ model MechanismMatrix {
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   data      Json     // MatrixData 的 JSON 序列化（rows, columns, conflicts, gaps）
+  analysisReport Json? // 缓存的文献分析报告（LLM 生成）
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

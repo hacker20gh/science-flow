@@ -10,6 +10,8 @@ interface CellEditorProps {
   anchorRect: DOMRect | null;
   onSave: (updatedCell: Partial<MatrixCell>) => void;
   onClose: () => void;
+  projectId?: string;
+  extractionId?: string;
 }
 
 const DIRECTION_OPTIONS = [
@@ -18,11 +20,13 @@ const DIRECTION_OPTIONS = [
   { value: "no_change" as const, label: "— 无变化", color: "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200" },
 ];
 
-export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: CellEditorProps) {
+export function CellEditor({ cell, row, column, anchorRect, onSave, onClose, projectId, extractionId }: CellEditorProps) {
   const [direction, setDirection] = useState<MatrixCell["direction"]>(cell.direction);
   const [significance, setSignificance] = useState(cell.significance ?? "");
   const [note, setNote] = useState(cell.detail ?? "");
   const [saving, setSaving] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click
@@ -77,6 +81,19 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: C
   async function handleSave() {
     setSaving(true);
     try {
+      // 记录编辑操作到审核轨迹
+      if (projectId && extractionId) {
+        if (direction !== cell.direction) {
+          await handleEdit("direction", cell.direction ?? "", direction ?? "");
+        }
+        if (significance !== (cell.significance ?? "")) {
+          await handleEdit("significance", cell.significance ?? "", significance);
+        }
+        if (note !== (cell.detail ?? "")) {
+          await handleEdit("note", cell.detail ?? "", note);
+        }
+      }
+
       onSave({
         direction,
         significance: significance || null,
@@ -85,6 +102,47 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: C
     } finally {
       setSaving(false);
     }
+  }
+
+  // 标记为已验证（先记录审核，再更新 extraction）
+  async function handleVerify() {
+    if (!projectId || !extractionId) return;
+    setVerifying(true);
+    try {
+      // 记录审核操作
+      await fetch(`/api/projects/${encodeURIComponent(projectId)}/extractions/audit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          extractionId,
+          action: "verify",
+          note: "用户手动标记为已验证",
+        }),
+      });
+
+      setVerified(true);
+    } catch (error) {
+      console.error("验证失败:", error);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  // 记录编辑操作到审核轨迹
+  async function handleEdit(field: string, oldValue: string, newValue: string) {
+    if (!projectId || !extractionId) return;
+
+    await fetch(`/api/projects/${encodeURIComponent(projectId)}/extractions/audit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        extractionId,
+        action: "edit_" + field,
+        field,
+        oldValue,
+        newValue,
+      }),
+    });
   }
 
   return (
@@ -211,20 +269,36 @@ export function CellEditor({ cell, row, column, anchorRect, onSave, onClose }: C
         </div>
 
         {/* Actions */}
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {saving ? "保存中..." : "保存"}
-          </button>
+        <div className="flex justify-between items-center gap-2">
+          {/* 验证按钮 — 仅当有 projectId 和 extractionId 时显示 */}
+          {projectId && extractionId && (
+            <button
+              onClick={handleVerify}
+              disabled={verified || verifying}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                verified
+                  ? "border-green-300 text-green-600 bg-green-50 cursor-default"
+                  : "border-green-300 text-green-600 hover:bg-green-50"
+              } disabled:opacity-50`}
+            >
+              {verified ? "✓ 已验证" : verifying ? "标记中..." : "✓ 标记为已验证"}
+            </button>
+          )}
+          <div className="flex gap-2 ml-auto">
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {saving ? "保存中..." : "保存"}
+            </button>
+          </div>
         </div>
       </div>
     </>

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
-import { mapExtractionToDB } from "@/lib/extraction-mapper";
+import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
 
 export async function POST(
   req: NextRequest,
@@ -44,6 +44,33 @@ export async function POST(
         const record = await tx.extraction.create({
           data: mapExtractionToDB(ext, paperId),
         });
+
+        // 创建关联的关系型通路/表型效果
+        const { pathwayEffects, phenotypeEffects } = extractRelationalEffects(ext);
+
+        if (pathwayEffects.length > 0) {
+          await tx.pathwayEffect.createMany({
+            data: pathwayEffects.map(pe => ({
+              extractionId: record.id,
+              pathway: pe.pathway,
+              direction: pe.direction,
+              significance: pe.significance,
+              method: pe.method,
+            })),
+          });
+        }
+
+        if (phenotypeEffects.length > 0) {
+          await tx.phenotypeEffect.createMany({
+            data: phenotypeEffects.map(ph => ({
+              extractionId: record.id,
+              phenotype: ph.phenotype,
+              direction: ph.direction,
+              foldChange: ph.foldChange,
+            })),
+          });
+        }
+
         results.push(record);
       }
 

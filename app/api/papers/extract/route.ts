@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { extractFromText, type ExtractionResult } from "@/lib/llm/extraction";
+import { extractWithFallback, type ExtractionResult } from "@/lib/llm/extraction";
+import { validateExtraction } from "@/lib/llm/extraction-validator";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
 import { sleep } from "@/lib/utils/sleep";
+import { parsePDF } from "@/lib/pdf-parser";
 
 interface ExtractRequestBody {
   papers: Array<{
@@ -68,8 +70,6 @@ export async function POST(req: NextRequest) {
           console.log(`[Extract] 从 DB 获取了 ${Object.keys(dbFullTexts).length} 篇论文的全文`);
 
           // 对没有 fullText 但有 oaUrl 的论文，自动下载 PDF 并提取文本
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const pdfParse = require("pdf-parse-new");
           const papersNeedingDownload = dbPapers.filter(
             (p: { id: string; fullText: string | null; oaUrl: string | null }) => !dbFullTexts[p.id] && p.oaUrl
           );
@@ -104,18 +104,18 @@ export async function POST(req: NextRequest) {
                   continue;
                 }
 
-                const pdfData = await pdfParse(buffer);
-                if (pdfData.text && pdfData.text.trim().length > 100) {
-                  dbFullTexts[dbPaper.id] = pdfData.text;
-                  console.log(`[Extract] 自动下载成功: ${dbPaper.id} → ${pdfData.numpages} 页, ${pdfData.text.length} 字符`);
+                const parseResult = await parsePDF(buffer, "oa-paper.pdf");
+                if (parseResult.text && parseResult.text.trim().length > 100) {
+                  dbFullTexts[dbPaper.id] = parseResult.text;
+                  console.log(`[Extract] 自动下载成功 (${parseResult.parser}): ${dbPaper.id} → ${parseResult.text.length} 字符, ${parseResult.parseTimeMs}ms`);
                   db.paper.update({
                     where: { id: dbPaper.id },
-                    data: { fullText: pdfData.text },
+                    data: { fullText: parseResult.text },
                   }).catch((err: unknown) => {
                     console.error(`[Extract] Failed to save fullText for ${dbPaper.id}:`, err);
                   });
                 } else {
-                  console.warn(`[Extract] PDF 文本过短: ${pdfData.text?.length || 0} 字符`);
+                  console.warn(`[Extract] PDF 文本过短: ${parseResult.text?.length || 0} 字符`);
                 }
               } catch (dlError) {
                 console.warn(`[Extract] 自动下载失败: ${(dlError as Error)?.message}`);
@@ -157,12 +157,26 @@ export async function POST(req: NextRequest) {
             }
 
             emit({ type: "progress", step: `正在提取: ${paper.title}`, current: results.length, total: papers.length });
-            const extraction = await extractFromText(text, paper.title);
+            const rawExtraction = await extractWithFallback(text, paper.title);
+
+            // 质量校验 + 自动修正
+            const validation = validateExtraction(rawExtraction);
+            const extraction = validation.cleaned;
+            if (validation.autoFixedCount > 0) {
+              console.log(`[Extract] ${paper.title}: 自动修正 ${validation.autoFixedCount} 处 (${validation.overallQuality}, ${validation.averageScore}分)`);
+            }
+
             if (extraction.experiments.length === 0) {
               const warning = text.length < 500
                 ? "文本过短（仅摘要），缺少实验细节"
-                : "LLM 未提取到实验数据";
-              const result = { paperId: paper.paperId, title: paper.title, extraction, error: `提取结果为空：${warning}` };
+                : "LLM 未提取到实验数据（已尝试3种不同策略）";
+              const result = {
+                paperId: paper.paperId,
+                title: paper.title,
+                extraction,
+                error: `提取结果为空：${warning}`,
+                suggestModelSwitch: true,
+              };
               results.push(result);
               emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
             } else {

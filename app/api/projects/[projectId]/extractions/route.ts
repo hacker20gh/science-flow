@@ -16,7 +16,11 @@ export async function GET(
   try {
     const extractions = await prisma.extraction.findMany({
       where: { paper: { projectId } },
-      include: { paper: { select: { title: true, year: true } } },
+      include: {
+        paper: { select: { title: true, year: true } },
+        pathwayEffectsRelational: true,
+        phenotypeEffectsRelational: true,
+      },
       orderBy: { createdAt: "desc" },
     });
     return Response.json({ extractions });

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowRight,
+  BarChart3,
 } from "lucide-react";
 import type { MatrixData } from "@/lib/matrix/generator";
 
@@ -20,7 +21,7 @@ interface AIInsightsProps {
 
 interface Insight {
   id: string;
-  type: "conflict" | "hypothesis" | "gap" | "evidence_upgrade";
+  type: "conflict" | "hypothesis" | "gap" | "evidence_upgrade" | "pathway_summary";
   severity: "high" | "medium" | "low";
   title: string;
   description: string;
@@ -33,6 +34,67 @@ interface Insight {
 
 function generateInsights(matrixData: MatrixData, projectId: string): Insight[] {
   const insights: Insight[] = [];
+
+  // 0. Pathway summary insights — 每个 pathway 的整体统计
+  const pathwayStats = new Map<string, {
+    up: number; down: number; noChange: number;
+    papers: Set<string>; avgStrength: number; totalStrength: number; count: number;
+  }>();
+
+  for (const row of matrixData.rows) {
+    for (const [cellId, cell] of Object.entries(row.cells)) {
+      if (!cellId.startsWith("pathway:")) continue;
+      const name = cellId.replace("pathway:", "");
+      if (!pathwayStats.has(name)) {
+        pathwayStats.set(name, { up: 0, down: 0, noChange: 0, papers: new Set(), avgStrength: 0, totalStrength: 0, count: 0 });
+      }
+      const stats = pathwayStats.get(name)!;
+      if (cell.direction === "up") stats.up++;
+      else if (cell.direction === "down") stats.down++;
+      else stats.noChange++;
+      stats.papers.add(row.paperTitle);
+      stats.totalStrength += cell.evidenceStrength;
+      stats.count++;
+    }
+  }
+
+  // 只为 >=3 篇论文覆盖的 pathway 生成 summary insight
+  for (const [name, stats] of pathwayStats) {
+    if (stats.papers.size < 3) continue;
+    stats.avgStrength = Math.round(stats.totalStrength / stats.count);
+
+    const total = stats.up + stats.down + stats.noChange;
+    const dominant = stats.up > stats.down ? "up" : stats.down > stats.up ? "down" : null;
+    const dominantPct = dominant ? Math.round(((dominant === "up" ? stats.up : stats.down) / total) * 100) : 0;
+
+    const dirLabel = dominant === "up" ? "上调" : dominant === "down" ? "下调" : "无明确趋势";
+    const consistency = dominantPct;
+
+    let severity: Insight["severity"] = "low";
+    let description: string;
+
+    if (consistency >= 80) {
+      description = `${stats.papers.size} 篇文献中 ${dominantPct}% 一致报道 ${name} ${dirLabel}（平均证据强度 ${stats.avgStrength}/100）。`;
+      severity = "low";
+    } else if (consistency >= 60) {
+      description = `${stats.papers.size} 篇文献中 ${dominantPct}% 报道 ${name} ${dirLabel}，但有部分不一致（平均证据强度 ${stats.avgStrength}/100）。`;
+      severity = "medium";
+    } else {
+      description = `${stats.papers.size} 篇文献对 ${name} 方向不一致（${stats.up}↑/${stats.down}↓/${stats.noChange} 无变化），平均证据强度 ${stats.avgStrength}/100。需要更多文献。`;
+      severity = "high";
+    }
+
+    insights.push({
+      id: `summary-${name}`,
+      type: "pathway_summary",
+      severity,
+      title: `${name}：${stats.up}↑ ${stats.down}↓ ${stats.noChange}— 一致性 ${consistency}%`,
+      description,
+      actionLabel: "查看矩阵详情",
+      actionHref: "",
+      actionType: "info",
+    });
+  }
 
   // 1. Conflict insights
   for (const conflict of matrixData.conflicts) {
@@ -209,6 +271,7 @@ function InsightCard({
     hypothesis: <FlaskConical size={16} className="text-purple-500 shrink-0" />,
     gap: <Search size={16} className="text-blue-500 shrink-0" />,
     evidence_upgrade: <Lightbulb size={16} className="text-amber-500 shrink-0" />,
+    pathway_summary: <BarChart3 size={16} className="text-indigo-500 shrink-0" />,
   };
 
   const borderColorMap = {
@@ -246,11 +309,19 @@ export function AIInsights({ matrixData, projectId }: AIInsightsProps) {
 
   const insights = useMemo(() => generateInsights(matrixData, projectId), [matrixData, projectId]);
 
-  if (insights.length === 0) return null;
+  // 按类型优先级排序：conflict > hypothesis > gap > evidence_upgrade > pathway_summary
+  const sortedInsights = useMemo(() => {
+    const typePriority: Record<string, number> = {
+      conflict: 0, hypothesis: 1, gap: 2, evidence_upgrade: 3, pathway_summary: 4,
+    };
+    return [...insights].sort((a, b) => typePriority[a.type] - typePriority[b.type]);
+  }, [insights]);
 
-  const highPriority = insights.filter((i) => i.severity === "high");
-  const mediumPriority = insights.filter((i) => i.severity === "medium");
-  const lowPriority = insights.filter((i) => i.severity === "low");
+  if (sortedInsights.length === 0) return null;
+
+  const highPriority = sortedInsights.filter((i) => i.severity === "high");
+  const mediumPriority = sortedInsights.filter((i) => i.severity === "medium");
+  const lowPriority = sortedInsights.filter((i) => i.severity === "low");
 
   return (
     <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl overflow-hidden">
@@ -260,7 +331,7 @@ export function AIInsights({ matrixData, projectId }: AIInsightsProps) {
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-blue-800">
           <Lightbulb size={16} className="text-blue-600" />
-          AI 洞察 — {insights.length} 条建议
+          AI 洞察 — {sortedInsights.length} 条建议
           {highPriority.length > 0 && (
             <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">
               {highPriority.length} 条高优先

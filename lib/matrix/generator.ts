@@ -34,6 +34,7 @@ export interface MatrixRow {
   drugConc: string; // 药物+浓度
   cellLine: string;
   species: string;
+  duration?: string; // 处理时间
   year?: number;
   cells: Record<string, MatrixCell>;
 }
@@ -75,14 +76,15 @@ export function calculateEvidenceStrength(opts: {
   sampleSize?: number | null;
   statisticalMethod?: string | null;
   significance?: string | null;
+  impactFactor?: number | null; // 期刊影响因子
 }): number {
   let score = 30; // 基础分
 
   // 实验方法评分 (0-25)
   if (opts.expMethod) {
-    const method = opts.expMethod.toLowerCase();
-    const goldStandard = ["western blot", "wb", "qpcr", "rt-pcr", "flow cytometry", "facs", "elisa", "immunofluorescence", "if", "confocal"];
-    const goodMethod = ["luciferase", "co-ip", "coimmunoprecipitation", "chip", "pull-down", "mass spec", "sequencing", "rna-seq"];
+    const method = normalizeMethodName(opts.expMethod);
+    const goldStandard = ["western blot", "wb", "qpcr", "rt-pcr", "rt-qpcr", "flow cytometry", "facs", "elisa", "immunofluorescence", "if", "confocal", "immunohistochemistry", "ihc", "immunocytochemistry", "icc"];
+    const goodMethod = ["luciferase", "co-ip", "coimmunoprecipitation", "chip", "pull-down", "mass spec", "mass spectrometry", "sequencing", "rna-seq", "scrnaseq", "atac-seq", "chromatin immunoprecipitation"];
     if (goldStandard.some(m => method.includes(m))) score += 25;
     else if (goodMethod.some(m => method.includes(m))) score += 20;
     else score += 10;
@@ -96,9 +98,17 @@ export function calculateEvidenceStrength(opts: {
     else score += 5;
   }
 
-  // 统计方法评分 (0-15)
+  // 统计方法评分 (0-15 基础 + 10 高级奖励)
   if (opts.statisticalMethod) {
     score += 15;
+    // 高级统计方法额外加分
+    const stat = opts.statisticalMethod.toLowerCase();
+    if (/(?:two-way|multi)\s*(?:anova|factorial)/.test(stat) ||
+        /mixed[\s-]effects?/.test(stat) ||
+        /cox\s*(?:proportional|regression|model)/.test(stat) ||
+        /kaplan[\s-]meier/.test(stat)) {
+      score += 10;
+    }
   }
 
   // 显著性标记评分 (0-5)
@@ -110,7 +120,33 @@ export function calculateEvidenceStrength(opts: {
     else if (sig !== "ns" && sig !== "n.s." && sig !== "not significant") score += 2;
   }
 
+  // 期刊影响因子评分 (0-10)
+  if (opts.impactFactor != null && opts.impactFactor > 0) {
+    if (opts.impactFactor >= 10) score += 10;
+    else if (opts.impactFactor >= 5) score += 7;
+    else if (opts.impactFactor >= 3) score += 4;
+    else score += 2;
+  }
+
   return Math.min(100, Math.max(0, score));
+}
+
+/**
+ * 归一化实验方法名称（展开常见缩写）
+ */
+function normalizeMethodName(method: string): string {
+  const lower = method.toLowerCase().trim();
+  const ABBREVIATIONS: Record<string, string> = {
+    "wb": "western blot",
+    "ihc": "immunohistochemistry",
+    "icc": "immunocytochemistry",
+    "if": "immunofluorescence",
+    "facs": "flow cytometry",
+    "co-ip": "coimmunoprecipitation",
+    "chip": "chromatin immunoprecipitation",
+    "ms": "mass spectrometry",
+  };
+  return ABBREVIATIONS[lower] || lower;
 }
 
 /**
@@ -133,6 +169,7 @@ interface ExtractionInput {
   paperId: string;
   paperTitle: string;
   year?: number;
+  impactFactor?: number | null; // 期刊影响因子
   experiments: ExperimentResult[];
 }
 
@@ -158,10 +195,11 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
       const rowId = `${input.paperId}-${i}`;
       const cells: Record<string, MatrixCell> = {};
 
-      // 通路变化 → 列
+      // 通路变化 → 列（归一化名称）
       for (const pe of exp.pathway_effects) {
-        const colId = `pathway:${pe.pathway}`;
-        ensureColumn(allColumns, colId, pe.pathway, "pathway", columnCounts);
+        const normalizedName = normalizePathway(pe.pathway);
+        const colId = `pathway:${normalizedName}`;
+        ensureColumn(allColumns, colId, normalizedName, "pathway", columnCounts);
 
         cells[colId] = {
           direction: pe.direction,
@@ -176,15 +214,17 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
             sampleSize: exp.sample_size,
             statisticalMethod: exp.statistical_test,
             significance: pe.significance,
+            impactFactor: input.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
       }
 
-      // 表型变化 → 列
+      // 表型变化 → 列（归一化名称）
       for (const ph of exp.phenotype_effects) {
-        const colId = `phenotype:${ph.phenotype}`;
-        ensureColumn(allColumns, colId, ph.phenotype, "phenotype", columnCounts);
+        const normalizedName = normalizePhenotype(ph.phenotype);
+        const colId = `phenotype:${normalizedName}`;
+        ensureColumn(allColumns, colId, normalizedName, "phenotype", columnCounts);
 
         cells[colId] = {
           direction: ph.direction,
@@ -199,6 +239,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
             sampleSize: exp.sample_size,
             statisticalMethod: exp.statistical_test,
             significance: null,
+            impactFactor: input.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
@@ -211,6 +252,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         drugConc,
         cellLine,
         species: exp.model.species || "",
+        duration: exp.drug_intervention.duration || "",
         year: input.year,
         cells,
       });
@@ -222,11 +264,11 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
     (a, b) => b.count - a.count
   );
 
-  // 检测冲突
-  const conflicts = detectConflicts(rows, columns);
+  // 使用智能冲突检测（区分真冲突与可解释差异）
+  const conflicts = detectSmartConflicts(rows, columns);
 
-  // 检测空白
-  const gaps = detectGaps(rows, columns);
+  // 使用智能空白检测（仅标记有意义的空白）
+  const gaps = detectSmartGaps(rows, columns);
 
   return {
     rows,
@@ -325,7 +367,7 @@ function incrementCount(counts: Map<string, number>, id: string) {
 export interface DBExtraction {
   id: string;
   paperId: string;
-  paper: { title: string; year: number | null };
+  paper: { title: string; year: number | null; impactFactor?: number | null };
   drugName: string | null;
   drugConc: string | null;
   cellLine: string | null;
@@ -341,6 +383,18 @@ export interface DBExtraction {
     phenotype: string;
     direction: string;
     fold_change?: string | null;
+  }> | null;
+  // 关系型数据（新增，优先使用）
+  pathwayEffectsRelational?: Array<{
+    pathway: string;
+    direction: string;
+    significance?: string | null;
+    method?: string | null;
+  }> | null;
+  phenotypeEffectsRelational?: Array<{
+    phenotype: string;
+    direction: string;
+    foldChange?: string | null;
   }> | null;
   method: string | null;
   expMethod: string | null;
@@ -369,9 +423,12 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
 
     const cells: Record<string, MatrixCell> = {};
 
-    // 通路效果 → 列（使用 normalize 归一化名称）
-    if (ext.pathwayEffects) {
-      for (const pe of ext.pathwayEffects) {
+    // 通路效果 → 列（优先关系型数据，回退 JSON）
+    const pathwayData = ext.pathwayEffectsRelational?.length
+      ? ext.pathwayEffectsRelational
+      : ext.pathwayEffects;
+    if (pathwayData) {
+      for (const pe of pathwayData) {
         const normalizedName = normalizePathway(pe.pathway);
         const colId = `pathway:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "pathway", columnCounts);
@@ -392,15 +449,19 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
             sampleSize: ext.sampleSize,
             statisticalMethod: ext.method,
             significance: pe.significance,
+            impactFactor: ext.paper.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
       }
     }
 
-    // 表型效果 → 列（使用 normalize 归一化名称）
-    if (ext.phenotypeEffects) {
-      for (const ph of ext.phenotypeEffects) {
+    // 表型效果 → 列（优先关系型数据，回退 JSON）
+    const phenotypeData = ext.phenotypeEffectsRelational?.length
+      ? ext.phenotypeEffectsRelational
+      : ext.phenotypeEffects;
+    if (phenotypeData) {
+      for (const ph of phenotypeData) {
         const normalizedName = normalizePhenotype(ph.phenotype);
         const colId = `phenotype:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "phenotype", columnCounts);
@@ -409,7 +470,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
           direction: ph.direction as "up" | "down" | "no_change" | null,
           significance: null,
           method: null,
-          detail: ph.fold_change || "",
+          detail: String((ph as Record<string, unknown>).foldChange || (ph as Record<string, unknown>).fold_change || ""),
           paperTitle: ext.paper.title,
           evidenceQuote: ext.rawText || ext.conclusion || "",
           experimentIndex: 0,
@@ -418,6 +479,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
             sampleSize: ext.sampleSize,
             statisticalMethod: ext.method,
             significance: null,
+            impactFactor: ext.paper.impactFactor,
           }),
         };
         incrementCount(columnCounts, colId);
@@ -431,6 +493,7 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
       drugConc,
       cellLine,
       species: ext.species || "",
+      duration: ext.duration || "",
       year: ext.paper.year ?? undefined,
       cells,
     });
@@ -495,11 +558,14 @@ function detectSmartConflicts(
 
     if (ups.length === 0 || downs.length === 0) continue;
 
-    // 按 (drugConc, cellLine) 分组，检查是否有真冲突
+    // 预构建 Set，避免循环内 Array.includes
+    const upIds = new Set(ups.map(r => r.id));
+
+    // 按 (drugConc, cellLine, species, duration) 分组，检查是否有真冲突
     const conditions = new Map<string, { ups: number; downs: number }>();
     for (const row of [...ups, ...downs]) {
-      const key = `${row.drugConc}|||${row.cellLine}`;
-      const dir = ups.includes(row) ? "up" : "down";
+      const key = `${row.drugConc}|||${row.cellLine}|||${row.species}|||${row.duration || ""}`;
+      const dir = upIds.has(row.id) ? "up" : "down";  // O(1)
       const existing = conditions.get(key) || { ups: 0, downs: 0 };
       if (dir === "up") existing.ups++;
       else existing.downs++;
@@ -513,9 +579,9 @@ function detectSmartConflicts(
     for (const [key, counts] of conditions) {
       if (counts.ups > 0 && counts.downs > 0) {
         hasRealConflict = true;
-        const [conc, cell] = key.split("|||");
+        const [conc, cell, species, duration] = key.split("|||");
         conditionDetails.push(
-          `${conc || "未知浓度"} ${cell || ""} 中 ${counts.ups}↑ vs ${counts.downs}↓`
+          `${conc || "未知浓度"} ${cell || ""}${species ? ` (${species})` : ""}${duration ? ` ${duration}` : ""} 中 ${counts.ups}↑ vs ${counts.downs}↓`
         );
       }
     }
@@ -527,12 +593,18 @@ function detectSmartConflicts(
         description: `真冲突：${conditionDetails.join("；")}`,
       });
     } else if (ups.length > 0 && downs.length > 0) {
-      // 可解释差异：不同剂量或不同细胞系
+      // 可解释差异：不同剂量、不同细胞系或不同物种
       const uniqueConcs = new Set(
         [...ups, ...downs].map((r) => r.drugConc).filter(Boolean)
       );
       const uniqueCells = new Set(
         [...ups, ...downs].map((r) => r.cellLine).filter(Boolean)
+      );
+      const uniqueSpecies = new Set(
+        [...ups, ...downs].map((r) => r.species).filter(Boolean)
+      );
+      const uniqueDurations = new Set(
+        [...ups, ...downs].map((r) => r.duration).filter(Boolean)
       );
 
       let reason = "";
@@ -540,6 +612,10 @@ function detectSmartConflicts(
         reason = `剂量依赖关系（${[...uniqueConcs].join(" vs ")}）`;
       else if (uniqueCells.size > 1)
         reason = `细胞系差异（${[...uniqueCells].join(" vs ")}）`;
+      else if (uniqueSpecies.size > 1)
+        reason = `物种差异（${[...uniqueSpecies].join(" vs ")}）`;
+      else if (uniqueDurations.size > 1)
+        reason = `处理时间差异（${[...uniqueDurations].join(" vs ")}）`;
       else
         reason = `${ups.length} 篇上调 vs ${downs.length} 篇下调`;
 
