@@ -56,6 +56,7 @@ export async function POST(
               direction: pe.direction,
               significance: pe.significance,
               method: pe.method,
+              foldChange: pe.foldChange,
             })),
           });
         }

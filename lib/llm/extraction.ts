@@ -26,11 +26,16 @@ export const ExperimentSchema = z.object({
     species: z.string().nullable().describe("物种"),
     passage: z.string().nullable().describe("传代范围"),
   }),
+  experiment_type: z.enum(["in_vitro", "in_vivo", "clinical", "unknown"]).describe(
+    "实验类型：in_vitro(体外细胞实验), in_vivo(体内动物实验), clinical(临床研究), unknown(不确定)"
+  ),
+  ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
   pathway_effects: z.array(z.object({
     pathway: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
     significance: z.string().nullable(),
     method: z.string().nullable(),
+    fold_change: z.string().nullable().describe("通路变化倍数，如 2.3-fold 或 p-AKT/AKT ratio from 1.0 to 3.2"),
   })),
   phenotype_effects: z.array(z.object({
     phenotype: z.string(),
