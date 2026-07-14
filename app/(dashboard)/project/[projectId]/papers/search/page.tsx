@@ -35,10 +35,15 @@ interface ExtractionResult {
   title: string;
   extraction: {
     experiments: Array<{
-      drug_intervention: { name: string; concentration: string | null; duration: string | null; co_treatment: string | null };
+      intervention: { type: string; target: string; concentration: string | null; duration: string | null; method: string | null; co_treatment: string | null };
       model: { cell_line: string | null; species: string | null; passage: string | null };
-      pathway_effects: Array<{ pathway: string; direction: "up" | "down" | "no_change"; significance: string | null; method: string | null }>;
-      phenotype_effects: Array<{ phenotype: string; direction: "up" | "down" | "no_change"; fold_change: string | null }>;
+      experiment_type: string;
+      experiment_methods: string[];
+      ic50: string | null;
+      dose_response: Array<{ concentration: string; effect_size: string; direction: string }> | null;
+      pathway_effects: Array<{ pathway: string; direction: "up" | "down" | "no_change"; significance: string | null; method: string | null; fold_change: string | null; downstream_of: string | null }>;
+      phenotype_effects: Array<{ phenotype: string; direction: "up" | "down" | "no_change"; fold_change: string | null; caused_by: string | null }>;
+      mechanistic_chain: Array<{ from: string; to: string; relation: string }> | null;
       controls: string[];
       statistical_test: string | null;
       sample_size: number | null;
@@ -736,7 +741,7 @@ export default function ProjectPaperSearchPage() {
             extractions={extractionData.map((r) => ({
               paperId: r.paperId,
               title: r.title,
-              extraction: r.extraction,
+              extraction: r.extraction as import("@/lib/llm/extraction").ExtractionResult | null,
               error: r.error,
             }))}
             onConfirm={handleExtractionConfirm}

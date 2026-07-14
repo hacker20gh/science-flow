@@ -160,7 +160,7 @@ function ExperimentCard({
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  const drug = experiment.drug_intervention;
+  const iv = experiment.intervention;
   const model = experiment.model;
 
   return (
@@ -175,9 +175,9 @@ function ExperimentCard({
           </span>
           <div className="min-w-0">
             <span className="text-sm font-medium">
-              {drug.name}
-              {drug.concentration && ` ${drug.concentration}`}
-              {drug.duration && ` · ${drug.duration}`}
+              {iv.target}
+              {iv.concentration && ` ${iv.concentration}`}
+              {iv.duration && ` · ${iv.duration}`}
             </span>
             <span className="text-xs text-gray-400 ml-2">
               {model.cell_line}

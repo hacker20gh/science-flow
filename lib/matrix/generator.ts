@@ -18,6 +18,19 @@ export interface MatrixCell {
   evidenceQuote: string;
   experimentIndex: number; // 该论文的第几个实验
   evidenceStrength: number; // 0-100 证据强度评分
+  // 扩展字段（可选，用于 tooltip 展示完整实验上下文）
+  intervention?: {
+    type: string; // drug, knockdown, overexpression, knockout, stimulation, inhibition
+    target: string; // 干预靶点（药物名或基因名）
+    concentration: string | null;
+    duration: string | null;
+  };
+  experimentType?: string; // cell_line, animal_model, clinical_trial 等
+  experimentMethods?: string[]; // ["Western blot", "qPCR", ...]
+  ic50?: string | null; // IC50/EC50 值
+  downstreamOf?: string | null; // 上游通路名（如有）
+  causedBy?: string | null; // 导致此表型的通路（如有）
+  foldChange?: string | null; // 变化倍数
 }
 
 export interface MatrixColumn {
@@ -182,10 +195,12 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
     for (let i = 0; i < input.experiments.length; i++) {
       const exp = input.experiments[i];
 
-      // 构造行
+      // 构造行（兼容新旧字段名）
+      const expAny = exp as Record<string, unknown>;
+      const iv = (expAny.intervention || expAny.drug_intervention) as Record<string, unknown> | undefined;
       const drugConc = [
-        exp.drug_intervention.name,
-        exp.drug_intervention.concentration,
+        (iv?.target || iv?.name) as string,
+        iv?.concentration as string,
       ]
         .filter(Boolean)
         .join(" ");
@@ -252,7 +267,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         drugConc,
         cellLine,
         species: exp.model.species || "",
-        duration: exp.drug_intervention.duration || "",
+        duration: (iv?.duration as string) || "",
         year: input.year,
         cells,
       });
@@ -401,6 +416,23 @@ export interface DBExtraction {
   sampleSize: number | null;
   conclusion: string | null;
   rawText: string | null;
+  // 实验类型与定量数据（新增，对应 Extraction 表扩展字段）
+  interventionType?: string | null; // drug, knockdown, overexpression 等
+  interventionMethod?: string | null; // siRNA, shRNA, CRISPR/Cas9 等
+  experimentType?: string | null; // cell_line, animal_model 等
+  experimentMethods?: string[] | null; // ["Western blot", "qPCR", ...]
+  ic50?: string | null; // IC50/EC50 值
+  doseResponse?: Array<{
+    concentration: string;
+    effectSize: string;
+    direction: string;
+  }> | null;
+  mechanisticChain?: Array<{
+    from: string;
+    to: string;
+    relation: string;
+  }> | null;
+  coTreatment?: string | null;
 }
 
 /**
@@ -433,6 +465,13 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
         const colId = `pathway:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "pathway", columnCounts);
 
+        // JSON pathwayEffects 中的 downstream_of（关系型 PathwayEffect 不存储此字段）
+        const peJson = (ext.pathwayEffects || []).find(
+          (p) => p.pathway === pe.pathway
+        );
+        const downstreamOf =
+          (peJson as Record<string, unknown> | undefined)?.downstream_of as string | null | undefined;
+
         cells[colId] = {
           direction: pe.direction as "up" | "down" | "no_change" | null,
           significance: pe.significance || null,
@@ -451,6 +490,20 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
             significance: pe.significance,
             impactFactor: ext.paper.impactFactor,
           }),
+          // 扩展字段：干预信息 + 实验类型 + 定量数据
+          intervention: {
+            type: ext.interventionType || "drug",
+            target: ext.drugName || "",
+            concentration: ext.drugConc || null,
+            duration: ext.duration || null,
+          },
+          experimentType: ext.experimentType || undefined,
+          experimentMethods: (ext.experimentMethods as string[] | null) || undefined,
+          ic50: ext.ic50 || null,
+          foldChange: (pe as Record<string, unknown>).foldChange as string | null
+            || (pe as Record<string, unknown>).fold_change as string | null
+            || null,
+          downstreamOf: downstreamOf || null,
         };
         incrementCount(columnCounts, colId);
       }
@@ -465,6 +518,13 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
         const normalizedName = normalizePhenotype(ph.phenotype);
         const colId = `phenotype:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "phenotype", columnCounts);
+
+        // JSON phenotypeEffects 中的 caused_by（关系型 PhenotypeEffect 不存储此字段）
+        const phJson = (ext.phenotypeEffects || []).find(
+          (p) => p.phenotype === ph.phenotype
+        );
+        const causedBy =
+          (phJson as Record<string, unknown> | undefined)?.caused_by as string | null | undefined;
 
         cells[colId] = {
           direction: ph.direction as "up" | "down" | "no_change" | null,
@@ -481,6 +541,20 @@ export function generateMatrixFromDB(extractions: DBExtraction[]): MatrixData {
             significance: null,
             impactFactor: ext.paper.impactFactor,
           }),
+          // 扩展字段：干预信息 + 实验类型 + 表型特有字段
+          intervention: {
+            type: ext.interventionType || "drug",
+            target: ext.drugName || "",
+            concentration: ext.drugConc || null,
+            duration: ext.duration || null,
+          },
+          experimentType: ext.experimentType || undefined,
+          experimentMethods: (ext.experimentMethods as string[] | null) || undefined,
+          ic50: ext.ic50 || null,
+          foldChange: (ph as Record<string, unknown>).foldChange as string | null
+            || (ph as Record<string, unknown>).fold_change as string | null
+            || null,
+          causedBy: causedBy || null,
         };
         incrementCount(columnCounts, colId);
       }

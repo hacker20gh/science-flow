@@ -68,9 +68,9 @@ function validateExperiment(exp: ExperimentResult, index: number): ExperimentVal
   // 创建可修改的副本
   const cleaned: ExperimentResult = JSON.parse(JSON.stringify(exp));
 
-  // 1. 校验 drug_intervention
-  if (!cleaned.drug_intervention.name || cleaned.drug_intervention.name.trim() === "") {
-    issues.push({ field: "drug_intervention.name", issue: "药物名称为空", severity: "error", autoFixed: false });
+  // 1. 校验 intervention
+  if (!cleaned.intervention.target || cleaned.intervention.target.trim() === "") {
+    issues.push({ field: "intervention.target", issue: "干预靶点为空", severity: "error", autoFixed: false });
     score -= 30;
   }
 

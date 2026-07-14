@@ -15,10 +15,15 @@ import { sleep } from "@/lib/utils/sleep";
 // ===== Zod Schema =====
 
 export const ExperimentSchema = z.object({
-  drug_intervention: z.object({
-    name: z.string().describe("药物或干预名称"),
-    concentration: z.string().nullable().describe("浓度，如 2 μM"),
+  intervention: z.object({
+    type: z.enum(["drug", "knockdown", "overexpression", "knockout", "stimulation", "inhibition"]).describe(
+      "干预类型: drug(药物), knockdown(基因敲低:siRNA/shRNA), overexpression(过表达:plasmid/转染), " +
+      "knockout(基因敲除:CRISPR), stimulation(刺激因子:LPS/TNF-α), inhibition(抑制剂)"
+    ),
+    target: z.string().describe("干预靶点：药物名或基因名（如 cisplatin, TP53, EGFR）"),
+    concentration: z.string().nullable().describe("浓度，如 2 μM 或 50 nM siRNA"),
     duration: z.string().nullable().describe("处理时间，如 24h"),
+    method: z.string().nullable().describe("干预方法（仅 knockdown/overexpression/knockout 时填写）: siRNA, shRNA, CRISPR/Cas9, plasmid 等"),
     co_treatment: z.string().nullable().describe("联合处理"),
   }),
   model: z.object({
@@ -26,17 +31,53 @@ export const ExperimentSchema = z.object({
     species: z.string().nullable().describe("物种"),
     passage: z.string().nullable().describe("传代范围"),
   }),
+  experiment_type: z.enum([
+    "cell_line", "primary_cell", "organoid", "tissue_slice",
+    "animal_model", "xenograft", "patient_sample",
+    "clinical_trial", "clinical_obs", "case_report",
+    "bioinformatics", "omics", "meta_analysis", "review", "unknown",
+  ]).describe(
+    "实验系统: cell_line(细胞系), primary_cell(原代细胞), organoid(类器官/3D培养), " +
+    "tissue_slice(组织切片), animal_model(动物模型), xenograft(异种移植/PDX), " +
+    "patient_sample(患者样本), clinical_trial(临床试验RCT), clinical_obs(队列/病例对照), " +
+    "case_report(病例报告), bioinformatics(生信分析), omics(组学), " +
+    "meta_analysis(系统综述/meta分析), review(综述), unknown(不确定)"
+  ),
+  experiment_methods: z.array(z.string()).describe(
+    "实验方法（可多个）: 如 Western blot, qPCR, RNA-seq, flow cytometry, " +
+    "immunohistochemistry, ELISA, CRISPR screen, ChIP-seq, mass spectrometry 等"
+  ),
+  ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
+  dose_response: z.array(z.object({
+    concentration: z.string().describe("浓度，如 1 μM"),
+    effect_size: z.string().describe("效应大小，如 1.2-fold 或 35%"),
+    direction: z.enum(["up", "down", "no_change"]),
+  })).nullable().describe("剂量-反应数据（论文测试多个浓度时填写）"),
   pathway_effects: z.array(z.object({
     pathway: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
     significance: z.string().nullable(),
     method: z.string().nullable(),
+    fold_change: z.string().nullable().describe("通路变化倍数，如 2.3-fold"),
+    downstream_of: z.string().nullable().describe("如果此通路是另一个通路的下游，填写上游通路名"),
   })),
   phenotype_effects: z.array(z.object({
     phenotype: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
     fold_change: z.string().nullable(),
+    caused_by: z.string().nullable().describe("哪个通路导致此表型变化"),
   })),
+  mechanistic_chain: z.array(z.object({
+    from: z.string().describe("上游通路/分子"),
+    to: z.string().describe("下游通路/分子"),
+    relation: z.string().describe("关系: activates, inhibits, phosphorylates 等"),
+  })).nullable().describe("因果链：通路之间的上下游关系"),
+  validated_by: z.array(z.string()).nullable().describe(
+    "此实验被哪些其他实验验证/支持。填写验证实验的关键描述。"
+  ),
+  validates: z.string().nullable().describe(
+    "此实验验证/支持哪个假设或发现。"
+  ),
   controls: z.array(z.string()),
   statistical_test: z.string().nullable(),
   sample_size: z.number().nullable(),
@@ -64,10 +105,40 @@ const EXTRACTION_TOOL = createToolFromSchema(
 
 const CORE_PROMPT = `You are a biomedical literature analysis expert.
 
+MULTILINGUAL SUPPORT:
+- This paper may be in Chinese, Japanese, or other non-English language.
+- Extract ALL information regardless of the paper's language.
+- Always output in English (translate pathway/phenotype names to standard English).
+- Chinese papers often have: 目的(Objective), 方法(Methods), 结果(Results), 结论(Conclusion)
+- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
+
 EXTRACTION RULES:
 - A single paper may contain MULTIPLE independent experiments. Extract each separately.
 - Only extract findings EXPLICITLY stated in the text. Do NOT infer or hallucinate.
 - If information is not available, use null.
+
+NEGATIVE RESULTS ARE IMPORTANT:
+- "not affected", "no significant change", "unchanged", "no effect" = direction "no_change"
+- ALWAYS extract these as experiments with direction "no_change". Do NOT skip them.
+- Negative results are as scientifically valuable as positive results.
+- If a paper states "p53 expression was not affected by treatment X", extract it as:
+  pathway_effects: [{ pathway: "p53", direction: "no_change", ... }]
+
+TABLE HANDLING RULES:
+- When you see a Markdown table, each ROW with numeric data is potentially a SEPARATE experiment.
+- Column headers define what is being measured (e.g., p-AKT, p-mTOR, Apoptosis rate).
+- Each row with different concentration/dose/cell line = separate experiment entry.
+- Extract ALL rows, not just the one with the most significant result.
+- For table data, set evidence_quote to include the table reference (e.g., "Table 1, row 3").
+- If a table shows dose-response data across multiple concentrations, fill the dose_response array AND create a separate experiment for the highest/most significant concentration.
+
+TABLE EXAMPLE:
+| Concentration | p53 (WB) | Apoptosis (%) |
+| 1 μM         | 1.2-fold  | 15%           |
+| 5 μM         | 2.3-fold  | 35%           |
+| 10 μM        | 3.1-fold  | 60%           |
+
+-> Extract 3 experiments (one per concentration), plus fill dose_response array for the concentration series.
 
 ANTI-HALLUCINATION (hard rules):
 - Each field MUST have an evidence_quote from the original text.
@@ -113,14 +184,26 @@ Expected output:
 const ABSTRACT_PROMPT = `You are analyzing a paper ABSTRACT (not full text).
 Many experimental details will be unavailable - this is expected and OK.
 
+MULTILINGUAL SUPPORT:
+- This paper may be in Chinese, Japanese, or other non-English language.
+- Extract ALL information regardless of the paper's language.
+- Always output in English (translate pathway/phenotype names to standard English).
+- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
+
 RELAXED RULES:
-- drug_intervention.concentration/duration/co_treatment: use null if not explicitly stated in the abstract
+- intervention.concentration/duration/co_treatment/method: use null if not explicitly stated
 - model.passage: almost always unavailable in abstracts, use null
+- experiment_type: infer from context (cell_line for cell experiments, bioinformatics for data mining, etc.)
+- experiment_methods: list from context, empty array if unknown
 - statistical_test/sample_size: often not in abstract, use null
 - controls: empty array if not mentioned
-- confidence: cap at 0.6 (abstract extraction is inherently less complete)
-- Focus on what IS available: drug name, cell line, pathway direction, phenotype direction
+- confidence: cap at 0.6
+- Focus on what IS available: intervention target, cell line, pathway direction, phenotype direction
 - For evidence_quote: use the EXACT sentence from the abstract
+
+NEGATIVE RESULTS: "no_change" direction is important. Extract "not affected", "no significant change", "unchanged" as experiments with direction "no_change". Do NOT skip them.
+
+TABLE HANDLING: When you see table data, each row with different concentration/dose/cell line = separate experiment entry. Extract ALL rows.
 
 NAMING CONVENTIONS (same as standard - use exact names):
 Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
@@ -136,6 +219,13 @@ Keep all anti-hallucination rules. Only extract what is explicitly stated.`;
  */
 const RELAXED_PROMPT = `You are extracting experimental data from a biomedical paper.
 This is a RETRY because the previous extraction returned no results.
+
+MULTILINGUAL SUPPORT:
+- This paper may be in Chinese, Japanese, or other non-English language.
+- Extract ALL information regardless of the paper's language.
+- Always output in English (translate pathway/phenotype names to standard English).
+- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
+
 Be MORE LENIENT in extraction:
 - Extract even when fields are incomplete (set missing fields to null)
 - Focus on identifying ANY pathway direction changes (up/down/no_change)
@@ -143,6 +233,11 @@ Be MORE LENIENT in extraction:
 - Drug name and cell line are the MOST important fields
 - If the paper mentions results but lacks specific numbers, still extract them with null for numeric fields
 - confidence can be 0.4-0.7 (acknowledging this is less certain)
+
+NEGATIVE RESULTS: "no_change" direction is important. Extract "not affected", "no significant change", "unchanged" as experiments with direction "no_change". Do NOT skip them.
+
+TABLE HANDLING: When you see table data, each row with different concentration/dose/cell line = separate experiment entry. Extract ALL rows.
+
 Keep: anti-hallucination rules (evidence_quote required), naming conventions
 
 NAMING CONVENTIONS (use exact names):
@@ -440,21 +535,35 @@ function buildChunks(sections: SectionInfo[], title: string, abstractSnippet: st
     if (fullText.length <= MAX_CHARS) {
       chunks.push(fullText);
     } else {
-      // 拆分大 section：按段落边界切分
+      // 按段落拆分，但使用"滑动窗口"保持上下文，避免实验描述被截断
       const paragraphs = section.text.split(/\n\n+/);
+
       let currentChunk = contextPrefix + `\n\n=== ${section.label} ===\n`;
+      let prevParagraphTail = ""; // 保留上一段的最后部分作为上下文
 
       for (const para of paragraphs) {
-        if (currentChunk.length + para.length + 2 > MAX_CHARS) {
-          if (currentChunk.length > contextPrefix.length + 50) {
+        const paraWithOverlap = prevParagraphTail
+          ? `[...continued from above]\n${para}`
+          : para;
+
+        if (currentChunk.length + paraWithOverlap.length + 2 > MAX_CHARS) {
+          if (currentChunk.length > contextPrefix.length + 100) {
             chunks.push(currentChunk);
           }
+          // 新 chunk 开始时，带上一段的最后 200 字符作为重叠上下文
           currentChunk = contextPrefix + `\n\n=== ${section.label} (continued) ===\n`;
+          if (prevParagraphTail) {
+            currentChunk += `[...continued from above]\n${prevParagraphTail}\n\n`;
+          }
         }
+
         currentChunk += para + "\n\n";
+
+        // 保留段落的最后 200 字符作为下一段的上下文
+        prevParagraphTail = para.length > 200 ? para.slice(-200) : para;
       }
 
-      if (currentChunk.length > contextPrefix.length + 50) {
+      if (currentChunk.length > contextPrefix.length + 100) {
         chunks.push(currentChunk);
       }
     }
@@ -474,7 +583,7 @@ function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
   for (const result of results) {
     for (const exp of result.experiments) {
       // 去重 key：drug_name + cell_line + first pathway
-      const drugName = exp.drug_intervention.name.toLowerCase().trim();
+      const drugName = exp.intervention.target.toLowerCase().trim();
       const cellLine = (exp.model.cell_line || "").toLowerCase().trim();
       const primaryPathway = exp.pathway_effects[0]?.pathway?.toLowerCase().trim() || "";
       const key = `${drugName}|${cellLine}|${primaryPathway}`;
@@ -482,7 +591,7 @@ function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
       if (seen.has(key)) {
         // 已存在：取 evidence_quote 更长、confidence 更高的版本
         const existingIdx = allExperiments.findIndex(e => {
-          const eKey = `${e.drug_intervention.name.toLowerCase().trim()}|${(e.model.cell_line || "").toLowerCase().trim()}|${e.pathway_effects[0]?.pathway?.toLowerCase().trim() || ""}`;
+          const eKey = `${e.intervention.target.toLowerCase().trim()}|${(e.model.cell_line || "").toLowerCase().trim()}|${e.pathway_effects[0]?.pathway?.toLowerCase().trim() || ""}`;
           return eKey === key;
         });
         if (existingIdx >= 0) {

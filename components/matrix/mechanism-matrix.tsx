@@ -39,6 +39,41 @@ import type {
 import { getStrengthLevel } from "@/lib/matrix/generator";
 import { CellEditor } from "./cell-editor";
 
+/* ---------- 实验类型中文映射 ---------- */
+function formatExperimentType(type: string): string {
+  const map: Record<string, string> = {
+    cell_line: "细胞系",
+    primary_cell: "原代细胞",
+    organoid: "类器官",
+    tissue_slice: "组织切片",
+    animal_model: "动物模型",
+    xenograft: "异种移植",
+    patient_sample: "患者样本",
+    clinical_trial: "临床试验",
+    clinical_obs: "观察性研究",
+    case_report: "病例报告",
+    bioinformatics: "生信分析",
+    omics: "组学",
+    meta_analysis: "Meta分析",
+    review: "综述",
+    unknown: "未知",
+  };
+  return map[type] || type;
+}
+
+/* ---------- 干预类型图标 ---------- */
+function getInterventionIcon(type: string): string {
+  switch (type) {
+    case "drug": return "💊";
+    case "knockdown": return "🔇";
+    case "overexpression": return "📢";
+    case "knockout": return "🧬";
+    case "stimulation": return "⚡";
+    case "inhibition": return "🚫";
+    default: return "🧬";
+  }
+}
+
 /* ---------- Sortable Column Header ---------- */
 
 function SortableColumnHeader({
@@ -799,28 +834,29 @@ export function MechanismMatrix({
         </div>
       </div>
 
-      {/* Hover Tooltip */}
+      {/* 增强 Hover Tooltip — 展示完整实验上下文 */}
       {hoveredCell && (() => {
         const { row, col, cell, rect } = hoveredCell;
         const strength = cell.evidenceStrength != null ? getStrengthLevel(cell.evidenceStrength) : null;
         const isUp = cell.direction === "up";
         const isDown = cell.direction === "down";
-        const TOOLTIP_WIDTH = 280;
+        const TOOLTIP_WIDTH = 320;
         const MARGIN = 8;
         let left = rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
         let top = rect.top - MARGIN;
         if (left < MARGIN) left = MARGIN;
         if (left + TOOLTIP_WIDTH > window.innerWidth - MARGIN) left = window.innerWidth - MARGIN - TOOLTIP_WIDTH;
-        // 默认显示在上方，如果上方不够则显示在下方
-        const showBelow = top < 160;
+        // 默认显示在上方，如果上方不够则显示在下方（增加预估高度以适配新内容）
+        const showBelow = top < 200;
         if (showBelow) top = rect.bottom + MARGIN;
-        else top = top - 120; // 估算 tooltip 高度
+        else top = top - 180; // 预估增强 tooltip 高度
 
         return (
           <div
             className="fixed z-50 bg-gray-900 text-white rounded-lg shadow-xl p-3 pointer-events-none"
             style={{ left, top, width: TOOLTIP_WIDTH }}
           >
+            {/* 标题：方向 + 显著性 + 证据强度 */}
             <div className="flex items-center gap-2 mb-2">
               <span className={`text-base font-bold ${isUp ? "text-green-400" : isDown ? "text-red-400" : "text-gray-400"}`}>
                 {isUp ? "↑" : isDown ? "↓" : "—"} {isUp ? "上调" : isDown ? "下调" : "无变化"}
@@ -836,17 +872,85 @@ export function MechanismMatrix({
                 </span>
               )}
             </div>
+
             <div className="space-y-1 text-[11px] text-gray-300">
-              {cell.significance && <div><span className="text-gray-500">显著性：</span>{cell.significance}</div>}
-              {cell.method && <div><span className="text-gray-500">方法：</span>{cell.method}</div>}
-              <div><span className="text-gray-500">条件：</span>{row.drugConc} · {row.cellLine}</div>
-              {cell.evidenceQuote && (
-                <div className="mt-1.5 pt-1.5 border-t border-gray-700">
-                  <span className="text-gray-500">原文：</span>
-                  <span className="italic text-gray-400 line-clamp-2">&ldquo;{cell.evidenceQuote}&rdquo;</span>
+              {/* 干预信息 */}
+              {cell.intervention && cell.intervention.target && (
+                <div className="text-gray-300">
+                  <span className="text-[12px]">{getInterventionIcon(cell.intervention.type)}</span>
+                  {" "}
+                  <span className="font-medium text-gray-200">{cell.intervention.target}</span>
+                  {cell.intervention.concentration && <span className="text-gray-400"> · {cell.intervention.concentration}</span>}
+                  {cell.intervention.duration && <span className="text-gray-400"> · {cell.intervention.duration}</span>}
                 </div>
               )}
+
+              {/* 实验系统 + 方法 */}
+              {(cell.experimentType || cell.experimentMethods?.length) && (
+                <div className="text-gray-400">
+                  {cell.experimentType && <span>{formatExperimentType(cell.experimentType)}</span>}
+                  {cell.experimentMethods && cell.experimentMethods.length > 0 && (
+                    <span>{cell.experimentType ? " · " : ""}{cell.experimentMethods.join(", ")}</span>
+                  )}
+                </div>
+              )}
+
+              {/* 幅度 + IC50 */}
+              {(cell.foldChange || cell.ic50) && (
+                <div className="text-gray-400">
+                  {cell.foldChange && <span>幅度: {cell.foldChange}</span>}
+                  {cell.ic50 && <span>{cell.foldChange ? " · " : ""}IC50: {cell.ic50}</span>}
+                </div>
+              )}
+
+              {/* 上游通路（通路效果专属） */}
+              {cell.downstreamOf && (
+                <div className="text-blue-400">
+                  ↑ {cell.downstreamOf} → {col.label}
+                </div>
+              )}
+
+              {/* 导致表型的通路（表型效果专属） */}
+              {cell.causedBy && (
+                <div className="text-purple-400">
+                  ← 因 {cell.causedBy}
+                </div>
+              )}
+
+              {/* 显著性 + 实验方法 */}
+              <div className="text-gray-400">
+                {cell.significance && <span>{cell.significance}</span>}
+                {cell.method && <span>{cell.significance ? " · " : ""}{cell.method}</span>}
+              </div>
+
+              {/* 实验条件 */}
+              <div><span className="text-gray-500">条件：</span>{row.drugConc} · {row.cellLine}</div>
             </div>
+
+            {/* 证据强度进度条 */}
+            <div className="flex items-center gap-2 mt-2">
+              <div className="flex-1 bg-gray-700 rounded-full h-1.5">
+                <div
+                  className={`h-1.5 rounded-full ${
+                    (cell.evidenceStrength ?? 0) >= 60
+                      ? "bg-green-500"
+                      : (cell.evidenceStrength ?? 0) >= 40
+                        ? "bg-amber-400"
+                        : "bg-red-400"
+                  }`}
+                  style={{ width: `${cell.evidenceStrength ?? 0}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-gray-500">{cell.evidenceStrength ?? 0}/100</span>
+            </div>
+
+            {/* 原文引用 */}
+            {cell.evidenceQuote && (
+              <div className="mt-1.5 pt-1.5 border-t border-gray-700">
+                <span className="text-[10px] text-gray-500">原文：</span>
+                <span className="text-[10px] italic text-gray-400 line-clamp-3">&ldquo;{cell.evidenceQuote}&rdquo;</span>
+              </div>
+            )}
           </div>
         );
       })()}

@@ -61,9 +61,17 @@ const DEFAULT_PRICING = { input: 3, cachedInput: 0.3, output: 15 };
  * Anthropic API 的 input_tokens 包含全部输入（缓存 + 非缓存），
  * cache_read_input_tokens 是其中的缓存部分（价格为原价的 10%）。
  * 非缓存部分 = inputTokens - cachedTokens。
+ *
+ * 支持自定义价格：传入 customPricing 可覆盖内置模型价格表。
  */
-function estimateCost(model: string, inputTokens: number, outputTokens: number, cachedTokens: number = 0): number {
-  const pricing = MODEL_PRICING[model] || DEFAULT_PRICING;
+function estimateCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  cachedTokens: number = 0,
+  customPricing?: { input: number; cachedInput: number; output: number },
+): number {
+  const pricing = customPricing || MODEL_PRICING[model] || DEFAULT_PRICING;
   const nonCachedInput = Math.max(0, inputTokens - cachedTokens);
   return (
     (nonCachedInput * pricing.input + cachedTokens * pricing.cachedInput + outputTokens * pricing.output) / 1_000_000
@@ -174,13 +182,13 @@ export async function getTokenUsageStats(): Promise<ReturnType<typeof buildStats
   }
 
   try {
-    // 从 DB 读取最近 7 天的记录（上限 10000）
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // 从 DB 读取最近 30 天的记录（上限 50000）
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const records = await (prisma as any).tokenUsage.findMany({
-      where: { createdAt: { gte: sevenDaysAgo } },
+      where: { createdAt: { gte: thirtyDaysAgo } },
       orderBy: { createdAt: "desc" },
-      take: 10000,
+      take: 50000,
     });
 
     return buildStats(records as TokenUsageRecord[]);
@@ -190,7 +198,7 @@ export async function getTokenUsageStats(): Promise<ReturnType<typeof buildStats
   }
 }
 
-function buildStats(records: TokenUsageRecord[]) {
+function buildStats(records: TokenUsageRecord[], customPricing?: { input: number; cachedInput: number; output: number }) {
   // 总计（费用计算区分缓存 token）
   const totals = records.reduce(
     (acc, r) => ({
@@ -200,7 +208,7 @@ function buildStats(records: TokenUsageRecord[]) {
       calls: acc.calls + 1,
       successfulCalls: acc.successfulCalls + (r.isRetry ? 0 : 1),
       retryCalls: acc.retryCalls + (r.isRetry ? 1 : 0),
-      costUSD: acc.costUSD + estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens),
+      costUSD: acc.costUSD + estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens, customPricing),
     }),
     { inputTokens: 0, outputTokens: 0, cachedTokens: 0, calls: 0, successfulCalls: 0, retryCalls: 0, costUSD: 0 },
   );
@@ -212,7 +220,7 @@ function buildStats(records: TokenUsageRecord[]) {
     existing.inputTokens += r.inputTokens;
     existing.outputTokens += r.outputTokens;
     existing.calls += 1;
-    existing.costUSD += estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens);
+    existing.costUSD += estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens, customPricing);
     byFeature.set(r.feature, existing);
   }
 
@@ -223,7 +231,7 @@ function buildStats(records: TokenUsageRecord[]) {
     existing.inputTokens += r.inputTokens;
     existing.outputTokens += r.outputTokens;
     existing.calls += 1;
-    existing.costUSD += estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens);
+    existing.costUSD += estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens, customPricing);
     byModel.set(r.model, existing);
   }
 
@@ -253,7 +261,7 @@ function buildStats(records: TokenUsageRecord[]) {
   const recentRecords = records.slice(0, 20).map((r) => ({
     ...r,
     timestamp: new Date(r.createdAt).getTime(),
-    costUSD: estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens),
+    costUSD: estimateCost(r.model, r.inputTokens, r.outputTokens, r.cachedTokens, customPricing),
   }));
 
   return {
