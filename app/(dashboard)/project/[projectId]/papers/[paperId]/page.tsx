@@ -8,7 +8,6 @@ import {
   Pencil, Save, X, Download,
 } from "lucide-react";
 import { toast } from "sonner";
-import { jsPDF } from "jspdf";
 
 interface Extraction {
   id: string;
@@ -45,7 +44,8 @@ interface Paper {
   extractions: Extraction[];
 }
 
-function exportPaperPdf(paper: Paper) {
+async function exportPaperPdf(paper: Paper) {
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF();
   let y = 20;
 

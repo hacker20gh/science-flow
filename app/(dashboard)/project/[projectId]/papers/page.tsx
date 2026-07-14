@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
 import { useParams } from "next/navigation";
 import {
   Search, Upload, BookOpen, FileText, Check, ChevronDown, ChevronUp,
@@ -660,7 +660,7 @@ function DoiQuickImport({ projectId, onImported }: { projectId: string; onImport
 
 // ===== 论文卡片组件 =====
 
-function PaperCard({
+const PaperCard = memo(function PaperCard({
   paper, expanded, onToggle, selected, onSelect, onDelete, projectId, onExtractionDone,
 }: {
   paper: Paper;
@@ -870,4 +870,4 @@ function PaperCard({
       )}
     </div>
   );
-}
+});

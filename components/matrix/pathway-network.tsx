@@ -8,6 +8,8 @@
  * 边按关系类型区分（实线灰=激活/促进，虚线红=抑制）。
  */
 
+import { useMemo } from "react";
+
 // ==================== 类型定义 ====================
 
 /** 两个通路之间的因果关系 */
@@ -129,6 +131,10 @@ export function PathwayNetwork({
   pathwayDirections,
   onNodeClick,
 }: PathwayNetworkProps) {
+  const { nodes, edges } = useMemo(() => buildGraph(chains), [chains]);
+  const positions = useMemo(() => layoutNodes(nodes, SVG_WIDTH, SVG_HEIGHT), [nodes]);
+  const posMap = useMemo(() => Object.fromEntries(positions.map((p) => [p.name, p])), [positions]);
+
   if (chains.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
@@ -136,10 +142,6 @@ export function PathwayNetwork({
       </div>
     );
   }
-
-  const { nodes, edges } = buildGraph(chains);
-  const positions = layoutNodes(nodes, SVG_WIDTH, SVG_HEIGHT);
-  const posMap = Object.fromEntries(positions.map((p) => [p.name, p]));
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">

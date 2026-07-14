@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import type { ExperimentDesign } from "@/lib/llm/experiment-design";
-import { jsPDF } from "jspdf";
 
 interface ExperimentDesignCardProps {
   design: ExperimentDesign;
   onSave?: () => void;
 }
 
-function exportProtocolPdf(design: ExperimentDesign) {
+async function exportProtocolPdf(design: ExperimentDesign) {
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF();
   let y = 20;
 

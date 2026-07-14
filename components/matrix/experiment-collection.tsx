@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, Fragment } from "react";
+import { useState, useMemo, useCallback, Fragment, memo } from "react";
 import { Search, Filter, Download, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
 import type { DBExtraction } from "@/lib/matrix/generator";
 
@@ -163,7 +163,7 @@ function exportCSV(extractions: DBExtraction[]) {
 
 // ===== 主组件 =====
 
-export function ExperimentCollection({ extractions, projectId: _projectId }: ExperimentCollectionProps) {
+export const ExperimentCollection = memo(function ExperimentCollection({ extractions, projectId: _projectId }: ExperimentCollectionProps) {
   // 搜索关键词
   const [search, setSearch] = useState("");
   // 筛选器
@@ -720,4 +720,4 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
       </div>
     </div>
   );
-}
+});

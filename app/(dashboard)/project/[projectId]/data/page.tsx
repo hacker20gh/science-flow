@@ -4,11 +4,18 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import dynamic from "next/dynamic";
 import { useProjectStore } from "@/store/project-store";
-import { ChartRenderer } from "@/components/charts/chart-renderer";
 import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import type { AnalysisResult } from "@/lib/llm/analysis";
+
+const ChartRenderer = dynamic(
+  () => import("@/components/charts/chart-renderer").then((m) => m.ChartRenderer),
+  {
+    loading: () => <div className="h-64 animate-pulse bg-muted rounded" />,
+    ssr: false,
+  }
+);
 
 export default function DataPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -29,13 +36,6 @@ export default function DataPage() {
       });
       return record;
     });
-  }
-
-  function parseExcelToCsv(workbook: XLSX.WorkBook): string {
-    const sheetName = workbook.SheetNames[0];
-    if (!sheetName) return "";
-    const sheet = workbook.Sheets[sheetName];
-    return XLSX.utils.sheet_to_csv(sheet);
   }
 
   const [csvData, setCsvData] = useState<string>("");
@@ -69,11 +69,18 @@ export default function DataPage() {
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (ext === "xlsx" || ext === "xls") {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         try {
+          const XLSX = await import("xlsx");
           const data = new Uint8Array(event.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: "array" });
-          const csv = parseExcelToCsv(workbook);
+          const sheetName = workbook.SheetNames[0];
+          if (!sheetName) {
+            setError("Excel 文件为空或无法解析");
+            return;
+          }
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
           if (!csv.trim()) {
             setError("Excel 文件为空或无法解析");
             return;

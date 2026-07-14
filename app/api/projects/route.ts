@@ -13,12 +13,6 @@ export async function GET() {
     const session = await auth();
     const userId = session?.user?.id || DEMO_USER_ID;
 
-    await prisma.user.upsert({
-      where: { id: userId },
-      create: { id: userId, email: `${userId}@sciflow.ai`, name: "用户" },
-      update: {},
-    });
-
     const projects = await prisma.project.findMany({
       where: { userId, deletedAt: null },
       orderBy: { updatedAt: "desc" },

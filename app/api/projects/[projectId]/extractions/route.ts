@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db-server";
 import { mapExtractionToDB } from "@/lib/extraction-mapper";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   if (!prisma) {
@@ -12,6 +12,9 @@ export async function GET(
   }
 
   const { projectId } = await params;
+
+  const take = Math.min(Number(req.nextUrl.searchParams.get("take")) || 50, 200);
+  const skip = Number(req.nextUrl.searchParams.get("skip")) || 0;
 
   try {
     const extractions = await prisma.extraction.findMany({
@@ -22,8 +25,10 @@ export async function GET(
         phenotypeEffectsRelational: true,
       },
       orderBy: { createdAt: "desc" },
+      take,
+      skip,
     });
-    return Response.json({ extractions });
+    return Response.json({ extractions, take, skip });
   } catch (error) {
     console.error("Failed to list extractions:", error);
     return Response.json({ extractions: [] }, { status: 500 });

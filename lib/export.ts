@@ -3,7 +3,9 @@
  */
 
 import type { MatrixData } from "@/lib/matrix/generator";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle } from "docx";
+
+// Note: Word 导出已拆分到 export-word.ts（docx 库懒加载）
+// 使用方式: const { exportManuscriptToWord } = await import("@/lib/export-word");
 
 // ===== CSV 导出 =====
 
@@ -190,65 +192,4 @@ export function exportToRis(papers: BibTexPaper[]): string {
 }
 
 // ===== Word 导出 =====
-
-export async function exportManuscriptToWord(sections: Record<string, string | undefined>): Promise<Blob> {
-  const sectionOrder = ["abstract", "introduction", "methods", "results", "discussion"];
-  const sectionTitles: Record<string, string> = {
-    abstract: "Abstract",
-    introduction: "Introduction",
-    methods: "Methods",
-    results: "Results",
-    discussion: "Discussion",
-  };
-
-  const children: Paragraph[] = [];
-
-  // Title
-  children.push(
-    new Paragraph({
-      text: "Research Article",
-      heading: HeadingLevel.TITLE,
-      alignment: "center",
-    })
-  );
-
-  // Author placeholder
-  children.push(
-    new Paragraph({
-      text: "Author Name",
-      alignment: "center",
-      spacing: { after: 400 },
-    })
-  );
-
-  // Sections
-  for (const section of sectionOrder) {
-    const content = sections[section];
-    if (content) {
-      children.push(
-        new Paragraph({
-          text: sectionTitles[section],
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 300, after: 150 },
-        })
-      );
-
-      // Split content into paragraphs
-      const paragraphs = content.split("\n\n").filter((p) => p.trim());
-      for (const para of paragraphs) {
-        children.push(
-          new Paragraph({
-            children: [new TextRun({ text: para.trim(), size: 24 })], // 12pt = 24 half-points
-            spacing: { after: 120 },
-          })
-        );
-      }
-    }
-  }
-
-  const doc = new Document({
-    sections: [{ children }],
-  });
-
-  return Packer.toBlob(doc);
-}
+// 已拆分到 lib/export-word.ts（docx 库懒加载）
