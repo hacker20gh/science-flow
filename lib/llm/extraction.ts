@@ -15,10 +15,15 @@ import { sleep } from "@/lib/utils/sleep";
 // ===== Zod Schema =====
 
 export const ExperimentSchema = z.object({
-  drug_intervention: z.object({
-    name: z.string().describe("药物或干预名称"),
-    concentration: z.string().nullable().describe("浓度，如 2 μM"),
+  intervention: z.object({
+    type: z.enum(["drug", "knockdown", "overexpression", "knockout", "stimulation", "inhibition"]).describe(
+      "干预类型: drug(药物), knockdown(基因敲低:siRNA/shRNA), overexpression(过表达:plasmid/转染), " +
+      "knockout(基因敲除:CRISPR), stimulation(刺激因子:LPS/TNF-α), inhibition(抑制剂)"
+    ),
+    target: z.string().describe("干预靶点：药物名或基因名（如 cisplatin, TP53, EGFR）"),
+    concentration: z.string().nullable().describe("浓度，如 2 μM 或 50 nM siRNA"),
     duration: z.string().nullable().describe("处理时间，如 24h"),
+    method: z.string().nullable().describe("干预方法（仅 knockdown/overexpression/knockout 时填写）: siRNA, shRNA, CRISPR/Cas9, plasmid 等"),
     co_treatment: z.string().nullable().describe("联合处理"),
   }),
   model: z.object({
@@ -45,18 +50,30 @@ export const ExperimentSchema = z.object({
     "survival analysis, WGCNA, molecular docking 等"
   ),
   ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
+  dose_response: z.array(z.object({
+    concentration: z.string().describe("浓度，如 1 μM"),
+    effect_size: z.string().describe("效应大小，如 1.2-fold 或 35%"),
+    direction: z.enum(["up", "down", "no_change"]),
+  })).nullable().describe("剂量-反应数据（论文测试多个浓度时填写，null 表示无此数据）"),
   pathway_effects: z.array(z.object({
     pathway: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
     significance: z.string().nullable(),
     method: z.string().nullable(),
     fold_change: z.string().nullable().describe("通路变化倍数，如 2.3-fold 或 p-AKT/AKT ratio from 1.0 to 3.2"),
+    downstream_of: z.string().nullable().describe("如果此通路是另一个通路的下游，填写上游通路名（如 mTOR downstream_of PI3K/AKT）"),
   })),
   phenotype_effects: z.array(z.object({
     phenotype: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
     fold_change: z.string().nullable(),
+    caused_by: z.string().nullable().describe("哪个通路导致此表型变化（如 Apoptosis caused_by p53）"),
   })),
+  mechanistic_chain: z.array(z.object({
+    from: z.string().describe("上游通路/分子"),
+    to: z.string().describe("下游通路/分子"),
+    relation: z.string().describe("关系: activates, inhibits, phosphorylates, promotes, suppresses, induces 等"),
+  })).nullable().describe("因果链：通路之间的上下游关系（如 p53→activates→Bax→releases→Cytochrome c）"),
   controls: z.array(z.string()),
   statistical_test: z.string().nullable(),
   sample_size: z.number().nullable(),
@@ -144,39 +161,59 @@ If the paper uses a variant (e.g. "programmed cell death", "cell survival"), out
 - Confidence (0-1): 1.0 = explicitly stated, 0.8 = strongly implied, 0.5 = inferred, 0.3 = uncertain.
 
 MULTI-EXPERIMENT EXAMPLE:
-Input: "Cisplatin was tested at 1, 5, and 10 μM on HeLa cells for 24h. Western blot showed dose-dependent p53 upregulation. Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM). In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05)."
-Expected: 3 experiments (different concentrations = 2, different cell line = 1):
+Input: "Cisplatin was tested at 1, 5, and 10 μM on HeLa cells for 24h. Western blot showed dose-dependent p53 upregulation. Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM). In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05). siRNA knockdown of p53 suppressed apoptosis."
+Expected: 4 experiments (different concentrations=2, different cell line=1, gene knockdown=1):
 {
   "experiments": [
     {
-      "drug_intervention": {"name": "cisplatin", "concentration": "1 μM", "duration": "24h", "co_treatment": null},
+      "intervention": {"type": "drug", "target": "cisplatin", "concentration": "1 μM", "duration": "24h", "method": null, "co_treatment": null},
       "model": {"cell_line": "HeLa", "species": "human", "passage": null},
-      "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": null, "method": "Western blot"}],
-      "phenotype_effects": [],
+      "experiment_type": "cell_line", "experiment_methods": ["Western blot"],
+      "ic50": null, "dose_response": null,
+      "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": null, "method": "Western blot", "fold_change": null, "downstream_of": null}],
+      "phenotype_effects": [], "mechanistic_chain": null,
       "controls": [], "statistical_test": null, "sample_size": null,
       "conclusion": "Low dose cisplatin upregulates p53 in HeLa",
-      "evidence_quote": "Western blot showed dose-dependent p53 upregulation",
-      "confidence": 0.7
+      "evidence_quote": "Western blot showed dose-dependent p53 upregulation", "confidence": 0.7
     },
     {
-      "drug_intervention": {"name": "cisplatin", "concentration": "10 μM", "duration": "24h", "co_treatment": null},
+      "intervention": {"type": "drug", "target": "cisplatin", "concentration": "10 μM", "duration": "24h", "method": null, "co_treatment": null},
       "model": {"cell_line": "HeLa", "species": "human", "passage": null},
+      "experiment_type": "cell_line", "experiment_methods": ["flow cytometry"],
+      "ic50": null, "dose_response": [
+        {"concentration": "1 μM", "effect_size": "1.2-fold", "direction": "up"},
+        {"concentration": "5 μM", "effect_size": "1.8-fold", "direction": "up"},
+        {"concentration": "10 μM", "effect_size": "2.5-fold", "direction": "up"}
+      ],
       "pathway_effects": [],
-      "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold"}],
+      "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold", "caused_by": "p53"}],
+      "mechanistic_chain": [{"from": "p53", "to": "Apoptosis", "relation": "induces"}],
       "controls": [], "statistical_test": null, "sample_size": null,
       "conclusion": "High dose cisplatin induces apoptosis in HeLa",
-      "evidence_quote": "Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM)",
-      "confidence": 0.85
+      "evidence_quote": "Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM)", "confidence": 0.85
     },
     {
-      "drug_intervention": {"name": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
+      "intervention": {"type": "drug", "target": "cisplatin", "concentration": "5 μM", "duration": "24h", "method": null, "co_treatment": null},
       "model": {"cell_line": "A549", "species": "human", "passage": null},
-      "pathway_effects": [{"pathway": "NF-κB", "direction": "up", "significance": "p<0.05", "method": "EMSA"}],
-      "phenotype_effects": [],
+      "experiment_type": "cell_line", "experiment_methods": ["EMSA"],
+      "ic50": null, "dose_response": null,
+      "pathway_effects": [{"pathway": "NF-κB", "direction": "up", "significance": "p<0.05", "method": "EMSA", "fold_change": null, "downstream_of": null}],
+      "phenotype_effects": [], "mechanistic_chain": null,
       "controls": [], "statistical_test": null, "sample_size": null,
       "conclusion": "Cisplatin activates NF-κB in A549",
-      "evidence_quote": "In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05)",
-      "confidence": 0.9
+      "evidence_quote": "In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05)", "confidence": 0.9
+    },
+    {
+      "intervention": {"type": "knockdown", "target": "p53", "concentration": "50 nM", "duration": "48h", "method": "siRNA", "co_treatment": "cisplatin 5 μM"},
+      "model": {"cell_line": "HeLa", "species": "human", "passage": null},
+      "experiment_type": "cell_line", "experiment_methods": ["Western blot", "flow cytometry"],
+      "ic50": null, "dose_response": null,
+      "pathway_effects": [{"pathway": "p53", "direction": "down", "significance": null, "method": "Western blot", "fold_change": null, "downstream_of": null}],
+      "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "down", "fold_change": null, "caused_by": "p53 knockdown"}],
+      "mechanistic_chain": null,
+      "controls": ["scramble siRNA"], "statistical_test": null, "sample_size": null,
+      "conclusion": "p53 knockdown suppresses cisplatin-induced apoptosis",
+      "evidence_quote": "siRNA knockdown of p53 suppressed apoptosis", "confidence": 0.85
     }
   ]
 }`;
@@ -603,16 +640,15 @@ function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
 
   for (const result of results) {
     for (const exp of result.experiments) {
-      // 去重 key：drug_name + cell_line + first pathway
-      const drugName = exp.drug_intervention.name.toLowerCase().trim();
+      // 去重 key：intervention_target + cell_line + first pathway
+      const drugName = exp.intervention.target.toLowerCase().trim();
       const cellLine = (exp.model.cell_line || "").toLowerCase().trim();
       const primaryPathway = exp.pathway_effects[0]?.pathway?.toLowerCase().trim() || "";
       const key = `${drugName}|${cellLine}|${primaryPathway}`;
 
       if (seen.has(key)) {
-        // 已存在：取 evidence_quote 更长、confidence 更高的版本
         const existingIdx = allExperiments.findIndex(e => {
-          const eKey = `${e.drug_intervention.name.toLowerCase().trim()}|${(e.model.cell_line || "").toLowerCase().trim()}|${e.pathway_effects[0]?.pathway?.toLowerCase().trim() || ""}`;
+          const eKey = `${e.intervention.target.toLowerCase().trim()}|${(e.model.cell_line || "").toLowerCase().trim()}|${e.pathway_effects[0]?.pathway?.toLowerCase().trim() || ""}`;
           return eKey === key;
         });
         if (existingIdx >= 0) {

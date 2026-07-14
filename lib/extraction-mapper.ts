@@ -2,12 +2,14 @@
  * 将 LLM 提取结果转换为数据库 Extraction 记录的数据
  */
 export function mapExtractionToDB(experiment: Record<string, unknown>, paperId: string) {
+  // 兼容新 (intervention) 和旧 (drug_intervention) 字段名
+  const iv = (experiment.intervention || experiment.drug_intervention) as Record<string, unknown> | undefined;
   return {
     paperId,
-    drugName: (experiment.drug_intervention as Record<string, unknown>)?.name || null,
-    drugConc: (experiment.drug_intervention as Record<string, unknown>)?.concentration || null,
-    duration: (experiment.drug_intervention as Record<string, unknown>)?.duration || null,
-    coTreatment: (experiment.drug_intervention as Record<string, unknown>)?.co_treatment || null,
+    drugName: iv?.target || iv?.name || null,
+    drugConc: iv?.concentration || null,
+    duration: iv?.duration || null,
+    coTreatment: iv?.co_treatment || null,
     cellLine: (experiment.model as Record<string, unknown>)?.cell_line || null,
     species: (experiment.model as Record<string, unknown>)?.species || null,
     passage: (experiment.model as Record<string, unknown>)?.passage || null,
@@ -27,6 +29,11 @@ export function mapExtractionToDB(experiment: Record<string, unknown>, paperId: 
     experimentType: experiment.experiment_type || null,
     experimentMethods: experiment.experiment_methods || undefined,
     ic50: experiment.ic50 || null,
+    // 新增字段
+    doseResponse: experiment.dose_response || undefined,
+    mechanisticChain: experiment.mechanistic_chain || undefined,
+    interventionType: iv?.type || "drug",
+    interventionMethod: iv?.method || null,
   };
 }
 

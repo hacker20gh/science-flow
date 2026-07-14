@@ -182,10 +182,11 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
     for (let i = 0; i < input.experiments.length; i++) {
       const exp = input.experiments[i];
 
-      // 构造行
+      // 构造行（兼容新旧字段名）
+      const iv = (exp as Record<string, unknown>).intervention as Record<string, unknown> | undefined;
       const drugConc = [
-        exp.drug_intervention.name,
-        exp.drug_intervention.concentration,
+        iv?.target || (exp as Record<string, unknown>).drug_intervention && ((exp as Record<string, unknown>).drug_intervention as Record<string, unknown>)?.name,
+        iv?.concentration || (exp as Record<string, unknown>).drug_intervention && ((exp as Record<string, unknown>).drug_intervention as Record<string, unknown>)?.concentration,
       ]
         .filter(Boolean)
         .join(" ");
@@ -252,7 +253,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         drugConc,
         cellLine,
         species: exp.model.species || "",
-        duration: exp.drug_intervention.duration || "",
+        duration: (iv?.duration as string) || "",
         year: input.year,
         cells,
       });

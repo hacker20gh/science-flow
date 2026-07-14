@@ -130,6 +130,14 @@ model Extraction {
   experimentMethods Json?   // ["Western blot", "qPCR", "flow cytometry"]
   ic50            String?   // IC50/EC50 值，如 "5.2 μM"
 
+  // 干预类型（新增）
+  interventionType  String? @default("drug") // drug, knockdown, overexpression, knockout, stimulation, inhibition
+  interventionMethod String? // siRNA, shRNA, CRISPR/Cas9 等
+
+  // 剂量-反应 + 因果链（新增）
+  doseResponse     Json?   // [{concentration, effect_size, direction}]
+  mechanisticChain Json?   // [{from, to, relation}]
+
   audits ExtractionAudit[]
 
   createdAt DateTime @default(now())

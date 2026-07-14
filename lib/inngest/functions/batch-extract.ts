@@ -134,10 +134,10 @@ export const batchExtractFunction = inngest.createFunction(
               await prisma.extraction.create({
                 data: {
                   paperId: paper.paperId,
-                  drugName: exp.drug_intervention?.name || null,
-                  drugConc: exp.drug_intervention?.concentration || null,
-                  duration: exp.drug_intervention?.duration || null,
-                  coTreatment: exp.drug_intervention?.co_treatment || null,
+                  drugName: exp.intervention?.target || null,
+                  drugConc: exp.intervention?.concentration || null,
+                  duration: exp.intervention?.duration || null,
+                  coTreatment: exp.intervention?.co_treatment || null,
                   cellLine: exp.model?.cell_line || null,
                   species: exp.model?.species || null,
                   passage: exp.model?.passage || null,
