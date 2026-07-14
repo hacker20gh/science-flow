@@ -282,7 +282,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
   }, []);
 
   // ===== 排序图标 =====
-  const SortIcon = ({ columnKey }: { columnKey: string }) => {
+  const getSortIcon = (columnKey: string) => {
     if (sort.key !== columnKey || !sort.dir) {
       return <ChevronDown size={10} className="text-gray-300 ml-0.5" />;
     }
@@ -384,7 +384,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
               >
                 <span className="inline-flex items-center">
                   论文
-                  <SortIcon columnKey="paper" />
+                  {getSortIcon("paper")}
                 </span>
               </th>
               <th
@@ -393,7 +393,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
               >
                 <span className="inline-flex items-center">
                   干预
-                  <SortIcon columnKey="drug" />
+                  {getSortIcon("drug")}
                 </span>
               </th>
               <th
@@ -402,7 +402,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
               >
                 <span className="inline-flex items-center">
                   系统
-                  <SortIcon columnKey="cellLine" />
+                  {getSortIcon("cellLine")}
                 </span>
               </th>
               <th
@@ -411,7 +411,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
               >
                 <span className="inline-flex items-center">
                   方法
-                  <SortIcon columnKey="expMethod" />
+                  {getSortIcon("expMethod")}
                 </span>
               </th>
               <th className="text-left px-2 py-2 font-medium text-gray-600">通路</th>
@@ -422,7 +422,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
               >
                 <span className="inline-flex items-center">
                   样本量
-                  <SortIcon columnKey="sampleSize" />
+                  {getSortIcon("sampleSize")}
                 </span>
               </th>
               <th
@@ -431,7 +431,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
               >
                 <span className="inline-flex items-center">
                   证据
-                  <SortIcon columnKey="strength" />
+                  {getSortIcon("strength")}
                 </span>
               </th>
               <th
@@ -440,7 +440,7 @@ export function ExperimentCollection({ extractions, projectId: _projectId }: Exp
               >
                 <span className="inline-flex items-center">
                   年份
-                  <SortIcon columnKey="year" />
+                  {getSortIcon("year")}
                 </span>
               </th>
             </tr>
