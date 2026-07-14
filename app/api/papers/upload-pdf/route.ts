@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
 import { auth } from "@/lib/auth";
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse-new");
+import { parsePDF } from "@/lib/pdf-parser";
 
 /**
  * POST /api/papers/upload-pdf
@@ -44,13 +43,16 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // 用 pdf-parse-new 提取文本
+    // 用 Docling（优先）或 pdf-parse-new 提取文本
     let fullText = "";
     let pageCount = 0;
+    let parser = "pdf-parse";
     try {
-      const pdfData = await pdfParse(buffer);
-      fullText = pdfData.text || "";
-      pageCount = pdfData.numpages || 0;
+      const parseResult = await parsePDF(buffer, file.name);
+      fullText = parseResult.text;
+      pageCount = parseResult.pageCount;
+      parser = parseResult.parser;
+      console.log(`[UploadPDF] 解析完成: ${parser}, ${fullText.length} 字符, ${parseResult.parseTimeMs}ms`);
     } catch (parseError) {
       console.error("[UploadPDF] PDF 解析失败:", parseError);
       return Response.json({ error: "PDF 解析失败，文件可能已损坏" }, { status: 400 });
@@ -93,6 +95,7 @@ export async function POST(req: NextRequest) {
           paperId: paper.id,
           pageCount,
           textLength: fullText.length,
+          parser,
           preview: fullText.slice(0, 200) + "...",
         });
       } catch (dbError) {

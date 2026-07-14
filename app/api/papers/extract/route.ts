@@ -4,6 +4,7 @@ import { extractWithFallback, type ExtractionResult } from "@/lib/llm/extraction
 import { validateExtraction } from "@/lib/llm/extraction-validator";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
 import { sleep } from "@/lib/utils/sleep";
+import { parsePDF } from "@/lib/pdf-parser";
 
 interface ExtractRequestBody {
   papers: Array<{
@@ -69,8 +70,6 @@ export async function POST(req: NextRequest) {
           console.log(`[Extract] 从 DB 获取了 ${Object.keys(dbFullTexts).length} 篇论文的全文`);
 
           // 对没有 fullText 但有 oaUrl 的论文，自动下载 PDF 并提取文本
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const pdfParse = require("pdf-parse-new");
           const papersNeedingDownload = dbPapers.filter(
             (p: { id: string; fullText: string | null; oaUrl: string | null }) => !dbFullTexts[p.id] && p.oaUrl
           );
@@ -105,18 +104,18 @@ export async function POST(req: NextRequest) {
                   continue;
                 }
 
-                const pdfData = await pdfParse(buffer);
-                if (pdfData.text && pdfData.text.trim().length > 100) {
-                  dbFullTexts[dbPaper.id] = pdfData.text;
-                  console.log(`[Extract] 自动下载成功: ${dbPaper.id} → ${pdfData.numpages} 页, ${pdfData.text.length} 字符`);
+                const parseResult = await parsePDF(buffer, "oa-paper.pdf");
+                if (parseResult.text && parseResult.text.trim().length > 100) {
+                  dbFullTexts[dbPaper.id] = parseResult.text;
+                  console.log(`[Extract] 自动下载成功 (${parseResult.parser}): ${dbPaper.id} → ${parseResult.text.length} 字符, ${parseResult.parseTimeMs}ms`);
                   db.paper.update({
                     where: { id: dbPaper.id },
-                    data: { fullText: pdfData.text },
+                    data: { fullText: parseResult.text },
                   }).catch((err: unknown) => {
                     console.error(`[Extract] Failed to save fullText for ${dbPaper.id}:`, err);
                   });
                 } else {
-                  console.warn(`[Extract] PDF 文本过短: ${pdfData.text?.length || 0} 字符`);
+                  console.warn(`[Extract] PDF 文本过短: ${parseResult.text?.length || 0} 字符`);
                 }
               } catch (dlError) {
                 console.warn(`[Extract] 自动下载失败: ${(dlError as Error)?.message}`);
