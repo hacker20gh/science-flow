@@ -14,15 +14,29 @@ export async function GET(
   try {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        userId: true,
+        createdAt: true,
+        updatedAt: true,
+        deletedAt: true,
         papers: {
-          orderBy: { createdAt: "desc" },
-          include: { _count: { select: { extractions: true } } },
+          select: { id: true, _count: { select: { extractions: true } } },
+          orderBy: { createdAt: "desc" as const },
         },
-        experiments: { orderBy: { createdAt: "desc" } },
-        hypotheses: { orderBy: { createdAt: "desc" } },
-        timeline: { orderBy: { sortOrder: "asc" } },
-        manuscripts: { orderBy: { createdAt: "desc" } },
+        experiments: { select: { id: true }, orderBy: { createdAt: "desc" as const } },
+        hypotheses: {
+          select: { id: true, statement: true },
+          orderBy: { createdAt: "desc" as const },
+        },
+        timeline: {
+          take: 1,
+          orderBy: { createdAt: "desc" as const },
+          select: { id: true, createdAt: true, type: true, title: true },
+        },
+        manuscripts: { select: { id: true }, orderBy: { createdAt: "desc" as const } },
       },
     });
 

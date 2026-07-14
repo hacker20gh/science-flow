@@ -17,7 +17,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { toPng, toSvg } from "html-to-image";
+/* html-to-image loaded lazily in exportPng/exportSvg */
 import {
   GitBranch,
   Activity,
@@ -385,6 +385,7 @@ export function MechanismMatrix({
   async function exportPng() {
     if (!tableRef.current) return;
     try {
+      const { toPng } = await import("html-to-image");
       const dataUrl = await toPng(tableRef.current, { backgroundColor: "#ffffff" });
       const link = document.createElement("a");
       link.download = "mechanism-matrix.png";
@@ -398,6 +399,7 @@ export function MechanismMatrix({
   async function exportSvg() {
     if (!tableRef.current) return;
     try {
+      const { toSvg } = await import("html-to-image");
       const dataUrl = await toSvg(tableRef.current, { backgroundColor: "#ffffff" });
       const link = document.createElement("a");
       link.download = "mechanism-matrix.svg";
@@ -762,9 +764,10 @@ export function MechanismMatrix({
                 汇总
               </td>
               {visibleColumns.map((col) => {
-                const ups = data.rows.filter(r => r.cells[col.id]?.direction === "up").length;
-                const downs = data.rows.filter(r => r.cells[col.id]?.direction === "down").length;
-                const noChange = data.rows.filter(r => r.cells[col.id]?.direction === "no_change").length;
+                const s = summary.get(col.id);
+                const ups = s?.up ?? 0;
+                const downs = s?.down ?? 0;
+                const noChange = s?.noChange ?? 0;
                 const total = ups + downs + noChange;
                 const consensus = total > 0 ? Math.round(Math.max(ups, downs) / total * 100) : 0;
 

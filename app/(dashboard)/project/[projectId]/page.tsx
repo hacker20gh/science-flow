@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useMemo } from "react";
-import { motion } from "framer-motion";
+import { FramerMotionDiv as MotionDiv } from "@/components/ui/motion-wrapper";
 import {
   BookOpen,
   FlaskConical,
@@ -243,7 +243,7 @@ export default function ProjectPage({
           { icon: Lightbulb, count: project.hypotheses.length, label: "个假设", color: "amber", bg: "bg-amber-50", text: "text-amber-600" },
           { icon: FileText, count: project.manuscripts.length, label: "篇草稿", color: "purple", bg: "bg-purple-50", text: "text-purple-600" },
         ].map((stat, i) => (
-          <motion.div
+          <MotionDiv
             key={stat.label}
             variants={fadeUp}
             initial="initial"
@@ -258,7 +258,7 @@ export default function ProjectPage({
               <div className={`text-xl font-bold ${stat.text}`}>{stat.count}</div>
               <div className="text-xs text-gray-500">{stat.label}</div>
             </div>
-          </motion.div>
+          </MotionDiv>
         ))}
       </div>
 
@@ -307,7 +307,7 @@ export default function ProjectPage({
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {insights.map((insight, i) => (
-              <motion.div
+              <MotionDiv
                 key={insight.id}
                 variants={fadeUp}
                 initial="initial"
@@ -345,7 +345,7 @@ export default function ProjectPage({
                     )}
                   </div>
                 </div>
-              </motion.div>
+              </MotionDiv>
             ))}
           </div>
         </section>

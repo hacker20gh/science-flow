@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
 import {
   Lightbulb,
   AlertTriangle,
@@ -304,7 +304,7 @@ function InsightCard({
 
 // ---- Main component ----
 
-export function AIInsights({ matrixData, projectId }: AIInsightsProps) {
+export const AIInsights = memo(function AIInsights({ matrixData, projectId }: AIInsightsProps) {
   const [expanded, setExpanded] = useState(true);
 
   const insights = useMemo(() => generateInsights(matrixData, projectId), [matrixData, projectId]);
@@ -354,4 +354,4 @@ export function AIInsights({ matrixData, projectId }: AIInsightsProps) {
       )}
     </div>
   );
-}
+});

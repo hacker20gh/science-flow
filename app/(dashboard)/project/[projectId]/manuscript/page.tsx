@@ -2,15 +2,32 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import dynamic from "next/dynamic";
 import { useProjectStore } from "@/store/project-store";
-import { exportManuscriptToLatex, exportManuscriptToWord, downloadFile } from "@/lib/export";
+import { exportManuscriptToLatex, downloadFile } from "@/lib/export";
 import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import type { ManuscriptDraft } from "@/lib/llm/manuscript";
 import type { ReviewSimulation } from "@/lib/llm/reviewer";
 import CitationPanel from "@/components/manuscript/citation-panel";
 import type { PaperForMatch } from "@/lib/manuscript/citation-parser";
+
+const DynamicReactMarkdown = dynamic(
+  () =>
+    Promise.all([
+      import("react-markdown"),
+      import("remark-gfm"),
+    ]).then(([rm, gfm]) => {
+      const Markdown = rm.default;
+      const gfmPlugin = gfm.default;
+      return function MarkdownWithGfm({ children }: { children: string }) {
+        return <Markdown remarkPlugins={[gfmPlugin]}>{children}</Markdown>;
+      };
+    }),
+  {
+    loading: () => <div className="animate-pulse h-32 bg-gray-100 rounded" />,
+    ssr: false,
+  }
+);
 
 const SECTIONS = [
   { id: "abstract", label: "Abstract", desc: "背景 + 方法 + 结果 + 结论" },
@@ -286,6 +303,7 @@ export default function ManuscriptPage() {
                     const data = draft[s.id as keyof ManuscriptDraft];
                     sections[s.id] = data?.content;
                   }
+                  const { exportManuscriptToWord } = await import("@/lib/export-word");
                   const blob = await exportManuscriptToWord(sections);
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
@@ -524,9 +542,9 @@ export default function ManuscriptPage() {
                       title="点击编辑"
                     >
                       <div className="prose prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <DynamicReactMarkdown>
                           {currentSection.content}
-                        </ReactMarkdown>
+                        </DynamicReactMarkdown>
                       </div>
                     </div>
                   )}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
+import { FramerMotionDiv as MotionDiv, FramerMotionSection as MotionSection } from "@/components/ui/motion-wrapper";
 import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Plus } from "lucide-react";
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
 import { AIInsights } from "@/components/matrix/ai-insights";
@@ -413,7 +413,7 @@ export default function BrainPage() {
       {!useDemo && <AnalysisReportPanel matrixData={matrixData} projectId={projectId} />}
 
       {/* 机制矩阵 */}
-      <motion.section
+      <MotionSection
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
@@ -459,10 +459,10 @@ export default function BrainPage() {
           </div>
         </div>
         <MechanismMatrix projectId={projectId} data={matrixData} />
-      </motion.section>
+      </MotionSection>
 
       {/* 假设追踪器 */}
-      <motion.section
+      <MotionSection
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.2 }}
@@ -541,7 +541,7 @@ export default function BrainPage() {
           /* 真实数据：渲染所有假设 */
           <div className="space-y-4">
             {hypotheses.map((h, i) => (
-              <motion.div
+              <MotionDiv
                 key={h.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -555,7 +555,7 @@ export default function BrainPage() {
                   onEdit={handleEditHypothesis}
                   totalExperiments={matrixData.totalExperiments}
                 />
-              </motion.div>
+              </MotionDiv>
             ))}
           </div>
         ) : (
@@ -564,18 +564,18 @@ export default function BrainPage() {
             搜索文献并提出假设后，假设追踪器会自动显示
           </div>
         )}
-      </motion.section>
+      </MotionSection>
 
       {/* 实验集合视图 + 通路网络 */}
       {!useDemo && dbExtractions && dbExtractions.length > 0 && (
         <>
-          <motion.section
+          <MotionSection
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.2 }}
           >
             <ExperimentCollection extractions={dbExtractions} projectId={projectId} />
-          </motion.section>
+          </MotionSection>
 
           {/* 通路网络 */}
           {(() => {
@@ -586,20 +586,20 @@ export default function BrainPage() {
             }
             if (chains.length === 0) return null;
             return (
-              <motion.section
+              <MotionSection
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.25 }}
               >
                 <PathwayNetwork chains={chains} />
-              </motion.section>
+              </MotionSection>
             );
           })()}
         </>
       )}
 
       {/* 待办清单 */}
-      <motion.section
+      <MotionSection
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.3 }}
@@ -608,7 +608,7 @@ export default function BrainPage() {
           待办清单
         </h2>
         <TaskBoard projectId={projectId} matrixData={useDemo ? undefined : matrixData} />
-      </motion.section>
+      </MotionSection>
       {/* Hypothesis Form Dialog */}
       <HypothesisForm
         isOpen={showForm}

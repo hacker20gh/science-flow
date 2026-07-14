@@ -25,6 +25,7 @@ export async function GET(
         userId: session.user.id,
       },
       orderBy: { updatedAt: "desc" },
+      take: 50,
       include: { _count: { select: { messages: true } } },
     });
 

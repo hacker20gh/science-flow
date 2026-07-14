@@ -3,6 +3,14 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pdf-parse-new", "pdf-parse", "formidable"],
+
+  experimental: {
+    optimizePackageImports: [
+      "lucide-react",
+      "framer-motion",
+      "recharts",
+    ],
+  },
 };
 
 export default withSentryConfig(nextConfig, {
