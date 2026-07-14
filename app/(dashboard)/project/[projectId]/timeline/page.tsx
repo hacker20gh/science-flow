@@ -67,7 +67,7 @@ export default function TimelinePage() {
         <div className="p-8"><TimelineSkeleton /></div>
       )}
 
-      {!loading && <Timeline events={events} />}
+      {!loading && <Timeline events={events} projectId={projectId} />}
     </main>
   );
 }

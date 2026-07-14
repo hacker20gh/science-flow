@@ -11,6 +11,7 @@ import {
 
 interface TimelineProps {
   events: TimelineEvent[];
+  projectId?: string;
   onEventClick?: (event: TimelineEvent) => void;
 }
 
@@ -35,6 +36,40 @@ function getConfig(type: string) {
       bgColor: "bg-gray-100",
     }
   );
+}
+
+/** 根据事件类型跳转到对应页面 */
+function navigateToEvent(event: TimelineEvent, projectId?: string) {
+  if (!projectId) return;
+  // 使用 metadata 中的 ID 信息进行跳转
+  const meta = event.metadata as Record<string, unknown> | undefined;
+
+  switch (event.type) {
+    case "literature":
+      if (meta?.paperId) {
+        window.location.href = `/project/${projectId}/papers`;
+      }
+      break;
+    case "hypothesis":
+      window.location.href = `/project/${projectId}/brain`;
+      break;
+    case "experiment_design":
+    case "experiment_completed":
+    case "experiment_failed":
+      window.location.href = `/project/${projectId}/experiments`;
+      break;
+    case "manuscript":
+      window.location.href = `/project/${projectId}/manuscript`;
+      break;
+    case "matrix_updated":
+      window.location.href = `/project/${projectId}/brain`;
+      break;
+    case "data_upload":
+      window.location.href = `/project/${projectId}/data`;
+      break;
+    default:
+      break;
+  }
 }
 
 /** 合并连续同类型事件 */
@@ -84,9 +119,18 @@ function mergeEvents(events: TimelineEvent[]): MergedGroup[] {
   return groups;
 }
 
-export function Timeline({ events, onEventClick }: TimelineProps) {
+export function Timeline({ events, projectId, onEventClick }: TimelineProps) {
   const [filter, setFilter] = useState<TimelineEventType | "all">("all");
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+
+  // 默认点击处理：根据事件类型跳转到对应页面
+  const handleEventClick = (event: TimelineEvent) => {
+    if (onEventClick) {
+      onEventClick(event);
+    } else {
+      navigateToEvent(event, projectId);
+    }
+  };
 
   const filteredEvents =
     filter === "all"
@@ -219,7 +263,7 @@ export function Timeline({ events, onEventClick }: TimelineProps) {
                           className="flex items-start gap-3 px-3 py-2 rounded-lg bg-white border border-gray-100 text-sm cursor-pointer hover:bg-gray-50"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onEventClick?.(event);
+                            handleEventClick(event);
                           }}
                         >
                           <span className="text-xs text-gray-400 shrink-0 mt-0.5">
@@ -241,22 +285,38 @@ export function Timeline({ events, onEventClick }: TimelineProps) {
                   )}
 
                   {/* 单条事件的详情 */}
-                  {isExpanded && !hasMulti && group.events[0]?.metadata && (
-                    <div className="ml-14 mb-3 p-3 bg-white border border-gray-100 rounded-lg text-xs space-y-1">
-                      {Object.entries(group.events[0].metadata).map(
-                        ([key, value]) => (
-                          <div key={key} className="flex gap-2">
-                            <span className="text-gray-400 min-w-[80px]">
-                              {key}：
-                            </span>
-                            <span className="text-gray-700">
-                              {typeof value === "object"
-                                ? JSON.stringify(value)
-                                : String(value)}
-                            </span>
-                          </div>
-                        )
+                  {isExpanded && !hasMulti && (
+                    <div
+                      className="ml-14 mb-3 bg-white border border-gray-100 rounded-lg overflow-hidden"
+                    >
+                      {group.events[0]?.metadata && (
+                        <div className="p-3 text-xs space-y-1">
+                          {Object.entries(group.events[0].metadata).map(
+                            ([key, value]) => (
+                              <div key={key} className="flex gap-2">
+                                <span className="text-gray-400 min-w-[80px]">
+                                  {key}：
+                                </span>
+                                <span className="text-gray-700">
+                                  {typeof value === "object"
+                                    ? JSON.stringify(value)
+                                    : String(value)}
+                                </span>
+                              </div>
+                            )
+                          )}
+                        </div>
                       )}
+                      {/* 点击跳转区域 */}
+                      <button
+                        className="w-full px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 border-t border-gray-100 text-left cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEventClick(group.events[0]);
+                        }}
+                      >
+                        查看详情 →
+                      </button>
                     </div>
                   )}
                 </div>

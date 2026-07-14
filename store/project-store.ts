@@ -10,8 +10,6 @@ import type { ExperimentResult } from "@/lib/llm/extraction";
 import type { MatrixData } from "@/lib/matrix/generator";
 import { generateMatrix } from "@/lib/matrix/generator";
 import {
-  createEvent,
-  getDemoEvents,
   type TimelineEvent,
   type TimelineEventType,
 } from "@/lib/timeline/events";
@@ -71,7 +69,6 @@ interface ProjectState {
     description: string,
     metadata?: Record<string, unknown>
   ) => void;
-  loadDemoTimeline: () => void;
 }
 
 // ===== Store =====
@@ -98,13 +95,7 @@ export const useProjectStore = create<ProjectState>()(
       const unique = newPapers.filter((p) => !existingIds.has(p.paperId));
       return { papers: [...state.papers, ...unique] };
     });
-
-    // 自动记录时间线事件
-    get().addEvent(
-      "literature",
-      `添加了 ${newPapers.length} 篇文献`,
-      `搜索并纳入 ${newPapers.length} 篇文献到项目`
-    );
+    // 时间线事件由服务端 API 创建，不在 store 中写入
   },
 
   updatePaperExtraction: (paperId, status, experiments, error) => {
@@ -121,20 +112,10 @@ export const useProjectStore = create<ProjectState>()(
       ),
     }));
 
+    // 提取完成后刷新矩阵（时间线事件由服务端 API 创建）
     if (status === "done") {
-      const totalExps = experiments?.length || 0;
-      get().addEvent(
-        "literature",
-        "完成文献信息提取",
-        `从 1 篇文献中提取出 ${totalExps} 个实验数据`
-      );
       setTimeout(() => {
         get().refreshMatrix();
-        get().addEvent(
-          "matrix_updated",
-          "机制矩阵已更新",
-          "新的提取数据已加入机制矩阵"
-        );
       }, 100);
     }
   },
@@ -196,25 +177,17 @@ export const useProjectStore = create<ProjectState>()(
   },
 
   // ===== 时间线操作 =====
+  // 时间线事件统一由服务端 API 创建，store 中不再写入
+  // addEvent 保留为空操作，确保类型兼容（其他模块可能引用）
+  addEvent: () => { /* noop — 时间线由服务端管理 */ },
 
-  addEvent: (type, title, description, metadata) => {
-    const event = createEvent(type, title, description, metadata);
-    set((state) => ({
-      timeline: [...state.timeline, event],
-    }));
-  },
-
-  loadDemoTimeline: () => {
-    set({ timeline: getDemoEvents() });
-  },
 }),
     {
       name: "sciflow-project-store",
-      // 只持久化 papers、matrix、timeline，不持久化 projectId（来自 URL）
+      // 只持久化 papers、matrix，不持久化 projectId（来自 URL）和 timeline（由服务端管理）
       partialize: (state) => ({
         papers: state.papers,
         matrix: state.matrix,
-        timeline: state.timeline,
       }),
     }
   )

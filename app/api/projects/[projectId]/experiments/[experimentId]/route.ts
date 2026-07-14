@@ -61,6 +61,29 @@ export async function PATCH(
       data: { status },
     });
 
+    // 实验完成或失败时，自动创建时间线事件
+    if (status === "completed" || status === "failed") {
+      const eventTitle =
+        status === "completed"
+          ? `实验完成：${existing.name}`
+          : `实验失败：${existing.name}`;
+      const eventType =
+        status === "completed" ? "experiment_completed" : "experiment_failed";
+      try {
+        await prisma.timelineEvent.create({
+          data: {
+            projectId,
+            type: eventType,
+            title: eventTitle,
+            content: { experimentId, status, experimentName: existing.name },
+          },
+        });
+      } catch (e) {
+        // 时间线写入失败不阻断主流程
+        console.error("Failed to create timeline event:", e);
+      }
+    }
+
     return Response.json({ experiment });
   } catch (error) {
     console.error("Failed to update experiment status:", error);

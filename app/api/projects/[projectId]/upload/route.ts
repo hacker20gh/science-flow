@@ -79,6 +79,21 @@ export async function POST(req: NextRequest) {
           },
         });
         paperId = paper.id;
+
+        // 上传成功后创建时间线事件
+        try {
+          await prisma.timelineEvent.create({
+            data: {
+              projectId,
+              type: "data_upload",
+              title: `上传文献：${title}`,
+              content: { paperId: paper.id, fileName: safeName, pageCount },
+            },
+          });
+        } catch (e) {
+          // 时间线写入失败不阻断上传流程
+          console.error("Failed to create timeline event:", e);
+        }
       } catch {
         // 数据库不可用时继续
       }

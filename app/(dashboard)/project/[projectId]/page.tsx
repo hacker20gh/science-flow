@@ -24,6 +24,7 @@ import { WorkflowProgress } from "@/components/project/workflow-progress";
 import { generateInsights } from "@/lib/workflow/rules";
 import type { ProactiveInsight } from "@/lib/workflow/event-bus";
 import { toast } from "sonner";
+import { EVENT_CONFIG, type TimelineEventType } from "@/lib/timeline/events";
 
 const fadeUp = {
   initial: { opacity: 0, y: 20 },
@@ -358,13 +359,18 @@ export default function ProjectPage({
             <h2 className="text-lg font-semibold">最近活动</h2>
           </div>
           <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-            {timelineEvents.map((event) => (
-              <div key={event.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
-                <span className="text-sm text-gray-700 truncate flex-1">{event.title}</span>
-                <span className="text-xs text-gray-400 shrink-0">{relativeTime(event.createdAt)}</span>
-              </div>
-            ))}
+            {timelineEvents.map((event) => {
+                // 根据事件类型显示对应图标
+                const eventConfig = EVENT_CONFIG[event.type as TimelineEventType];
+                const icon = eventConfig?.icon || "📌";
+                return (
+                  <div key={event.id} className="flex items-center gap-3 px-4 py-3">
+                    <span className="text-sm shrink-0">{icon}</span>
+                    <span className="text-sm text-gray-700 truncate flex-1">{event.title}</span>
+                    <span className="text-xs text-gray-400 shrink-0">{relativeTime(event.createdAt)}</span>
+                  </div>
+                );
+              })}
           </div>
         </section>
       )}

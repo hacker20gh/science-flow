@@ -55,6 +55,24 @@ export async function POST(
       select: { id: true, updatedAt: true },
     });
 
+    // 矩阵保存成功后，创建时间线事件
+    try {
+      // 从 data 中提取行数和列数（如果存在）
+      const totalPapers = Array.isArray(data?.rows) ? data.rows.length : undefined;
+      const totalExperiments = Array.isArray(data?.columns) ? data.columns.length : undefined;
+      await prisma.timelineEvent.create({
+        data: {
+          projectId,
+          type: "matrix_updated",
+          title: "机制矩阵已更新",
+          content: { totalExperiments, totalPapers },
+        },
+      });
+    } catch (e) {
+      // 时间线写入失败不阻断主流程
+      console.error("Failed to create timeline event:", e);
+    }
+
     return Response.json({ matrix: record });
   } catch (error) {
     console.error("Failed to save matrix:", error);

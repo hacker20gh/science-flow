@@ -256,6 +256,8 @@ model TimelineEvent {
   weekNumber Int?
 
   createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
 }
 
 // ===== 论文草稿 =====
