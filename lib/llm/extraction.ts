@@ -64,8 +64,18 @@ const EXTRACTION_TOOL = createToolFromSchema(
 
 const CORE_PROMPT = `You are a biomedical literature analysis expert.
 
+CRITICAL RULE: Most papers contain 3-10 independent experiments. You MUST extract EVERY experiment separately. Do NOT merge or skip experiments.
+
+An experiment is defined as a unique combination of:
+- Drug/intervention + concentration + duration (different dose = different experiment)
+- Cell line / model (different cell line = different experiment)
+- Measured outcome (different pathway measured = different experiment)
+
 EXTRACTION RULES:
-- A single paper may contain MULTIPLE independent experiments. Extract each separately.
+- Extract EACH experiment as a separate entry in the experiments array.
+- If a paper tests 5 different concentrations of the same drug, that's 5 experiments.
+- If a paper tests the same drug on 3 different cell lines, that's 3 experiments.
+- If a paper measures 4 different pathways, that could be 4 experiments (or fewer if measured together).
 - Only extract findings EXPLICITLY stated in the text. Do NOT infer or hallucinate.
 - If information is not available, use null.
 
@@ -90,23 +100,84 @@ If the paper uses a variant (e.g. "programmed cell death", "cell survival"), out
 - pathway_effects[].method: experimental technique (e.g. "Western blot", "qPCR"), NOT statistical method.
 - Confidence (0-1): 1.0 = explicitly stated, 0.8 = strongly implied, 0.5 = inferred, 0.3 = uncertain.
 
-FEW-SHOT EXAMPLE:
-Input excerpt: "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53 (Western blot, p<0.01, n=3) and increased apoptosis (flow cytometry, 2.5-fold). DMSO was used as vehicle control."
-Expected output:
+MULTI-EXPERIMENT EXAMPLE:
+Input: "Cisplatin was tested at 1, 5, and 10 μM on HeLa cells for 24h. Western blot showed dose-dependent p53 upregulation. Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM). In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05)."
+Expected: 3 experiments (different concentrations = 2, different cell line = 1):
 {
-  "experiments": [{
-    "drug_intervention": {"name": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
-    "model": {"cell_line": "HeLa", "species": "human", "passage": null},
-    "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": "p<0.01", "method": "Western blot"}],
-    "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold"}],
-    "controls": ["DMSO vehicle control"],
-    "statistical_test": null,
-    "sample_size": 3,
-    "conclusion": "Cisplatin upregulates p53 and induces apoptosis in HeLa cells",
-    "evidence_quote": "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53",
-    "confidence": 0.95
-  }]
+  "experiments": [
+    {
+      "drug_intervention": {"name": "cisplatin", "concentration": "1 μM", "duration": "24h", "co_treatment": null},
+      "model": {"cell_line": "HeLa", "species": "human", "passage": null},
+      "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": null, "method": "Western blot"}],
+      "phenotype_effects": [],
+      "controls": [], "statistical_test": null, "sample_size": null,
+      "conclusion": "Low dose cisplatin upregulates p53 in HeLa",
+      "evidence_quote": "Western blot showed dose-dependent p53 upregulation",
+      "confidence": 0.7
+    },
+    {
+      "drug_intervention": {"name": "cisplatin", "concentration": "10 μM", "duration": "24h", "co_treatment": null},
+      "model": {"cell_line": "HeLa", "species": "human", "passage": null},
+      "pathway_effects": [],
+      "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold"}],
+      "controls": [], "statistical_test": null, "sample_size": null,
+      "conclusion": "High dose cisplatin induces apoptosis in HeLa",
+      "evidence_quote": "Flow cytometry revealed increased apoptosis (2.5-fold at 10 μM)",
+      "confidence": 0.85
+    },
+    {
+      "drug_intervention": {"name": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
+      "model": {"cell_line": "A549", "species": "human", "passage": null},
+      "pathway_effects": [{"pathway": "NF-κB", "direction": "up", "significance": "p<0.05", "method": "EMSA"}],
+      "phenotype_effects": [],
+      "controls": [], "statistical_test": null, "sample_size": null,
+      "conclusion": "Cisplatin activates NF-κB in A549",
+      "evidence_quote": "In A549 cells, cisplatin 5 μM activated NF-κB (EMSA, p<0.05)",
+      "confidence": 0.9
+    }
+  ]
 }`;
+
+// ===== 补充提取：实验数不够时自动触发 =====
+
+/**
+ * 判断是否需要补充提取
+ * 如果全文长度暗示应该有更多实验但提取数不够，触发第二次提取
+ */
+function shouldSupplementExtract(text: string, experimentCount: number): boolean {
+  if (text.length > 20000 && experimentCount <= 3) return true;
+  if (text.length > 8000 && experimentCount <= 1) return true;
+  return false;
+}
+
+/**
+ * 补充提取：用更强调多实验的 prompt 再提一次
+ */
+async function supplementExtract(
+  text: string,
+  title: string,
+  existingCount: number,
+  options?: { maxTokens?: number; onToken?: (event: SSEEvent) => void }
+): Promise<ExtractionResult> {
+  const SUPPLEMENT_PROMPT = `You are extracting experiments from a biomedical paper.
+The previous extraction only found ${existingCount} experiment(s), but this paper is ${Math.round(text.length / 1000)}k characters long, which suggests there are MORE experiments.
+
+IMPORTANT: Look carefully at the ENTIRE text. Extract experiments from:
+- Results section (all subsections)
+- Figures and tables descriptions
+- Discussion section (may reference additional findings)
+
+Different concentrations, time points, cell lines = SEPARATE experiments.
+Each pathway measured = separate experiment entry.
+Aim for 5-10+ experiments.
+
+NAMING CONVENTIONS (use exact names):
+Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
+Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50
+Keep: evidence_quote required, anti-hallucination rules.`;
+
+  return extractWithPrompt(text, title, SUPPLEMENT_PROMPT, options);
+}
 
 // ===== 摘要专用 Prompt =====
 
@@ -136,14 +207,18 @@ Keep all anti-hallucination rules. Only extract what is explicitly stated.`;
  */
 const RELAXED_PROMPT = `You are extracting experimental data from a biomedical paper.
 This is a RETRY because the previous extraction returned no results.
-Be MORE LENIENT in extraction:
+
+CRITICAL: Most papers have 3-10 experiments. Extract ALL of them separately.
+Different concentration = different experiment. Different cell line = different experiment.
+
+Be MORE LENIENT:
 - Extract even when fields are incomplete (set missing fields to null)
 - Focus on identifying ANY pathway direction changes (up/down/no_change)
 - Focus on identifying ANY phenotype effects
 - Drug name and cell line are the MOST important fields
 - If the paper mentions results but lacks specific numbers, still extract them with null for numeric fields
-- confidence can be 0.4-0.7 (acknowledging this is less certain)
-Keep: anti-hallucination rules (evidence_quote required), naming conventions
+- confidence can be 0.4-0.7
+Keep: anti-hallucination rules, naming conventions
 
 NAMING CONVENTIONS (use exact names):
 Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
@@ -408,8 +483,20 @@ export async function extractWithFallback(
     return extractWithPrompt(text, title, MINIMAL_PROMPT, options);
   }
 
-  // 长文本（全文）：标准 → 宽松 → 最小
+  // 长文本（全文）：标准 → 补充提取 → 宽松 → 最小
   const result1 = await extractFromText(text, title, options);
+
+  // 补充提取：如果实验数太少且全文够长，用强调多实验的 prompt 再提一次
+  if (result1.experiments.length > 0 && shouldSupplementExtract(text, result1.experiments.length)) {
+    console.log(`[Extraction] 仅提取到 ${result1.experiments.length} 个实验（全文 ${Math.round(text.length/1000)}k），尝试补充提取: ${title}`);
+    const supplement = await supplementExtract(text, title, result1.experiments.length, options);
+    if (supplement.experiments.length > result1.experiments.length) {
+      console.log(`[Extraction] 补充提取新增 ${supplement.experiments.length - result1.experiments.length} 个实验`);
+      // 合并：保留原有的 + 新增的（按 drug+cell+pathway 去重）
+      return mergeExtractionResults([result1, supplement]);
+    }
+  }
+
   if (result1.experiments.length > 0) return result1;
 
   console.log(`[Extraction] 空结果，使用宽松 prompt 重试: ${title}`);
