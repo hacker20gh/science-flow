@@ -125,14 +125,19 @@ export default function FloatingTokenPanel() {
   useEffect(() => {
     try {
       const savedPos = localStorage.getItem("sciflow_token_panel_pos");
+      let x = 16;
+      let y = typeof window !== "undefined" ? window.innerHeight - 56 : 600;
       if (savedPos) {
         const parsed = JSON.parse(savedPos);
-        setPosition({ x: parsed.x, y: parsed.y });
-      } else {
-        setPosition({ x: 16, y: window.innerHeight - 56 });
+        x = parsed.x;
+        y = parsed.y;
       }
+      // clamp 到视口内（收起时 48px 高，展开时用 size.h）
+      const maxW = typeof window !== "undefined" ? window.innerWidth - 60 : 1200;
+      const maxH = typeof window !== "undefined" ? window.innerHeight - 56 : 600;
+      setPosition({ x: Math.max(0, Math.min(x, maxW)), y: Math.max(0, Math.min(y, maxH)) });
     } catch {
-      setPosition({ x: 16, y: window.innerHeight - 56 });
+      setPosition({ x: 16, y: typeof window !== "undefined" ? window.innerHeight - 56 : 600 });
     }
     setPositionLoaded(true);
     setSize(loadSize());
