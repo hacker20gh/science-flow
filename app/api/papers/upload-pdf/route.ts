@@ -7,6 +7,7 @@ import { parsePDF } from "@/lib/pdf-parser";
  * POST /api/papers/upload-pdf
  *
  * 手动上传 PDF，提取全文并保存到 Paper.fullText
+ * 同时将 PDF 文件保存到 Supabase Storage，供原文查看器使用
  * Body: FormData { paperId: string, file: File }
  */
 export async function POST(req: NextRequest) {
@@ -85,9 +86,35 @@ export async function POST(req: NextRequest) {
           return Response.json({ error: "论文记录不存在，请先保存文献" }, { status: 404 });
         }
 
+        // 上传 PDF 到 Supabase Storage
+        let pdfUrl: string | null = null;
+        try {
+          const { getServerClient } = await import("@/lib/supabase");
+          const supabase = getServerClient();
+          const storagePath = `papers/${paper.id}/full-text.pdf`;
+          const { error: uploadError } = await supabase.storage
+            .from("sciflow")
+            .upload(storagePath, buffer, {
+              contentType: "application/pdf",
+              upsert: true,
+            });
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage.from("sciflow").getPublicUrl(storagePath);
+            pdfUrl = urlData?.publicUrl || null;
+          } else {
+            console.warn("[UploadPDF] Storage 上传失败（不影响全文保存）:", uploadError.message);
+          }
+        } catch (storageErr) {
+          console.warn("[UploadPDF] Storage 错误（不影响全文保存）:", storageErr);
+        }
+
         await prisma.paper.update({
           where: { id: paper.id },
-          data: { fullText },
+          data: {
+            fullText,
+            // 如果有 pdfUrl，保存到 oaUrl（仅当 oaUrl 为空时）
+            ...(pdfUrl && !paper.oaUrl ? { oaUrl: pdfUrl } : {}),
+          },
         });
 
         return Response.json({
@@ -96,6 +123,7 @@ export async function POST(req: NextRequest) {
           pageCount,
           textLength: fullText.length,
           parser,
+          pdfUrl,
           preview: fullText.slice(0, 200) + "...",
         });
       } catch (dbError) {

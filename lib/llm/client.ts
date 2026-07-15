@@ -23,9 +23,9 @@ import { sleep } from "@/lib/utils/sleep";
 // 默认配置
 const DEFAULT_BASE_URL = "http://127.0.0.1:15721";
 const DEFAULT_MODELS = {
-  extraction: "claude-sonnet-5",
-  chat: "claude-sonnet-5",
-  analysis: "claude-opus-4-8",
+  extraction: "mimo-v2.5-pro",
+  chat: "mimo-v2.5-pro",
+  analysis: "mimo-v2.5-pro",
 };
 
 // ===== 重试状态追踪（AsyncLocalStorage，避免并发竞态） =====
@@ -78,8 +78,8 @@ async function getDBConfig(): Promise<{ baseUrl: string; models: Record<string, 
         models?: Record<string, string>;
       };
 
-      // 新格式：直连 API 模式
-      if (config.mode === "direct" && config.apiBaseUrl && config.apiKey) {
+      // 直连 API 模式（兼容：有 apiBaseUrl + apiKey 就算直连，不要求 mode 字段）
+      if (config.apiBaseUrl && config.apiKey) {
         cachedDBConfig = {
           baseUrl: config.apiBaseUrl,
           apiKey: config.apiKey,
@@ -89,7 +89,7 @@ async function getDBConfig(): Promise<{ baseUrl: string; models: Record<string, 
         return cachedDBConfig;
       }
 
-      // 新格式：CCS 代理模式
+      // CCS 代理模式
       if (config.mode === "ccs" && config.ccsBaseUrl) {
         cachedDBConfig = {
           baseUrl: config.ccsBaseUrl,
@@ -412,7 +412,7 @@ export async function withLLMRetry<T>(
   fn: () => Promise<T>,
   opts?: { maxRetries?: number; baseDelay?: number; label?: string }
 ): Promise<T> {
-  const maxRetries = opts?.maxRetries ?? 2;
+  const maxRetries = opts?.maxRetries ?? 1;
   const baseDelay = opts?.baseDelay ?? 1000;
   const label = opts?.label ?? "LLM";
 

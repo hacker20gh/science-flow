@@ -134,6 +134,12 @@ model Extraction {
   interventionType   String? @default("drug") // drug, knockdown, overexpression, knockout, stimulation, inhibition
   interventionMethod String? // siRNA, shRNA, CRISPR/Cas9 等
 
+  // 实验分层
+  experimentTier    String? @default("in_vitro") // in_vitro, in_vivo, clinical, computational
+  experimentRole    String? // main, supporting, control
+  conclusionIndex   Int?    // 属于论文的第几个结论（0-based）
+  conclusionClaim   String? // 此实验所属结论的 claim 文本
+
   // 剂量-反应 + 因果链（新增）
   doseResponse     Json? // [{concentration, effect_size, direction}]
   mechanisticChain Json? // [{from, to, relation}]

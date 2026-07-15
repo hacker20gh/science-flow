@@ -6,6 +6,7 @@
  */
 
 import type { ExperimentResult, ExtractionResult } from "./extraction";
+import { flattenConclusions } from "./extraction";
 
 // ===== 校验结果类型 =====
 
@@ -69,20 +70,20 @@ function validateExperiment(exp: ExperimentResult, index: number): ExperimentVal
   const cleaned: ExperimentResult = JSON.parse(JSON.stringify(exp));
 
   // 1. 校验 intervention
-  if (!cleaned.intervention.target || cleaned.intervention.target.trim() === "") {
-    issues.push({ field: "intervention.target", issue: "干预靶点为空", severity: "error", autoFixed: false });
-    score -= 30;
+  if (!cleaned.intervention?.target || cleaned.intervention.target.trim() === "") {
+    issues.push({ field: "intervention.target", issue: "干预靶点为空", severity: "warning", autoFixed: false });
+    score -= 15;
   }
 
   // 2. 校验 model.cell_line
-  if (!cleaned.model.cell_line || cleaned.model.cell_line.trim() === "") {
+  if (!cleaned.model?.cell_line || cleaned.model?.cell_line?.trim() === "") {
     issues.push({ field: "model.cell_line", issue: "细胞系为空", severity: "warning", autoFixed: false });
     score -= 10;
   }
 
   // 3. 校验 direction 归一化（自动修正）
-  for (let i = 0; i < cleaned.pathway_effects.length; i++) {
-    const pe = cleaned.pathway_effects[i];
+  for (let i = 0; i < (cleaned.pathway_effects || []).length; i++) {
+    const pe = (cleaned.pathway_effects || [])[i];
     const normalized = normalizeDirection(pe.direction);
     if (normalized !== pe.direction) {
       issues.push({
@@ -108,8 +109,8 @@ function validateExperiment(exp: ExperimentResult, index: number): ExperimentVal
   }
 
   // 4. 校验 phenotype_effects direction 归一化
-  for (let i = 0; i < cleaned.phenotype_effects.length; i++) {
-    const ph = cleaned.phenotype_effects[i];
+  for (let i = 0; i < (cleaned.phenotype_effects || []).length; i++) {
+    const ph = (cleaned.phenotype_effects || [])[i];
     const normalized = normalizeDirection(ph.direction);
     if (normalized !== ph.direction) {
       issues.push({
@@ -135,7 +136,7 @@ function validateExperiment(exp: ExperimentResult, index: number): ExperimentVal
   }
 
   // 6. 校验空结果：conclusion 有方向暗示但 pathway/phenotype 为空
-  if (cleaned.pathway_effects.length === 0 && cleaned.phenotype_effects.length === 0) {
+  if ((cleaned.pathway_effects || []).length === 0 && (cleaned.phenotype_effects || []).length === 0) {
     const conclusionLower = (cleaned.conclusion || "").toLowerCase();
     const hasDirectionHint = /upregul|downregul|increas|decreas|elevat|suppress|inhibit|activat|promot|induc/.test(conclusionLower);
     if (hasDirectionHint) {
@@ -195,18 +196,19 @@ function normalizeDirection(dir: string | null | undefined): string {
  * @returns 校验报告 + 修正后的结果
  */
 export function validateExtraction(result: ExtractionResult): ExtractionValidation {
-  if (!result.experiments || result.experiments.length === 0) {
+  const experiments = flattenConclusions(result);
+  if (!experiments || experiments.length === 0) {
     return {
       overallQuality: "poor",
       averageScore: 0,
       experimentValidations: [],
       totalIssues: 1,
       autoFixedCount: 0,
-      cleaned: { experiments: [] },
+      cleaned: { claim: undefined, conclusions: [] },
     };
   }
 
-  const validations = result.experiments.map((exp, i) => validateExperiment(exp, i));
+  const validations = experiments.map((exp, i) => validateExperiment(exp, i));
 
   const totalIssues = validations.reduce((sum, v) => sum + v.issues.length, 0);
   const autoFixedCount = validations.reduce(
@@ -226,7 +228,11 @@ export function validateExtraction(result: ExtractionResult): ExtractionValidati
     totalIssues,
     autoFixedCount,
     cleaned: {
-      experiments: validations.map(v => v.cleaned),
+      claim: undefined,
+      conclusions: validations.map((v, i) => ({
+        claim: (v.cleaned as ExperimentResult & { conclusionClaim?: string }).conclusionClaim || `实验 ${i + 1}`,
+        evidenceChain: [v.cleaned],
+      })),
     },
   };
 }

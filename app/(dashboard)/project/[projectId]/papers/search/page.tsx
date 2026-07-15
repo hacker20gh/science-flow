@@ -397,11 +397,14 @@ export default function ProjectPaperSearchPage() {
             // 单篇完成，更新进度
             setExtractionDetails((prev) => prev.map((item, i) => {
               if (i === d.completed! - 1) {
-                const single = d.single as { extraction?: { experiments?: unknown[] }; suggestModelSwitch?: boolean };
+                const single = d.single as { extraction?: { experiments?: unknown[]; conclusions?: Array<{ evidenceChain: unknown[] }> }; suggestModelSwitch?: boolean };
+                const expCount = single.extraction?.experiments?.length
+                  || single.extraction?.conclusions?.reduce((s, c) => s + c.evidenceChain.length, 0)
+                  || 0;
                 return {
                   ...item,
-                  status: single.extraction?.experiments?.length ? "done" as const : "error" as const,
-                  experiments: single.extraction?.experiments?.length || 0,
+                  status: expCount > 0 ? "done" as const : "error" as const,
+                  experiments: expCount,
                   suggestModelSwitch: single.suggestModelSwitch,
                 };
               }
@@ -421,12 +424,15 @@ export default function ProjectPaperSearchPage() {
 
       // 更新进度详情
       setExtractionDetails((prev) => prev.map((d, i) => {
-        const result = (results as Array<{ extraction?: { experiments?: unknown[] }; error?: string; suggestModelSwitch?: boolean }>)?.[i];
+        const result = (results as Array<{ extraction?: { experiments?: unknown[]; conclusions?: Array<{ evidenceChain: unknown[] }> }; error?: string; suggestModelSwitch?: boolean }>)?.[i];
         if (!result) return d;
+        const expCount = result.extraction?.experiments?.length
+          || result.extraction?.conclusions?.reduce((s, c) => s + c.evidenceChain.length, 0)
+          || 0;
         return {
           ...d,
-          status: result.extraction?.experiments?.length ? "done" as const : "error" as const,
-          experiments: result.extraction?.experiments?.length || 0,
+          status: expCount > 0 ? "done" as const : "error" as const,
+          experiments: expCount,
           error: result.error,
           suggestModelSwitch: result.suggestModelSwitch,
         };
@@ -434,15 +440,18 @@ export default function ProjectPaperSearchPage() {
 
       // 持久化提取结果
       const saveStatuses: Record<string, "saving" | "saved" | "error"> = {};
-      for (const result of results as Array<{ paperId: string; extraction?: { experiments: import("@/lib/llm/extraction").ExperimentResult[] }; error?: string }>) {
-        if (result.extraction?.experiments) {
-          updatePaperExtraction(result.paperId, "done", result.extraction.experiments);
+      for (const result of results as Array<{ paperId: string; extraction?: { experiments?: import("@/lib/llm/extraction").ExperimentResult[]; conclusions?: Array<{ evidenceChain: import("@/lib/llm/extraction").ExperimentResult[] }> }; error?: string }>) {
+        const experiments = result.extraction?.experiments
+          || result.extraction?.conclusions?.flatMap(c => c.evidenceChain)
+          || [];
+        if (experiments.length > 0) {
+          updatePaperExtraction(result.paperId, "done", experiments);
           saveStatuses[result.paperId] = "saving";
           setSaveStatus({ ...saveStatuses });
           fetch(`/api/projects/${projectId}/extractions/batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paperId: result.paperId, extractions: result.extraction.experiments }),
+            body: JSON.stringify({ paperId: result.paperId, extractions: experiments }),
           })
             .then((r) => { saveStatuses[result.paperId] = r.ok ? "saved" : "error"; setSaveStatus({ ...saveStatuses }); })
             .catch(() => { saveStatuses[result.paperId] = "error"; setSaveStatus({ ...saveStatuses }); });

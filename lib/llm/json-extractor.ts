@@ -73,7 +73,9 @@ export async function extractStructuredOutput<T>(
     if (block.type === "tool_use") {
       const parsed = schema.safeParse(block.input);
       if (parsed.success) return parsed.data;
-      console.warn(`[${label}] tool_use validation failed, trying text fallback:`, parsed.error.flatten());
+      // 打印详细的字段级错误
+      const issues = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`);
+      console.warn(`[${label}] tool_use validation failed (${issues.length} issues):`, issues.slice(0, 10));
     }
   }
 
@@ -110,7 +112,7 @@ export async function extractStructuredOutput<T>(
     }
   }
 
-  throw new Error(`[${label}] 无法从 LLM 输出中提取结构化数据`);
+  throw new Error(`[${label}] LLM 返回的内容无法解析为结构化数据 — 可能是模型能力不足或输出格式不兼容`);
 }
 
 /**

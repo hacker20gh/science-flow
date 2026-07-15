@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { readFile } from "fs/promises";
 import path from "path";
 import { auth } from "@/lib/auth";
-import { extractFromText, smartTruncate } from "@/lib/llm/extraction";
+import { extractFromText, smartTruncate, flattenConclusions } from "@/lib/llm/extraction";
 import { prisma } from "@/lib/db-server";
 import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
 
@@ -50,8 +50,9 @@ export async function POST(req: NextRequest) {
         });
 
         if (paper) {
+          const flatExps = flattenConclusions(extraction);
           await prisma.$transaction(async (tx: any) => {
-            for (const exp of extraction.experiments) {
+            for (const exp of flatExps) {
               const record = await tx.extraction.create({
                 data: mapExtractionToDB(exp, paperId),
               });
@@ -87,8 +88,8 @@ export async function POST(req: NextRequest) {
               data: {
                 projectId,
                 type: "literature",
-                title: `从本地 PDF 提取了 ${extraction.experiments.length} 条实验数据`,
-                content: { paperId, fileName: safeFileName, count: extraction.experiments.length },
+                title: `从本地 PDF 提取了 ${flatExps.length} 条实验数据`,
+                content: { paperId, fileName: safeFileName, count: flatExps.length },
               },
             });
           });
@@ -98,11 +99,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const flatExperiments = flattenConclusions(extraction);
     return Response.json({
       paperId,
       title,
-      experiments: extraction.experiments,
-      count: extraction.experiments.length,
+      experiments: flatExperiments,
+      count: flatExperiments.length,
     });
   } catch (error) {
     console.error("Extract from local PDF error:", error);

@@ -8,7 +8,8 @@
  */
 
 import { inngest } from "../client";
-import { extractFromText } from "@/lib/llm/extraction";
+import { extractFromText, flattenConclusions } from "@/lib/llm/extraction";
+import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
 
 /** 从 DB 获取论文全文，对有 oaUrl 的尝试自动下载 PDF */
 async function ensureFullTexts(
@@ -122,7 +123,9 @@ export const batchExtractFunction = inngest.createFunction(
               return { paperId: paper.paperId, success: false, error: "数据库不可用" };
             }
 
-            if (extraction.experiments.length === 0) {
+            const flatExperiments = flattenConclusions(extraction);
+
+            if (flatExperiments.length === 0) {
               return {
                 paperId: paper.paperId,
                 success: false,
@@ -130,32 +133,39 @@ export const batchExtractFunction = inngest.createFunction(
               };
             }
 
-            for (const exp of extraction.experiments) {
-              await prisma.extraction.create({
-                data: {
-                  paperId: paper.paperId,
-                  drugName: exp.intervention?.target || null,
-                  drugConc: exp.intervention?.concentration || null,
-                  duration: exp.intervention?.duration || null,
-                  coTreatment: exp.intervention?.co_treatment || null,
-                  cellLine: exp.model?.cell_line || null,
-                  species: exp.model?.species || null,
-                  passage: exp.model?.passage || null,
-                  pathway: exp.pathway_effects?.[0]?.pathway || null,
-                  pathwayDir: exp.pathway_effects?.[0]?.direction || null,
-                  phenotype: exp.phenotype_effects?.[0]?.phenotype || null,
-                  phenotypeDir: exp.phenotype_effects?.[0]?.direction || null,
-                  method: exp.statistical_test || null,
-                  expMethod: exp.pathway_effects?.[0]?.method || null,
-                  conclusion: exp.conclusion || null,
-                  rawText: exp.evidence_quote || null,
-                  pathwayEffects: exp.pathway_effects || [],
-                  phenotypeEffects: exp.phenotype_effects || [],
-                  controls: exp.controls || [],
-                  sampleSize: exp.sample_size || null,
-                  confidence: exp.confidence || null,
-                },
+            for (const exp of flatExperiments) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const record = await prisma.extraction.create({
+                data: mapExtractionToDB(exp as any, paper.paperId) as any,
               });
+
+              // 创建关联的关系型通路/表型效果
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const { pathwayEffects, phenotypeEffects } = extractRelationalEffects(exp as any);
+
+              if (pathwayEffects.length > 0) {
+                await prisma.pathwayEffect.createMany({
+                  data: pathwayEffects.map(pe => ({
+                    extractionId: record.id,
+                    pathway: pe.pathway,
+                    direction: pe.direction,
+                    significance: pe.significance,
+                    method: pe.method,
+                    foldChange: pe.foldChange,
+                  })),
+                });
+              }
+
+              if (phenotypeEffects.length > 0) {
+                await prisma.phenotypeEffect.createMany({
+                  data: phenotypeEffects.map(ph => ({
+                    extractionId: record.id,
+                    phenotype: ph.phenotype,
+                    direction: ph.direction,
+                    foldChange: ph.foldChange,
+                  })),
+                });
+              }
             }
 
             return { paperId: paper.paperId, success: true };

@@ -4,6 +4,10 @@
 export function mapExtractionToDB(experiment: Record<string, unknown>, paperId: string) {
   // 兼容新 (intervention) 和旧 (drug_intervention) 字段名
   const iv = (experiment.intervention || experiment.drug_intervention) as Record<string, unknown> | undefined;
+
+  // 计算实验分层标签
+  const tier = getExperimentTierFromType(experiment.experiment_type as string | undefined);
+
   return {
     paperId,
     drugName: iv?.target || iv?.name || null,
@@ -34,7 +38,39 @@ export function mapExtractionToDB(experiment: Record<string, unknown>, paperId: 
     mechanisticChain: experiment.mechanistic_chain || undefined,
     interventionType: iv?.type || "drug",
     interventionMethod: iv?.method || null,
+    experimentTier: tier,
+    experimentRole: experiment.role || null,
+    conclusionIndex: (experiment as Record<string, unknown>).conclusionIndex ?? null,
+    conclusionClaim: (experiment as Record<string, unknown>).conclusionClaim || null,
   };
+}
+
+/**
+ * 从 experiment_type 推断实验分层标签
+ */
+function getExperimentTierFromType(experimentType?: string | null): string {
+  switch (experimentType) {
+    case "cell_line":
+    case "primary_cell":
+    case "organoid":
+    case "tissue_slice":
+      return "in_vitro";
+    case "animal_model":
+    case "xenograft":
+      return "in_vivo";
+    case "patient_sample":
+    case "clinical_trial":
+    case "clinical_obs":
+    case "case_report":
+      return "clinical";
+    case "bioinformatics":
+    case "omics":
+    case "meta_analysis":
+    case "review":
+      return "computational";
+    default:
+      return "in_vitro";
+  }
 }
 
 /**

@@ -47,6 +47,22 @@ export default function BrainPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingHypothesis, setEditingHypothesis] = useState<Hypothesis | null>(null);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
+  const [activeTab, setActiveTab] = useState<"matrix" | "experiments" | "pathway" | "hypotheses">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(`brain-active-tab-${params.projectId}`);
+      if (saved && ["matrix", "experiments", "pathway", "hypotheses"].includes(saved)) {
+        return saved as "matrix" | "experiments" | "pathway" | "hypotheses";
+      }
+    }
+    return "matrix";
+  });
+
+  // 持久化 activeTab 到 localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`brain-active-tab-${projectId}`, activeTab);
+    }
+  }, [activeTab, projectId]);
 
   const refreshHypotheses = useCallback(() => {
     if (!projectId) return;
@@ -70,7 +86,7 @@ export default function BrainPage() {
         });
         refreshHypotheses();
       } catch {
-        // silently fail
+        toast.error("操作失败");
       }
     },
     [projectId, refreshHypotheses]
@@ -86,7 +102,7 @@ export default function BrainPage() {
         });
         refreshHypotheses();
       } catch {
-        // silently fail
+        toast.error("操作失败");
       }
     },
     [projectId, refreshHypotheses]
@@ -100,7 +116,7 @@ export default function BrainPage() {
         });
         refreshHypotheses();
       } catch {
-        // silently fail
+        toast.error("操作失败");
       }
     },
     [projectId, refreshHypotheses]
@@ -163,14 +179,13 @@ export default function BrainPage() {
   }, [projectId]);
 
   // 从 DB 获取真实提取数据（直接用于矩阵生成）
-  useEffect(() => {
+  const refreshExtractions = useCallback(() => {
     if (!projectId) return;
     fetch(`/api/projects/${projectId}/extractions`)
       .then((res) => res.json())
       .then((data) => {
         if (data.extractions) {
           setDbExtractions(data.extractions);
-          // 检测是否有新的提取结果（与上次构建矩阵时的提取数量比较）
           if (lastBuildCountRef.current > 0 && data.extractions.length > lastBuildCountRef.current) {
             setHasNewExtractions(true);
           }
@@ -179,8 +194,11 @@ export default function BrainPage() {
       .catch((err) => {
         console.error("[Brain] Failed to load extractions:", err);
       });
-   
   }, [projectId]);
+
+  useEffect(() => {
+    refreshExtractions();
+  }, [refreshExtractions]);
 
   // 从 DB 文献构建 extractedPapers（用于 fallback）
   const extractedPapers = useMemo(() => {
@@ -406,89 +424,165 @@ export default function BrainPage() {
         />
       )}
 
+      {/* 文献分析报告 — 顶部 */}
+      {!useDemo && <AnalysisReportPanel matrixData={matrixData} projectId={projectId} />}
+
       {/* AI 洞察面板 */}
       {!useDemo && <AIInsights matrixData={matrixData} projectId={projectId} />}
 
-      {/* 文献分析报告 */}
-      {!useDemo && <AnalysisReportPanel matrixData={matrixData} projectId={projectId} />}
-
-      {/* 机制矩阵 */}
-      <MotionSection
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.1 }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            机制矩阵
-            {hasNewExtractions && !useDemo && (
-              <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-normal">
-                有更新
+      {/* 冲突提示条 */}
+      {!useDemo && matrixData.conflicts.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-sm">
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <span className="text-amber-800">
+            发现 <strong>{matrixData.conflicts.length}</strong> 个通路冲突 —{" "}
+            {matrixData.conflicts.slice(0, 2).map((c, i) => (
+              <span key={i}>
+                {i > 0 && "、"}
+                <strong>{c.columnId}</strong>
               </span>
-            )}
-          </h2>
-          <div className="flex gap-2">
-            {!useDemo && (
-              <button
-                onClick={rebuildMatrix}
-                disabled={rebuilding}
-                className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1"
-              >
-                <RefreshCw size={12} className={rebuilding ? "animate-spin" : ""} />
-                {rebuilding ? "重建中…" : "重建矩阵"}
-              </button>
-            )}
-            <button
-              onClick={() => {
-                const csv = exportMatrixToCsv(matrixData);
-                downloadFile(csv, "mechanism-matrix.csv", "text/csv;charset=utf-8");
-              }}
-              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
-            >
-              导出 CSV
-            </button>
-            <button
-              onClick={() => {
-                const latex = exportMatrixToLatex(matrixData);
-                downloadFile(latex, "mechanism-matrix.tex", "application/x-latex");
-              }}
-              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
-            >
-              导出 LaTeX
-            </button>
-          </div>
+            ))}
+            {matrixData.conflicts.length > 2 && " 等"} 需要实验验证
+          </span>
         </div>
-        <MechanismMatrix projectId={projectId} data={matrixData} />
-      </MotionSection>
+      )}
 
-      {/* 假设追踪器 */}
-      <MotionSection
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            假设追踪器
-            {!useDemo && hypotheses.length > 0 && (
-              <span className="ml-2 text-sm font-normal text-gray-400">
-                {hypotheses.length} 个假设
-              </span>
-            )}
-          </h2>
-          {!useDemo && (
-            <button
-              onClick={handleOpenCreateForm}
-              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1"
-            >
-              <Plus size={14} />
-              新建假设
-            </button>
+      {/* Tab 切换区域 */}
+      {!useDemo && dbExtractions && dbExtractions.length > 0 && (
+        <div>
+          {/* Tab 按钮 */}
+          <div className="flex items-center gap-1 border-b border-gray-200 mb-4">
+            {([
+              { key: "matrix" as const, label: "机制矩阵", icon: "📊" },
+              { key: "experiments" as const, label: "实验集合", icon: "📋" },
+              { key: "pathway" as const, label: "通路网络", icon: "🔗" },
+              { key: "hypotheses" as const, label: "假设追踪", icon: "💡" },
+            ]).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.key
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab: 机制矩阵 */}
+          {activeTab === "matrix" && (
+            <div>
+              <div className="flex items-center justify-end gap-2 mb-3">
+                <button
+                  onClick={rebuildMatrix}
+                  disabled={rebuilding}
+                  className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1"
+                >
+                  <RefreshCw size={12} className={rebuilding ? "animate-spin" : ""} />
+                  {rebuilding ? "重建中…" : "重建矩阵"}
+                </button>
+                <button
+                  onClick={() => {
+                    const csv = exportMatrixToCsv(matrixData);
+                    downloadFile(csv, "mechanism-matrix.csv", "text/csv;charset=utf-8");
+                  }}
+                  className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  导出 CSV
+                </button>
+                <button
+                  onClick={() => {
+                    const latex = exportMatrixToLatex(matrixData);
+                    downloadFile(latex, "mechanism-matrix.tex", "application/x-latex");
+                  }}
+                  className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  导出 LaTeX
+                </button>
+              </div>
+              <MechanismMatrix projectId={projectId} data={matrixData} />
+            </div>
+          )}
+
+          {/* Tab: 实验集合 */}
+          {activeTab === "experiments" && (
+            <ExperimentCollection extractions={dbExtractions} projectId={projectId} onDelete={refreshExtractions} />
+          )}
+
+          {/* Tab: 通路网络 */}
+          {activeTab === "pathway" && (() => {
+            const chains: MechanisticLink[] = [];
+            for (const ext of dbExtractions) {
+              const mc = (ext as unknown as Record<string, unknown>).mechanisticChain as MechanisticLink[] | null;
+              if (mc) chains.push(...mc);
+            }
+            if (chains.length === 0) {
+              return (
+                <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-400">
+                  暂无因果链数据。提取文献时填写了 mechanistic_chain 的实验会显示在这里。
+                </div>
+              );
+            }
+            return <PathwayNetwork chains={chains} />;
+          })()}
+
+          {/* Tab: 假设追踪 */}
+          {activeTab === "hypotheses" && (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">
+                  假设追踪器
+                  {hypotheses.length > 0 && (
+                    <span className="ml-2 text-sm font-normal text-gray-400">
+                      {hypotheses.length} 个假设
+                    </span>
+                  )}
+                </h2>
+                <button
+                  onClick={handleOpenCreateForm}
+                  className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1"
+                >
+                  <Plus size={14} />
+                  新建假设
+                </button>
+              </div>
+              {hypotheses.length > 0 ? (
+                <div className="space-y-4">
+                  {hypotheses.map((h, i) => (
+                    <MotionDiv
+                      key={h.id}
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: i * 0.06 }}
+                    >
+                      <HypothesisCard
+                        hypothesis={h}
+                        projectId={projectId}
+                        onUpdate={handleUpdateHypothesis}
+                        onDelete={handleDeleteHypothesis}
+                        onEdit={handleEditHypothesis}
+                        totalExperiments={matrixData.totalExperiments}
+                      />
+                    </MotionDiv>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-white border border-gray-200 rounded-xl p-6 text-center text-gray-400 text-sm">
+                  搜索文献并提出假设后，假设追踪器会自动显示
+                </div>
+              )}
+            </div>
           )}
         </div>
+      )}
 
-        {useDemo ? (
-          /* Demo 数据：展示硬编码样例 */
+      {/* Demo 模式：假设追踪器 */}
+      {useDemo && (
+        <div>
+          <h2 className="text-lg font-semibold mb-4">假设追踪器</h2>
           <div className="bg-white border border-gray-200 rounded-xl p-6">
             <div className="flex items-start justify-between">
               <div className="flex-1">
@@ -501,7 +595,6 @@ export default function BrainPage() {
                     sorafenib 通过 NF-κB 上调 HCC 细胞中的 PD-L1 表达
                   </h3>
                 </div>
-
                 <div className="mt-3">
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="text-gray-500">证据强度</span>
@@ -511,7 +604,6 @@ export default function BrainPage() {
                     <div className="bg-green-500 h-2 rounded-full" style={{ width: "80%" }} />
                   </div>
                 </div>
-
                 <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
                   <div>
                     <p className="text-green-600 font-medium mb-1 flex items-center gap-1">
@@ -537,65 +629,16 @@ export default function BrainPage() {
               </div>
             </div>
           </div>
-        ) : hypotheses.length > 0 ? (
-          /* 真实数据：渲染所有假设 */
-          <div className="space-y-4">
-            {hypotheses.map((h, i) => (
-              <MotionDiv
-                key={h.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: i * 0.06 }}
-              >
-                <HypothesisCard
-                  hypothesis={h}
-                  projectId={projectId}
-                  onUpdate={handleUpdateHypothesis}
-                  onDelete={handleDeleteHypothesis}
-                  onEdit={handleEditHypothesis}
-                  totalExperiments={matrixData.totalExperiments}
-                />
-              </MotionDiv>
-            ))}
-          </div>
-        ) : (
-          /* 真实数据但无假设 */
-          <div className="bg-white border border-gray-200 rounded-xl p-6 text-center text-gray-400 text-sm">
-            搜索文献并提出假设后，假设追踪器会自动显示
-          </div>
-        )}
-      </MotionSection>
+        </div>
+      )}
 
-      {/* 实验集合视图 + 通路网络 */}
-      {!useDemo && dbExtractions && dbExtractions.length > 0 && (
-        <>
-          <MotionSection
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
-          >
-            <ExperimentCollection extractions={dbExtractions} projectId={projectId} />
-          </MotionSection>
-
-          {/* 通路网络 */}
-          {(() => {
-            const chains: MechanisticLink[] = [];
-            for (const ext of dbExtractions) {
-              const mc = (ext as unknown as Record<string, unknown>).mechanisticChain as MechanisticLink[] | null;
-              if (mc) chains.push(...mc);
-            }
-            if (chains.length === 0) return null;
-            return (
-              <MotionSection
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.25 }}
-              >
-                <PathwayNetwork chains={chains} />
-              </MotionSection>
-            );
-          })()}
-        </>
+      {/* 无数据时显示空状态 */}
+      {!useDemo && (!dbExtractions || dbExtractions.length === 0) && (
+        <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-400">
+          <Brain size={40} className="mx-auto mb-3 text-gray-300" />
+          <p className="text-lg font-medium text-gray-500 mb-1">暂无实验数据</p>
+          <p className="text-sm">搜索文献并提取后，机制矩阵和实验数据会自动显示在这里</p>
+        </div>
       )}
 
       {/* 待办清单 */}

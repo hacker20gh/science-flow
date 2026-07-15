@@ -381,6 +381,38 @@ export default function PaperDetailPage() {
             >
               <Download size={16} />
             </button>
+            <label
+              className="shrink-0 p-2 border border-gray-200 text-gray-500 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-colors cursor-pointer"
+              title="上传 PDF 全文"
+            >
+              <input
+                type="file"
+                accept=".pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const form = new FormData();
+                  form.append("file", file);
+                  form.append("paperId", paper.id);
+                  if (paper.doi) form.append("doi", paper.doi);
+                  if (paper.pmid) form.append("pmid", paper.pmid);
+                  try {
+                    const res = await fetch("/api/papers/upload-pdf", { method: "POST", body: form });
+                    if (!res.ok) {
+                      const err = await res.json();
+                      throw new Error(err.error || "上传失败");
+                    }
+                    const data = await res.json();
+                    toast.success(`全文解析成功！共 ${data.textLength} 字符（${data.parser}）`);
+                    window.location.reload();
+                  } catch (err) {
+                    toast.error("PDF 上传失败：" + (err instanceof Error ? err.message : "未知错误"));
+                  }
+                }}
+              />
+              <FileText size={16} />
+            </label>
             </>
           )}
         </div>

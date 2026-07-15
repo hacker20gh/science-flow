@@ -216,8 +216,8 @@ export default function ManuscriptPage() {
           })),
           experiments: extractedPapers.flatMap((p) =>
             p.experiments.map((e) => ({
-              name: `${e.intervention.target} ${e.intervention.concentration || ""}`,
-              protocol: `细胞系：${e.model.cell_line}，处理：${e.intervention.duration || "24h"}`,
+              name: `${e.intervention?.target || "未知"} ${e.intervention?.concentration || ""}`,
+              protocol: `细胞系：${e.model?.cell_line || "未知"}，处理：${e.intervention?.duration || "24h"}`,
               result: e.conclusion,
             }))
           ),

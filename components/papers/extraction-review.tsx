@@ -6,9 +6,8 @@ import type { ExperimentResult } from "@/lib/llm/extraction";
 interface PaperExtraction {
   paperId: string;
   title: string;
-  extraction: {
-    experiments: ExperimentResult[];
-  } | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  extraction: any;
   error?: string;
 }
 
@@ -83,7 +82,10 @@ export function ExtractionReview({
 
         if (!paper.extraction) return null;
 
-        const experiments = paper.extraction.experiments;
+        // 兼容新格式（conclusions）和旧格式（experiments）
+        const experiments = paper.extraction.conclusions
+          ? paper.extraction.conclusions.flatMap((c: { evidenceChain: ExperimentResult[] }) => c.evidenceChain)
+          : paper.extraction.experiments || [];
 
         return (
           <div
@@ -140,7 +142,7 @@ export function ExtractionReview({
 
             {/* 实验列表 */}
             <div className="divide-y divide-gray-50">
-              {experiments.map((exp, idx) => (
+              {experiments.map((exp: ExperimentResult, idx: number) => (
                 <ExperimentCard key={idx} experiment={exp} index={idx + 1} />
               ))}
             </div>
@@ -175,28 +177,28 @@ function ExperimentCard({
           </span>
           <div className="min-w-0">
             <span className="text-sm font-medium">
-              {iv.target}
-              {iv.concentration && ` ${iv.concentration}`}
-              {iv.duration && ` · ${iv.duration}`}
+              {iv?.target || "未知靶点"}
+              {iv?.concentration && ` ${iv.concentration}`}
+              {iv?.duration && ` · ${iv.duration}`}
             </span>
             <span className="text-xs text-gray-400 ml-2">
-              {model.cell_line}
-              {model.species && ` · ${model.species}`}
+              {model?.cell_line || "未知"}
+              {model?.species && ` · ${model.species}`}
             </span>
           </div>
         </div>
         <span className="text-xs text-gray-400 shrink-0">
-          {experiment.pathway_effects.length + experiment.phenotype_effects.length} 项发现
+          {(experiment.pathway_effects || []).length + (experiment.phenotype_effects || []).length} 项发现
         </span>
       </div>
 
       {expanded && (
         <div className="mt-3 space-y-2 text-xs">
           {/* 通路变化 */}
-          {experiment.pathway_effects.length > 0 && (
+          {(experiment.pathway_effects || []).length > 0 && (
             <div>
               <span className="font-medium text-gray-600">通路变化：</span>
-              {experiment.pathway_effects.map((p, i) => (
+              {(experiment.pathway_effects || []).map((p, i) => (
                 <span key={i} className="ml-2">
                   {p.pathway}{" "}
                   <span className={p.direction === "up" ? "text-green-600" : p.direction === "down" ? "text-red-600" : "text-gray-500"}>
@@ -214,10 +216,10 @@ function ExperimentCard({
           )}
 
           {/* 表型变化 */}
-          {experiment.phenotype_effects.length > 0 && (
+          {(experiment.phenotype_effects || []).length > 0 && (
             <div>
               <span className="font-medium text-gray-600">表型变化：</span>
-              {experiment.phenotype_effects.map((p, i) => (
+              {(experiment.phenotype_effects || []).map((p, i) => (
                 <span key={i} className="ml-2">
                   {p.phenotype}{" "}
                   <span className={p.direction === "up" ? "text-green-600" : p.direction === "down" ? "text-red-600" : "text-gray-500"}>
@@ -239,8 +241,8 @@ function ExperimentCard({
             {experiment.sample_size && (
               <span>n={experiment.sample_size}</span>
             )}
-            {experiment.controls.length > 0 && (
-              <span>对照：{experiment.controls.join(", ")}</span>
+            {(experiment.controls || []).length > 0 && (
+              <span>对照：{(experiment.controls || []).join(", ")}</span>
             )}
           </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -29,6 +29,8 @@ import {
   Minimize2,
   GripVertical,
   ArrowUpDown,
+  Trash2,
+  Search,
 } from "lucide-react";
 import type {
   MatrixData,
@@ -82,12 +84,14 @@ function SortableColumnHeader({
   ds,
   width,
   onResize,
+  searchQuery,
 }: {
   col: MatrixColumn;
   hasConflict: boolean;
   ds: { header: string };
   width?: number;
   onResize?: (colId: string, newWidth: number) => void;
+  searchQuery?: string;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: col.id,
@@ -137,7 +141,7 @@ function SortableColumnHeader({
         hasConflict
           ? "border-b-amber-400 bg-amber-50"
           : "border-b-gray-200 bg-gradient-to-b from-gray-50 to-gray-100"
-      }`}
+      } ${searchQuery && col.label.toLowerCase().includes(searchQuery.toLowerCase()) ? "bg-yellow-100" : ""}`}
     >
       {/* Drag handle — visible on hover */}
       <button
@@ -224,6 +228,7 @@ export function MechanismMatrix({
   const DEFAULT_COL_WIDTH = 110;
   const [showConflicts, setShowConflicts] = useState(true);
   const [data, setData] = useState<MatrixData>(initialData);
+  useEffect(() => { setData(initialData); }, [initialData]);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const [hoveredCell, setHoveredCell] = useState<{
     row: MatrixRow;
@@ -233,7 +238,9 @@ export function MechanismMatrix({
   } | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("completeness");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [searchQuery, setSearchQuery] = useState("");
   const [visibleRowCount, setVisibleRowCount] = useState(50);
+  const [deleting, setDeleting] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
 
   const dndSensors = useSensors(
@@ -415,6 +422,25 @@ export function MechanismMatrix({
     return data.conflicts.some((c) => c.columnId === colId);
   }
 
+  // 删除机制矩阵
+  async function handleDelete() {
+    if (!window.confirm("确定要清空机制矩阵吗？\n\n手动编辑的单元格数据将丢失，但可以从文献重新生成。")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/matrix`, { method: "DELETE" });
+      if (!res.ok) throw new Error("删除失败");
+      toast.success("机制矩阵已清空");
+      // 清空本地数据
+      const emptyData: MatrixData = { ...data, rows: [], totalExperiments: 0 };
+      setData(emptyData);
+      onMatrixUpdate?.(emptyData);
+    } catch (err) {
+      toast.error("删除失败：" + (err instanceof Error ? err.message : "未知错误"));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (data.rows.length === 0) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-12 text-center text-gray-400">
@@ -430,8 +456,20 @@ export function MechanismMatrix({
       {/* 工具栏 */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
+          {/* 搜索 */}
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索通路、药物、论文..."
+              className="pl-8 pr-3 py-1 text-xs border border-gray-200 rounded-lg w-48 focus:outline-none focus:ring-1 focus:ring-blue-300"
+            />
+          </div>
+
           {/* 维度筛选 */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 border-l border-gray-200 pl-3">
             <span className="text-xs text-gray-500">维度：</span>
             {(["all", "pathway", "phenotype"] as const).map((t) => (
               <button
@@ -530,6 +568,15 @@ export function MechanismMatrix({
             >
               导出 SVG
             </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-2 py-0.5 text-[11px] border border-red-200 text-red-500 rounded hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-50"
+              title="清空矩阵"
+            >
+              <Trash2 size={11} className="inline mr-0.5" />
+              {deleting ? "清空中..." : "清空矩阵"}
+            </button>
           </div>
         </div>
       </div>
@@ -600,6 +647,7 @@ export function MechanismMatrix({
                       ds={ds}
                       width={columnWidths[col.id] || DEFAULT_COL_WIDTH}
                       onResize={handleColumnResize}
+                      searchQuery={searchQuery}
                     />
                   ))}
                 </SortableContext>
@@ -637,6 +685,7 @@ export function MechanismMatrix({
                         ${isNewPaper ? "border-r-gray-200" : "border-r-gray-100"}
                         ${isNewPaper ? "bg-white" : "bg-gray-50/30"}
                         ${isHovered ? "bg-blue-50/40 !important" : ""}
+                        ${searchQuery && (row.paperTitle.toLowerCase().includes(searchQuery.toLowerCase()) || row.drugConc.toLowerCase().includes(searchQuery.toLowerCase())) ? "bg-yellow-50" : ""}
                       `}
                     >
                       {isNewPaper ? (
@@ -695,6 +744,7 @@ export function MechanismMatrix({
                                   ? "text-red-700 hover:bg-red-50"
                                   : "text-gray-500 hover:bg-gray-100"
                             }
+                            ${searchQuery && (row.paperTitle.toLowerCase().includes(searchQuery.toLowerCase()) || row.drugConc.toLowerCase().includes(searchQuery.toLowerCase())) && col.label.toLowerCase().includes(searchQuery.toLowerCase()) ? "bg-yellow-100" : ""}
                             ${hasConflict && cell ? "ring-1 ring-inset ring-amber-300 animate-pulse-subtle" : ""}
                             ${cell && cell.direction && (cell.evidenceStrength ?? 0) < 40 ? "border border-dashed border-amber-400" : ""}
                           `}

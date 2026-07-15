@@ -91,8 +91,16 @@ export async function DELETE(
   const { projectId } = await params;
 
   try {
+    // 删除旧矩阵，然后插入一个空的标记记录（防止自动重新生成）
     await prisma.mechanismMatrix.deleteMany({
       where: { projectId },
+    });
+    await prisma.mechanismMatrix.create({
+      data: {
+        projectId,
+        data: { rows: [], columns: [], conflicts: [], gaps: [], stats: {} },
+        analysisReport: { cleared: true, clearedAt: new Date().toISOString() },
+      },
     });
     return Response.json({ ok: true });
   } catch (error) {
