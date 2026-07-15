@@ -8,8 +8,10 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 let pdfParseFallback: ((buffer: Buffer) => Promise<{ text: string; numpages: number }>) | null = null;
 
-const DOCLING_SERVICE_URL = process.env.DOCLING_SERVICE_URL || "http://localhost:8099";
-const PARSE_TIMEOUT_MS = 60_000; // 60 秒
+const DOCLING_SERVICE_URL = process.env.DOCLING_SERVICE_URL || "";
+const PARSE_TIMEOUT_MS = 30_000; // 30 秒（从 60 秒降低）
+// 生产环境没有 Docling 服务，直接跳过
+const DOCLING_ENABLED = !!DOCLING_SERVICE_URL && DOCLING_SERVICE_URL !== "http://localhost:8099";
 
 export interface ParseResult {
   text: string;
@@ -23,14 +25,16 @@ export interface ParseResult {
  * 优先 Docling（保留表格/公式/多栏），降级到 pdf-parse-new
  */
 export async function parsePDF(buffer: Buffer, filename?: string): Promise<ParseResult> {
-  // 尝试 Docling 微服务
-  try {
-    return await parseWithDocling(buffer, filename);
-  } catch (doclingError) {
-    console.warn(
-      `[PDF Parser] Docling 服务不可用，降级到 pdf-parse:`,
-      (doclingError as Error)?.message
-    );
+  // 尝试 Docling 微服务（仅在配置了服务地址时）
+  if (DOCLING_ENABLED) {
+    try {
+      return await parseWithDocling(buffer, filename);
+    } catch (doclingError) {
+      console.warn(
+        `[PDF Parser] Docling 服务不可用，降级到 pdf-parse:`,
+        (doclingError as Error)?.message
+      );
+    }
   }
 
   // 降级：pdf-parse-new

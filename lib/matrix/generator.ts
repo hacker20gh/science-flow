@@ -205,24 +205,24 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         .filter(Boolean)
         .join(" ");
 
-      const cellLine = exp.model.cell_line || "未知";
+      const cellLine = exp.model?.cell_line || "未知";
 
       const rowId = `${input.paperId}-${i}`;
       const cells: Record<string, MatrixCell> = {};
 
       // 通路变化 → 列（归一化名称）
-      for (const pe of exp.pathway_effects) {
+      for (const pe of exp.pathway_effects || []) {
         const normalizedName = normalizePathway(pe.pathway);
         const colId = `pathway:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "pathway", columnCounts);
 
         cells[colId] = {
           direction: pe.direction,
-          significance: pe.significance,
-          method: pe.method,
+          significance: pe.significance ?? null,
+          method: pe.method ?? null,
           detail: `${pe.method || ""} ${pe.significance || ""}`.trim(),
           paperTitle: input.paperTitle,
-          evidenceQuote: exp.evidence_quote,
+          evidenceQuote: exp.evidence_quote || "",
           experimentIndex: i,
           evidenceStrength: calculateEvidenceStrength({
             expMethod: pe.method,
@@ -236,7 +236,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
       }
 
       // 表型变化 → 列（归一化名称）
-      for (const ph of exp.phenotype_effects) {
+      for (const ph of exp.phenotype_effects || []) {
         const normalizedName = normalizePhenotype(ph.phenotype);
         const colId = `phenotype:${normalizedName}`;
         ensureColumn(allColumns, colId, normalizedName, "phenotype", columnCounts);
@@ -247,7 +247,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
           method: null,
           detail: ph.fold_change || "",
           paperTitle: input.paperTitle,
-          evidenceQuote: exp.evidence_quote,
+          evidenceQuote: exp.evidence_quote || "",
           experimentIndex: i,
           evidenceStrength: calculateEvidenceStrength({
             expMethod: null,
@@ -266,7 +266,7 @@ export function generateMatrix(inputs: ExtractionInput[]): MatrixData {
         paperId: input.paperId,
         drugConc,
         cellLine,
-        species: exp.model.species || "",
+        species: exp.model?.species || "",
         duration: (iv?.duration as string) || "",
         year: input.year,
         cells,
@@ -433,6 +433,11 @@ export interface DBExtraction {
     relation: string;
   }> | null;
   coTreatment?: string | null;
+  experimentTier?: string | null;
+  experimentRole?: string | null;
+  conclusionIndex?: number | null;
+  conclusionClaim?: string | null;
+  confidence?: number | null;
 }
 
 /**

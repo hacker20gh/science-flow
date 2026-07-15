@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, memo } from "react";
 import { useParams } from "next/navigation";
 import {
   Search, Upload, BookOpen, FileText, Check, ChevronDown, ChevronUp,
-  ExternalLink, Trash2, RefreshCw, Loader2, Download, Filter, ArrowUpDown,
+  ExternalLink, Trash2, RefreshCw, Loader2, Download, Filter, ArrowUpDown, X,
 } from "lucide-react";
 import { PapersSkeleton } from "@/components/skeletons";
 import { consumeSSEStream } from "@/lib/llm/sse-consumer";
@@ -31,6 +31,7 @@ interface Extraction {
   drugName?: string;
   pathway?: string;
   conclusion?: string;
+  conclusionClaim?: string | null;
 }
 
 interface Paper {
@@ -76,6 +77,7 @@ export default function PapersPage() {
   const [extractProgress, setExtractProgress] = useState<string>("");
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single' | 'batch'; id?: string } | null>(null);
   const [showZoteroImport, setShowZoteroImport] = useState(false);
+  const [dismissedUnextracted, setDismissedUnextracted] = useState(false);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/papers`)
@@ -84,6 +86,13 @@ export default function PapersPage() {
       .catch(() => setPapers([]))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  // 请求浏览器通知权限
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // 统计
   const stats = useMemo(() => {
@@ -97,6 +106,12 @@ export default function PapersPage() {
       withFullText: papers.filter((p) => p.fullText).length,
     };
   }, [papers]);
+
+  // 未提取论文数（用于提示条）
+  const unextractedCount = useMemo(
+    () => papers.filter((p) => p.extractions.length === 0).length,
+    [papers]
+  );
 
   // 筛选 + 搜索 + 排序
   const filteredPapers = useMemo(() => {
@@ -212,58 +227,71 @@ export default function PapersPage() {
     if (selectedPapers.length === 0) return;
 
     setBatchLoading(true);
-    setExtractProgress("正在提交提取请求...");
-    try {
-      const res = await fetch("/api/papers/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          papers: selectedPapers.map((p) => ({
-            paperId: p.id,
-            title: p.title,
-            abstract: p.abstract,
-            fullText: p.fullText || undefined,
-          })),
-        }),
-      });
+    let successCount = 0;
+    let errorCount = 0;
 
-      if (!res.ok) {
-        throw new Error("提取请求失败");
-      }
+    for (let i = 0; i < selectedPapers.length; i++) {
+      const paper = selectedPapers[i];
+      setExtractProgress(`正在提取 ${i + 1}/${selectedPapers.length}：${paper.title.slice(0, 40)}...`);
 
-      // SSE 流式消费
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let finalData: any = null;
-      await consumeSSEStream(res, {
-        onProgress: (step, current, total) => {
-          setExtractProgress(`${step} (${current}/${total})`);
-        },
-        onResult: (data) => {
-          const d = data as { final?: boolean; single?: unknown; completed?: number; total?: number; results?: unknown[]; summary?: { success?: number; total?: number; errors?: number; totalExperiments?: number } };
-          if (d.final) {
-            finalData = d;
+      try {
+        const res = await fetch("/api/papers/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            papers: [{ paperId: paper.id, title: paper.title, abstract: paper.abstract, fullText: paper.fullText || undefined }],
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        let hasResult = false;
+        await consumeSSEStream(res, {
+          onProgress: () => {},
+          onResult: (data) => {
+            const d = data as { final?: boolean; results?: Array<{ extraction?: { experiments?: unknown[]; conclusions?: Array<{ evidenceChain: unknown[] }> }; error?: string }>; summary?: { success?: number } };
+            if (d.final) {
+              const first = d.results?.[0];
+              const experiments = first?.extraction?.experiments
+                || first?.extraction?.conclusions?.flatMap((c) => c.evidenceChain)
+                || [];
+              if (experiments.length > 0 || (d.summary?.success && d.summary.success > 0)) {
+                hasResult = true;
+              }
+            }
+          },
+          onError: () => {},
+        });
+
+        if (hasResult) {
+          successCount++;
+          // Update this paper's status in local state
+          const refreshRes = await fetch(`/api/projects/${projectId}/papers`);
+          if (refreshRes.ok) {
+            const d = await refreshRes.json();
+            setPapers(d.papers || []);
           }
-        },
-        onError: (msg) => {
-          toast.error("提取失败", { description: msg });
-        },
-      });
-
-      // 刷新文献列表
-      const refresh = await fetch(`/api/projects/${projectId}/papers`);
-      if (refresh.ok) {
-        const d = await refresh.json();
-        setPapers(d.papers || []);
+        } else {
+          errorCount++;
+        }
+      } catch {
+        errorCount++;
       }
-      clearSelection();
-      toast.success("批量提取完成", {
-        description: `成功 ${finalData?.summary?.success || 0} 篇${finalData?.summary?.empty ? `，${finalData.summary.empty} 篇提取为空（可能仅含摘要）` : ""}${finalData?.summary?.errors ? `，${finalData.summary.errors} 篇失败` : ""}`,
-      });
-    } catch {
-      toast.error("批量提取失败", { description: "请稍后重试" });
-    } finally {
-      setBatchLoading(false);
-      setExtractProgress("");
+    }
+
+    clearSelection();
+    setBatchLoading(false);
+    setExtractProgress("");
+
+    toast.success("批量提取完成", {
+      description: `成功 ${successCount} 篇${errorCount > 0 ? `，失败 ${errorCount} 篇` : ""}（共 ${selectedPapers.length} 篇）`,
+    });
+    // 浏览器通知（页面不可见时）
+    if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+      const body = `成功 ${successCount} 篇${errorCount > 0 ? `，失败 ${errorCount} 篇` : ""}（共 ${selectedPapers.length} 篇）`;
+      new Notification("SciFlow 批量提取完成", { body });
     }
   }
 
@@ -460,6 +488,22 @@ export default function PapersPage() {
               导出 RIS
             </button>
           </div>
+        </div>
+      )}
+
+      {/* 未提取论文提示条 */}
+      {!loading && unextractedCount > 0 && !dismissedUnextracted && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-center justify-between">
+          <span className="text-sm text-blue-700">
+            💡 还有 {unextractedCount} 篇论文未提取，建议继续提取以完善机制矩阵
+          </span>
+          <button
+            onClick={() => setDismissedUnextracted(true)}
+            className="p-1 text-blue-400 hover:text-blue-600 rounded"
+            aria-label="关闭提示"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -661,7 +705,7 @@ function DoiQuickImport({ projectId, onImported }: { projectId: string; onImport
 // ===== 论文卡片组件 =====
 
 const PaperCard = memo(function PaperCard({
-  paper, expanded, onToggle, selected, onSelect, onDelete, projectId, onExtractionDone,
+  paper, expanded, onToggle, selected, onSelect, onDelete, projectId, onExtractionDone, onExtractionNotify,
 }: {
   paper: Paper;
   expanded: boolean;
@@ -671,8 +715,11 @@ const PaperCard = memo(function PaperCard({
   onDelete: () => void;
   projectId: string;
   onExtractionDone: React.Dispatch<React.SetStateAction<Paper[]>>;
+  onExtractionNotify?: (title: string, body: string, isError?: boolean) => void;
 }) {
   const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractProgress, setExtractProgress] = useState<string | null>(null);
   const { updatePaperExtraction } = useProjectStore();
 
   async function handleExtract() {
@@ -685,30 +732,115 @@ const PaperCard = memo(function PaperCard({
           papers: [{ paperId: paper.id, title: paper.title, abstract: paper.abstract, fullText: paper.fullText || undefined }],
         }),
       });
-      if (!res.ok) throw new Error("提取请求失败");
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ error: "未知错误" }));
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
 
       let exps: import("@/lib/llm/extraction").ExperimentResult[] = [];
+      let extractionError: string | null = null;
+      let rawExtraction: Record<string, unknown> | null = null;
       await consumeSSEStream(res, {
+        onProgress: (step, current, total) => {
+          setExtractProgress(`${step} (${current}/${total})`);
+        },
         onResult: (data) => {
-          const d = data as { final?: boolean; results?: Array<{ extraction?: { experiments?: import("@/lib/llm/extraction").ExperimentResult[] } }> };
-          if (d.final && d.results?.[0]?.extraction?.experiments) {
-            exps = d.results[0].extraction.experiments;
+          const d = data as { final?: boolean; results?: Array<{ extraction?: { experiments?: import("@/lib/llm/extraction").ExperimentResult[]; conclusions?: Array<{ claim?: string; evidenceChain: import("@/lib/llm/extraction").ExperimentResult[] }> }; error?: string; title?: string }> };
+          if (d.final && d.results?.[0]) {
+            const first = d.results[0];
+            rawExtraction = (first.extraction || null) as Record<string, unknown> | null;
+            // 兼容两种格式
+            const experiments = first.extraction?.experiments
+              || first.extraction?.conclusions?.flatMap(c => c.evidenceChain)
+              || [];
+            if (experiments.length > 0) {
+              exps = experiments;
+            } else if (first.error) {
+              extractionError = first.error;
+            } else {
+              extractionError = "未提取到实验数据";
+            }
           }
+        },
+        onError: (msg) => {
+          extractionError = msg;
         },
       });
 
-      toast.success("提取完成", { description: `提取到 ${exps.length} 个实验数据` });
-      // 通知 Brain 页面有新的提取结果
-      window.dispatchEvent(new CustomEvent("extraction-done", { detail: { projectId } }));
-      localStorage.setItem(`extraction-done-${projectId}`, String(Date.now()));
-      const updatedRes = await fetch(`/api/projects/${projectId}/papers`);
-      if (updatedRes.ok) {
-        const updatedData = await updatedRes.json();
-        onExtractionDone(updatedData.papers);
-        updatePaperExtraction(paper.id, "done", exps);
+      if (exps.length === 0) {
+        const reason = extractionError || "未提取到实验数据";
+        setExtractError(reason);
+        setExtractProgress(null);
+        toast.error("提取失败", { description: reason, duration: 8000 });
+      } else {
+        setExtractError(null);
+        setExtractProgress(null);
+        // 保存提取结果到 DB
+        try {
+          const saveRes = await fetch(`/api/projects/${projectId}/extractions/batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paperId: paper.id, extractions: exps }),
+          });
+          if (!saveRes.ok) {
+            console.error("Failed to save extractions:", await saveRes.text());
+          }
+        } catch (saveErr) {
+          console.error("Failed to save extractions:", saveErr);
+        }
+        // 计算提取质量指标
+        const extData = rawExtraction as Record<string, unknown> | null;
+        const conclusions = extData?.conclusions as Array<{ claim?: string; evidenceChain: Record<string, unknown>[] }> | undefined;
+        let qualitySummary = `提取到 ${exps.length} 个实验数据`;
+        if (conclusions && conclusions.length > 0) {
+          const conclusionCount = conclusions.length;
+          const completeCount = conclusions.filter(c =>
+            c.evidenceChain.some(e => e.role === "main")
+          ).length;
+          const completeness = Math.round((completeCount / conclusionCount) * 100);
+          qualitySummary = `提取完成：${exps.length} 个实验 | ${conclusionCount} 个结论 | 证据链完整度 ${completeness}%`;
+        }
+        toast.success("提取完成", {
+          description: qualitySummary,
+          action: {
+            label: "查看结果",
+            onClick: () => { window.location.href = `/project/${projectId}/brain`; },
+          },
+          duration: 10000,
+        });
+        // 通知 Brain 页面有新的提取结果
+        window.dispatchEvent(new CustomEvent("extraction-done", { detail: { projectId } }));
+        localStorage.setItem(`extraction-done-${projectId}`, String(Date.now()));
+        // 浏览器通知（页面不可见时）
+        if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+          new Notification("SciFlow 提取完成", {
+            body: `提取到 ${exps.length} 个实验 — ${paper.title}`,
+          });
+        }
+        const updatedRes = await fetch(`/api/projects/${projectId}/papers`);
+        if (updatedRes.ok) {
+          const updatedData = await updatedRes.json();
+          onExtractionDone(updatedData.papers);
+          updatePaperExtraction(paper.id, "done", exps);
+          // 提示还有未提取的论文
+          const remaining = (updatedData.papers as Paper[]).filter((p: Paper) => p.extractions.length === 0).length;
+          if (remaining > 0) {
+            toast.info(`还有 ${remaining} 篇论文未提取`, {
+              description: "继续提取以完善机制矩阵",
+              duration: 6000,
+            });
+          }
+        }
       }
-    } catch {
-      toast.error("提取失败", { description: "请稍后重试" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "未知错误";
+      setExtractError(msg);
+      setExtractProgress(null);
+      toast.error("提取失败", { description: msg, duration: 8000 });
+      // 浏览器通知（页面不可见时）
+      if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+        new Notification("SciFlow 提取失败", { body: msg });
+      }
     } finally {
       setExtracting(false);
     }
@@ -756,9 +888,17 @@ const PaperCard = memo(function PaperCard({
               </span>
             )}
             {paper.extractions.length > 0 && (
-              <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-600 rounded flex items-center gap-0.5">
-                <Check size={10} /> {paper.extractions.length} 条提取
-              </span>
+              <>
+                <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-600 rounded flex items-center gap-0.5">
+                  <Check size={10} /> {paper.extractions.length} 条提取
+                </span>
+                <Link
+                  href={`/project/${projectId}/brain`}
+                  className="text-xs px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 transition-colors"
+                >
+                  📊 查看知识面板
+                </Link>
+              </>
             )}
             {paper.extractions.length === 0 && (
               <span className="text-xs px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded">未提取</span>
@@ -769,6 +909,28 @@ const PaperCard = memo(function PaperCard({
               </span>
             )}
           </div>
+
+          {/* 结论摘要 */}
+          {paper.extractions.length > 0 && (() => {
+            const claims = [...new Set(
+              paper.extractions
+                .map((e) => e.conclusionClaim)
+                .filter((c): c is string => !!c && c.trim().length > 0)
+            )];
+            if (claims.length === 0) return null;
+            return (
+              <div className="mt-1.5 space-y-0.5">
+                {claims.slice(0, 2).map((claim, idx) => (
+                  <div key={idx} className="text-xs text-blue-600 truncate">
+                    💡 {claim}
+                  </div>
+                ))}
+                {claims.length > 2 && (
+                  <div className="text-xs text-gray-400">+{claims.length - 2} 个结论</div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         <button
@@ -851,12 +1013,16 @@ const PaperCard = memo(function PaperCard({
           {/* 操作按钮 */}
           <div className="flex items-center gap-2 pt-1">
             <button
-              onClick={handleExtract}
+              onClick={() => { setExtractError(null); setExtractProgress(null); handleExtract(); }}
               disabled={extracting}
-              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+              className={`px-3 py-1.5 text-xs rounded disabled:opacity-50 flex items-center gap-1 ${
+                extractError
+                  ? "bg-red-600 text-white hover:bg-red-700"
+                  : "bg-blue-600 text-white hover:bg-blue-700"
+              }`}
             >
               {extracting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-              {paper.extractions.length > 0 ? "重新提取" : "提取信息"}
+              {extracting ? "提取中..." : paper.extractions.length > 0 ? "重新提取" : "提取信息"}
             </button>
             <button
               onClick={onDelete}
@@ -866,6 +1032,28 @@ const PaperCard = memo(function PaperCard({
               删除
             </button>
           </div>
+
+          {/* 提取进度 */}
+          {extracting && extractProgress && (
+            <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin shrink-0" />
+              <span className="truncate">{extractProgress}</span>
+            </div>
+          )}
+
+          {/* 提取失败信息 */}
+          {extractError && !extracting && (
+            <div className="mt-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-start gap-2">
+              <span className="shrink-0">❌</span>
+              <span className="flex-1">提取失败：{extractError}</span>
+              <button
+                onClick={() => { setExtractError(null); handleExtract(); }}
+                className="shrink-0 px-2 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
+              >
+                重试
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
       "lucide-react",
       "framer-motion",
       "recharts",
+      "react-pdf",
     ],
   },
 };

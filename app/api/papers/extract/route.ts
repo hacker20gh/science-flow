@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { extractWithFallback, type ExtractionResult } from "@/lib/llm/extraction";
+import { extractWithFallback, flattenConclusions, getExperimentCount, type ExtractionResult } from "@/lib/llm/extraction";
 import { validateExtraction } from "@/lib/llm/extraction-validator";
+import { postProcessExtractions } from "@/lib/llm/extraction-postprocess";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
 import { sleep } from "@/lib/utils/sleep";
-import { parsePDF } from "@/lib/pdf-parser";
+import { fetchFullText } from "@/lib/fulltext-fetcher";
 
 interface ExtractRequestBody {
   papers: Array<{
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
           const db = prisma;
           const dbPapers = await db.paper.findMany({
             where: { id: { in: paperIds } },
-            select: { id: true, fullText: true, oaUrl: true },
+            select: { id: true, title: true, fullText: true, oaUrl: true, doi: true, pmid: true },
           });
 
           // 收集已有 fullText 的
@@ -69,12 +70,14 @@ export async function POST(req: NextRequest) {
           }
           console.log(`[Extract] 从 DB 获取了 ${Object.keys(dbFullTexts).length} 篇论文的全文`);
 
-          // 对没有 fullText 但有 oaUrl 的论文，自动下载 PDF 并提取文本
+          // 对没有 fullText 的论文，从多个 OA 来源尝试获取全文
           const papersNeedingDownload = dbPapers.filter(
-            (p: { id: string; fullText: string | null; oaUrl: string | null }) => !dbFullTexts[p.id] && p.oaUrl
+            (p: { id: string; fullText: string | null; oaUrl: string | null; doi: string | null; pmid: string | null }) =>
+              !dbFullTexts[p.id]
           );
+          console.log(`[Extract] 需要获取全文: ${papersNeedingDownload.length} 篇`);
 
-          // Parallel downloads with concurrency limit
+          // 并发获取全文（3 个并发）
           const CONCURRENT_DOWNLOADS = 3;
           const downloadQueue = [...papersNeedingDownload];
 
@@ -82,43 +85,22 @@ export async function POST(req: NextRequest) {
             while (downloadQueue.length > 0) {
               const dbPaper = downloadQueue.shift()!;
               try {
-                console.log(`[Extract] 自动下载 OA PDF: ${dbPaper.oaUrl}`);
-                const response = await fetch(dbPaper.oaUrl!, {
-                  headers: { "User-Agent": "SciFlow-AI/1.0 (research tool)" },
-                  signal: AbortSignal.timeout(30000),
-                });
-                if (!response.ok) {
-                  console.warn(`[Extract] 下载失败: HTTP ${response.status}`);
-                  continue;
+                const result = await fetchFullText(dbPaper);
+                if (result) {
+                  dbFullTexts[dbPaper.id] = result.text;
+                  console.log(`[FullText] 全文获取成功: ${dbPaper.id.slice(0, 10)} via ${result.source} (${result.text.length} 字符)`);
+                  try {
+                    await db.paper.update({
+                      where: { id: dbPaper.id },
+                      data: { fullText: result.text },
+                    });
+                    console.log(`[FullText] 全文已保存到 DB: ${dbPaper.id.slice(0, 10)}`);
+                  } catch (saveErr) {
+                    console.error(`[FullText] 保存全文失败 ${dbPaper.id}:`, saveErr);
+                  }
                 }
-
-                const contentType = response.headers.get("content-type");
-                if (contentType && !contentType.includes("pdf")) {
-                  console.warn(`[Extract] 非 PDF: ${contentType}`);
-                  continue;
-                }
-
-                const buffer = Buffer.from(await response.arrayBuffer());
-                if (buffer.length > 50 * 1024 * 1024) {
-                  console.warn(`[Extract] 文件过大: ${buffer.length}`);
-                  continue;
-                }
-
-                const parseResult = await parsePDF(buffer, "oa-paper.pdf");
-                if (parseResult.text && parseResult.text.trim().length > 100) {
-                  dbFullTexts[dbPaper.id] = parseResult.text;
-                  console.log(`[Extract] 自动下载成功 (${parseResult.parser}): ${dbPaper.id} → ${parseResult.text.length} 字符, ${parseResult.parseTimeMs}ms`);
-                  db.paper.update({
-                    where: { id: dbPaper.id },
-                    data: { fullText: parseResult.text },
-                  }).catch((err: unknown) => {
-                    console.error(`[Extract] Failed to save fullText for ${dbPaper.id}:`, err);
-                  });
-                } else {
-                  console.warn(`[Extract] PDF 文本过短: ${parseResult.text?.length || 0} 字符`);
-                }
-              } catch (dlError) {
-                console.warn(`[Extract] 自动下载失败: ${(dlError as Error)?.message}`);
+              } catch (err) {
+                console.warn(`[FullText] 获取失败 ${dbPaper.id}: ${(err as Error)?.message}`);
               }
             }
           }
@@ -131,11 +113,13 @@ export async function POST(req: NextRequest) {
     }
 
     // 逐篇提取（流式返回每篇结果）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results: Array<{
       paperId: string;
       title: string;
-      extraction: ExtractionResult | null;
+      extraction: any;
       error?: string;
+      suggestModelSwitch?: boolean;
     }> = [];
 
     const CONCURRENCY = 5;
@@ -166,21 +150,43 @@ export async function POST(req: NextRequest) {
               console.log(`[Extract] ${paper.title}: 自动修正 ${validation.autoFixedCount} 处 (${validation.overallQuality}, ${validation.averageScore}分)`);
             }
 
-            if (extraction.experiments.length === 0) {
+            // 保留原始结论结构，逐个结论做后处理
+            const originalConclusions = extraction.conclusions || [];
+            const processedConclusions = originalConclusions.map(conc => {
+              const processed = postProcessExtractions({ experiments: conc.evidenceChain });
+              return { claim: conc.claim, evidenceChain: processed.experiments };
+            }).filter(c => c.evidenceChain.length > 0);
+
+            // 扁平化用于 DB 存储（带 conclusionIndex + conclusionClaim）
+            const finalExperiments = processedConclusions.flatMap((conc, i) =>
+              conc.evidenceChain.map(exp => ({ ...exp, conclusionIndex: i, conclusionClaim: conc.claim }))
+            );
+
+            if (finalExperiments.length === 0) {
               const warning = text.length < 500
                 ? "文本过短（仅摘要），缺少实验细节"
                 : "LLM 未提取到实验数据（已尝试3种不同策略）";
               const result = {
                 paperId: paper.paperId,
                 title: paper.title,
-                extraction,
+                extraction: null,
                 error: `提取结果为空：${warning}`,
                 suggestModelSwitch: true,
               };
               results.push(result);
               emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
             } else {
-              const result = { paperId: paper.paperId, title: paper.title, extraction };
+              // 同时返回两种格式，兼容新旧前端
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const result: any = {
+                paperId: paper.paperId,
+                title: paper.title,
+                extraction: {
+                  claim: extraction.claim,
+                  experiments: finalExperiments,  // 旧格式：扁平数组（兼容 search/page.tsx）
+                  conclusions: processedConclusions,  // 新格式：结论 + 证据链
+                },
+              };
               results.push(result);
               emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
             }
@@ -196,10 +202,10 @@ export async function POST(req: NextRequest) {
       await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
       // 发送最终汇总
-      const successCount = results.filter((r) => r.extraction && r.extraction.experiments.length > 0).length;
-      const emptyCount = results.filter((r) => r.extraction && r.extraction.experiments.length === 0).length;
+      const successCount = results.filter((r) => r.extraction && getExperimentCount(r.extraction) > 0).length;
+      const emptyCount = results.filter((r) => r.extraction && getExperimentCount(r.extraction) === 0).length;
       const errorCount = results.filter((r) => !r.extraction).length;
-      const totalExperiments = results.reduce((sum, r) => sum + (r.extraction?.experiments?.length || 0), 0);
+      const totalExperiments = results.reduce((sum, r) => sum + (r.extraction ? getExperimentCount(r.extraction) : 0), 0);
       emit({
         type: "result",
         data: {

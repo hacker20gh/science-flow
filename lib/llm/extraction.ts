@@ -15,83 +15,158 @@ import { sleep } from "@/lib/utils/sleep";
 // ===== Zod Schema =====
 
 export const ExperimentSchema = z.object({
+  role: z.enum(["main", "supporting", "control"]).optional().describe(
+    "实验在论文论证中的角色: " +
+    "main(核心实验 — 直接证明论文的主要发现/结论), " +
+    "supporting(支撑实验 — 验证或补充核心发现，如不同细胞系/时间点/浓度的验证), " +
+    "control(对照实验 — 排除其他可能性，如阴性对照、vehicle control)"
+  ),
   intervention: z.object({
-    type: z.enum(["drug", "knockdown", "overexpression", "knockout", "stimulation", "inhibition"]).describe(
+    type: z.enum(["drug", "knockdown", "overexpression", "knockout", "stimulation", "inhibition"]).optional().describe(
       "干预类型: drug(药物), knockdown(基因敲低:siRNA/shRNA), overexpression(过表达:plasmid/转染), " +
       "knockout(基因敲除:CRISPR), stimulation(刺激因子:LPS/TNF-α), inhibition(抑制剂)"
     ),
-    target: z.string().describe("干预靶点：药物名或基因名（如 cisplatin, TP53, EGFR）"),
-    concentration: z.string().nullable().describe("浓度，如 2 μM 或 50 nM siRNA"),
-    duration: z.string().nullable().describe("处理时间，如 24h"),
-    method: z.string().nullable().describe("干预方法（仅 knockdown/overexpression/knockout 时填写）: siRNA, shRNA, CRISPR/Cas9, plasmid 等"),
-    co_treatment: z.string().nullable().describe("联合处理"),
-  }),
+    target: z.string().optional().describe("干预靶点：药物名或基因名（如 cisplatin, TP53, EGFR）"),
+    concentration: z.string().nullable().optional().describe("浓度，如 2 μM 或 50 nM siRNA"),
+    duration: z.string().nullable().optional().describe("处理时间，如 24h"),
+    method: z.string().nullable().optional().describe("干预方法（仅 knockdown/overexpression/knockout 时填写）: siRNA, shRNA, CRISPR/Cas9, plasmid 等"),
+    co_treatment: z.string().nullable().optional().describe("联合处理"),
+  }).optional(),
   model: z.object({
-    cell_line: z.string().nullable().describe("细胞系"),
-    species: z.string().nullable().describe("物种"),
-    passage: z.string().nullable().describe("传代范围"),
-  }),
+    cell_line: z.string().nullable().optional().describe("细胞系"),
+    species: z.string().nullable().optional().describe("物种"),
+    passage: z.string().nullable().optional().describe("传代范围"),
+  }).optional(),
   experiment_type: z.enum([
     "cell_line", "primary_cell", "organoid", "tissue_slice",
     "animal_model", "xenograft", "patient_sample",
     "clinical_trial", "clinical_obs", "case_report",
     "bioinformatics", "omics", "meta_analysis", "review", "unknown",
-  ]).describe(
+  ]).optional().describe(
     "实验系统: cell_line(细胞系), primary_cell(原代细胞), organoid(类器官/3D培养), " +
     "tissue_slice(组织切片), animal_model(动物模型), xenograft(异种移植/PDX), " +
     "patient_sample(患者样本), clinical_trial(临床试验RCT), clinical_obs(队列/病例对照), " +
     "case_report(病例报告), bioinformatics(生信分析), omics(组学), " +
     "meta_analysis(系统综述/meta分析), review(综述), unknown(不确定)"
   ),
-  experiment_methods: z.array(z.string()).describe(
+  experiment_methods: z.array(z.string()).optional().describe(
     "实验方法（可多个）: 如 Western blot, qPCR, RNA-seq, flow cytometry, " +
     "immunohistochemistry, ELISA, CRISPR screen, ChIP-seq, mass spectrometry 等"
   ),
-  ic50: z.string().nullable().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
+  ic50: z.string().nullable().optional().describe("IC50/EC50 值（如 5.2 μM），仅在有明确数值时填写"),
   dose_response: z.array(z.object({
     concentration: z.string().describe("浓度，如 1 μM"),
     effect_size: z.string().describe("效应大小，如 1.2-fold 或 35%"),
     direction: z.enum(["up", "down", "no_change"]),
-  })).nullable().describe("剂量-反应数据（论文测试多个浓度时填写）"),
+  })).nullable().optional().describe("剂量-反应数据（论文测试多个浓度时填写）"),
   pathway_effects: z.array(z.object({
     pathway: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
-    significance: z.string().nullable(),
-    method: z.string().nullable(),
-    fold_change: z.string().nullable().describe("通路变化倍数，如 2.3-fold"),
-    downstream_of: z.string().nullable().describe("如果此通路是另一个通路的下游，填写上游通路名"),
-  })),
+    significance: z.string().nullable().optional(),
+    method: z.string().nullable().optional(),
+    fold_change: z.string().nullable().optional().describe("通路变化倍数，如 2.3-fold"),
+    downstream_of: z.string().nullable().optional().describe("如果此通路是另一个通路的下游，填写上游通路名"),
+  })).optional(),
   phenotype_effects: z.array(z.object({
     phenotype: z.string(),
     direction: z.enum(["up", "down", "no_change"]),
-    fold_change: z.string().nullable(),
-    caused_by: z.string().nullable().describe("哪个通路导致此表型变化"),
-  })),
+    fold_change: z.string().nullable().optional(),
+    caused_by: z.string().nullable().optional().describe("哪个通路导致此表型变化"),
+  })).optional(),
   mechanistic_chain: z.array(z.object({
     from: z.string().describe("上游通路/分子"),
     to: z.string().describe("下游通路/分子"),
     relation: z.string().describe("关系: activates, inhibits, phosphorylates 等"),
-  })).nullable().describe("因果链：通路之间的上下游关系"),
-  validated_by: z.array(z.string()).nullable().describe(
+  })).nullable().optional().describe("因果链：通路之间的上下游关系"),
+  validated_by: z.array(z.string()).nullable().optional().describe(
     "此实验被哪些其他实验验证/支持。填写验证实验的关键描述。"
   ),
-  validates: z.string().nullable().describe(
+  validates: z.string().nullable().optional().describe(
     "此实验验证/支持哪个假设或发现。"
   ),
-  controls: z.array(z.string()),
-  statistical_test: z.string().nullable(),
-  sample_size: z.number().nullable(),
-  conclusion: z.string(),
-  evidence_quote: z.string(),
+  controls: z.array(z.string()).optional(),
+  statistical_test: z.string().nullable().optional(),
+  sample_size: z.number().nullable().optional(),
+  conclusion: z.string().optional(),
+  evidence_quote: z.string().optional(),
   confidence: z.number().min(0).max(1).optional(),
 });
 
-export const ExtractionResultSchema = z.object({
-  experiments: z.array(ExperimentSchema),
+export const ConclusionSchema = z.object({
+  claim: z.string().describe(
+    "论文的一个核心结论 — 这篇论文通过一系列实验证明了什么。" +
+    "例如: 'TCAF2 在肿瘤周细胞中高表达' 或 'TCAF2 抑制 TRPM8 通道活性'。" +
+    "一篇论文通常有 2-4 个核心结论。"
+  ),
+  evidenceChain: z.array(ExperimentSchema).describe(
+    "支持此结论的实验证据链 — 按逻辑顺序排列。" +
+    "第一个实验通常是初始发现，后续实验逐步验证。" +
+    "例如: [患者样本分析 → 蛋白组学 → 免疫组化验证]"
+  ),
 });
 
+export const ExtractionResultSchema = z.object({
+  claim: z.string().optional().describe(
+    "论文的总体核心主张 — 一句话概括这篇论文的主要贡献。"
+  ),
+  conclusions: z.array(ConclusionSchema).optional().describe(
+    "论文的核心结论列表（通常 2-4 个），每个结论下面挂一组实验证据链。" +
+    "结论之间应该有逻辑递进关系。"
+  ),
+  // 兼容旧格式：LLM 可能直接返回 experiments 数组
+  experiments: z.array(ExperimentSchema).optional(),
+});
+
+/**
+ * 将 LLM 输出规范化为统一的 conclusions 格式
+ * 处理旧格式 { experiments[] } → { conclusions[{ claim, evidenceChain }] }
+ */
+export function normalizeExtractionResult(data: unknown): ExtractionResult {
+  const d = data as Record<string, unknown>;
+  if (d.conclusions && Array.isArray(d.conclusions) && d.conclusions.length > 0) {
+    return { claim: d.claim as string | undefined, conclusions: d.conclusions as ConclusionResult[] };
+  }
+  if (d.experiments && Array.isArray(d.experiments) && d.experiments.length > 0) {
+    return {
+      claim: d.claim as string | undefined,
+      conclusions: [{ claim: (d.claim as string) || "论文的主要发现", evidenceChain: d.experiments as ExperimentResult[] }],
+    };
+  }
+  return { claim: d.claim as string | undefined, conclusions: [] };
+}
+
+export type ConclusionResult = z.infer<typeof ConclusionSchema>;
 export type ExperimentResult = z.infer<typeof ExperimentSchema>;
 export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
+
+/**
+ * 将 conclusions 结构扁平化为 experiments 数组（用于 DB 存储）
+ * 每个 experiment 附带 conclusionIndex 和 conclusionClaim 字段
+ */
+export function flattenConclusions(result: ExtractionResult): ExperimentResult[] {
+  if (!result.conclusions || result.conclusions.length === 0) {
+    // 兼容旧格式（直接 experiments 数组）
+    return (result as unknown as { experiments?: ExperimentResult[] }).experiments || [];
+  }
+  const allExperiments: (ExperimentResult & { conclusionIndex?: number; conclusionClaim?: string })[] = [];
+  for (let i = 0; i < result.conclusions.length; i++) {
+    const conc = result.conclusions[i];
+    for (const exp of conc.evidenceChain) {
+      allExperiments.push({ ...exp, conclusionIndex: i, conclusionClaim: conc.claim });
+    }
+  }
+  return allExperiments;
+}
+
+/**
+ * 获取 ExtractionResult 中的总实验数
+ */
+export function getExperimentCount(result: ExtractionResult): number {
+  if (result.conclusions && result.conclusions.length > 0) {
+    return result.conclusions.reduce((sum, c) => sum + c.evidenceChain.length, 0);
+  }
+  return (result as unknown as { experiments?: ExperimentResult[] }).experiments?.length || 0;
+}
 
 // ===== Tool 定义 =====
 
@@ -105,6 +180,40 @@ const EXTRACTION_TOOL = createToolFromSchema(
 
 const CORE_PROMPT = `You are a biomedical literature analysis expert.
 
+STEP 1 — IDENTIFY THE PAPER'S OVERALL CLAIM:
+Read the paper and identify its overall claim (claim field).
+- Usually found in the Abstract conclusion or Discussion
+- One sentence summarizing the paper's main contribution
+
+STEP 2 — BREAK DOWN INTO CONCLUSIONS:
+A paper typically proves 2-4 conclusions (sub-claims) that together support the overall claim.
+Each conclusion is supported by a chain of experiments.
+
+Example for a paper about "TCAF2 promotes CRC liver metastasis via TRPM8":
+- Conclusion 1: "TCAF2 is highly expressed in tumor pericytes"
+  Evidence chain: Patient sample isolation → Proteomics → TCAF2 identification
+- Conclusion 2: "TCAF2 inhibits TRPM8 channel activity"
+  Evidence chain: Electrophysiology → Calcium imaging → Menthol activation
+- Conclusion 3: "TCAF2-TRPM8 axis promotes liver metastasis"
+  Evidence chain: In vitro migration → In vivo xenograft → Survival analysis
+
+STEP 3 — EXTRACT EVIDENCE CHAINS:
+For each conclusion, extract the experiments in LOGICAL ORDER (how the authors built their argument).
+- First experiment: initial discovery or setup
+- Middle experiments: core validation
+- Last experiments: in vivo or clinical confirmation
+
+Each experiment has a "role":
+- "main": Directly proves the conclusion (the key experiment)
+- "supporting": Validates or extends (different cell line, dose, timepoint)
+- "control": Rules out alternatives (negative control, vehicle)
+
+QUALITY RULES:
+- Total experiments per paper: 6-15 (not 20+)
+- Each conclusion: 2-5 experiments in its chain
+- Only extract findings EXPLICITLY stated in the text
+- If information is not available, use null
+
 MULTILINGUAL SUPPORT:
 - This paper may be in Chinese, Japanese, or other non-English language.
 - Extract ALL information regardless of the paper's language.
@@ -113,7 +222,6 @@ MULTILINGUAL SUPPORT:
 - For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
 
 EXTRACTION RULES:
-- A single paper may contain MULTIPLE independent experiments. Extract each separately.
 - Only extract findings EXPLICITLY stated in the text. Do NOT infer or hallucinate.
 - If information is not available, use null.
 
@@ -147,6 +255,28 @@ ANTI-HALLUCINATION (hard rules):
 - Statistical methods must be explicitly mentioned in the text, not inferred.
 - Sample size: set to null if not explicitly stated.
 
+MERGING RULES (important for quality):
+- Do NOT split a single experiment into multiple entries just because it has multiple readouts.
+- Example: "Cisplatin increased p53 (WB) and apoptosis (flow cytometry)" = ONE experiment with multiple pathway_effects, NOT two experiments.
+- Same drug + same cell line + same timepoint = ONE experiment (combine all readouts).
+- Different concentrations of the same drug = ONE experiment with dose_response array (not separate experiments).
+- Only create separate experiments for: different drugs, different cell lines, different timepoints, or in vitro vs in vivo.
+
+INTERVENTION TYPE CLASSIFICATION (critical):
+- "drug": only for chemical compounds, small molecules, antibodies (e.g., cisplatin, doxorubicin, anti-PD-1)
+- "knockdown": siRNA, shRNA, antisense oligonucleotide targeting a gene
+- "overexpression": plasmid transfection, lentiviral overexpression of a gene
+- "knockout": CRISPR/Cas9 gene deletion, homozygous KO
+- "stimulation": growth factors (EGF, LPS), cytokines (TNF-α), environmental conditions (hypoxia), receptor agonists (menthol for TRPM8)
+- "inhibition": receptor antagonists, pathway inhibitors (AMG333 for TRPM8, LY294002 for PI3K)
+- DO NOT classify gene names (TCAF2, HIF-1α, TP53) as "drug" — they are targets, use knockdown/overexpression/knockout instead.
+
+WHAT IS NOT AN EXPERIMENT (do not extract):
+- Observational correlations ("X expression correlated with Y in patient samples") — only extract if there is a clear intervention
+- Method descriptions ("we performed Western blot to detect...") — not an experiment
+- Figure legends without new data
+- Review/summary sentences
+
 NAMING CONVENTIONS:
 STANDARD PATHWAY NAMES (you MUST use one of these exact names):
 NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
@@ -166,7 +296,8 @@ Input excerpt: "HeLa cells treated with 5 μM cisplatin for 24h showed significa
 Expected output:
 {
   "experiments": [{
-    "drug_intervention": {"name": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
+    "role": "main",
+    "intervention": {"type": "drug", "target": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
     "model": {"cell_line": "HeLa", "species": "human", "passage": null},
     "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": "p<0.01", "method": "Western blot"}],
     "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold"}],
@@ -380,9 +511,9 @@ export async function extractFromText(
       });
       const toolResult = toolUseBlocks.find((t) => t.name === "extract_paper_data");
       if (toolResult) {
-        return ExtractionResultSchema.parse(toolResult.input);
+        return normalizeExtractionResult(ExtractionResultSchema.parse(toolResult.input));
       }
-      throw new Error("No tool_use block in streaming response");
+      throw new Error("LLM 未返回结构化数据（可能模型不支持 tool_use 格式）");
     }
 
     // 阻塞式路径：monkey-patch 自动追踪
@@ -392,10 +523,10 @@ export async function extractFromText(
       _sciflowFeature: "extraction",
     } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
 
-    return await extractStructuredOutput(response, ExtractionResultSchema, {
+    const raw = await extractStructuredOutput(response, ExtractionResultSchema, {
       label: "extraction",
       retryFn: createRetryFunction(client, {
-        model: MODELS.extraction,
+        model: extractionModel,
         maxTokens,
         system: CORE_PROMPT,
         userMessage,
@@ -404,6 +535,7 @@ export async function extractFromText(
         feature: "extraction",
       }),
     });
+    return normalizeExtractionResult(raw);
   }, { label: "extraction" });
 }
 
@@ -457,9 +589,9 @@ export async function extractWithPrompt(
       });
       const toolResult = toolUseBlocks.find((t) => t.name === "extract_paper_data");
       if (toolResult) {
-        return ExtractionResultSchema.parse(toolResult.input);
+        return normalizeExtractionResult(ExtractionResultSchema.parse(toolResult.input));
       }
-      throw new Error("No tool_use block in streaming response");
+      throw new Error("LLM 未返回结构化数据（可能模型不支持 tool_use 格式）");
     }
 
     const response = await client.messages.create({
@@ -467,10 +599,10 @@ export async function extractWithPrompt(
       _sciflowFeature: "extraction",
     } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
 
-    return await extractStructuredOutput(response, ExtractionResultSchema, {
+    const raw = await extractStructuredOutput(response, ExtractionResultSchema, {
       label: "extraction",
       retryFn: createRetryFunction(client, {
-        model: MODELS.extraction,
+        model: extractionModel,
         maxTokens,
         system: systemPrompt,
         userMessage,
@@ -479,6 +611,7 @@ export async function extractWithPrompt(
         feature: "extraction",
       }),
     });
+    return normalizeExtractionResult(raw);
   }, { label: "extraction" });
 }
 
@@ -497,22 +630,18 @@ export async function extractWithFallback(
   // 短文本（通常为摘要）：用摘要专用 prompt，然后最小 prompt
   if (text.length < 800) {
     const result = await extractWithPrompt(text, title, ABSTRACT_PROMPT, options);
-    if (result.experiments.length > 0) return result;
+    if (getExperimentCount(result) > 0) return result;
 
     console.log(`[Extraction] 摘要提取为空，使用最小 prompt 重试: ${title}`);
     return extractWithPrompt(text, title, MINIMAL_PROMPT, options);
   }
 
-  // 长文本（全文）：标准 → 宽松 → 最小
+  // 长文本（全文）：标准 → 最小（跳过宽松，省一次 LLM 调用）
   const result1 = await extractFromText(text, title, options);
-  if (result1.experiments.length > 0) return result1;
+  if (getExperimentCount(result1) > 0) return result1;
 
-  console.log(`[Extraction] 空结果，使用宽松 prompt 重试: ${title}`);
-  const result2 = await extractWithPrompt(text, title, RELAXED_PROMPT, options);
-  if (result2.experiments.length > 0) return result2;
-
-  const abstractText = extractAbstract(text) || text.slice(0, 2000);
-  console.log(`[Extraction] 二次空结果，使用最小 prompt + 摘要重试: ${title}`);
+  console.log(`[Extraction] 空结果，使用最小 prompt 重试: ${title}`);
+  const abstractText = extractAbstract(text) || text.slice(0, 3000);
   return extractWithPrompt(abstractText, title, MINIMAL_PROMPT, options);
 }
 
@@ -581,23 +710,23 @@ function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
   const seen = new Set<string>();
 
   for (const result of results) {
-    for (const exp of result.experiments) {
+    for (const exp of flattenConclusions(result)) {
       // 去重 key：drug_name + cell_line + first pathway
-      const drugName = exp.intervention.target.toLowerCase().trim();
-      const cellLine = (exp.model.cell_line || "").toLowerCase().trim();
-      const primaryPathway = exp.pathway_effects[0]?.pathway?.toLowerCase().trim() || "";
+      const drugName = (exp.intervention?.target || "unknown").toLowerCase().trim();
+      const cellLine = (exp.model?.cell_line || "").toLowerCase().trim();
+      const primaryPathway = (exp.pathway_effects || [])[0]?.pathway?.toLowerCase().trim() || "";
       const key = `${drugName}|${cellLine}|${primaryPathway}`;
 
       if (seen.has(key)) {
         // 已存在：取 evidence_quote 更长、confidence 更高的版本
         const existingIdx = allExperiments.findIndex(e => {
-          const eKey = `${e.intervention.target.toLowerCase().trim()}|${(e.model.cell_line || "").toLowerCase().trim()}|${e.pathway_effects[0]?.pathway?.toLowerCase().trim() || ""}`;
+          const eKey = `${(e.intervention?.target || "unknown").toLowerCase().trim()}|${(e.model?.cell_line || "").toLowerCase().trim()}|${(e.pathway_effects || [])[0]?.pathway?.toLowerCase().trim() || ""}`;
           return eKey === key;
         });
         if (existingIdx >= 0) {
           const existing = allExperiments[existingIdx];
           // 保留更完整的版本
-          if (exp.evidence_quote.length > existing.evidence_quote.length ||
+          if ((exp.evidence_quote || "").length > (existing.evidence_quote || "").length ||
               (exp.confidence || 0) > (existing.confidence || 0)) {
             allExperiments[existingIdx] = exp;
           }
@@ -609,7 +738,10 @@ function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
     }
   }
 
-  return { experiments: allExperiments };
+  return { claim: undefined, conclusions: allExperiments.map((exp, i) => ({
+    claim: (exp as ExperimentResult & { conclusionClaim?: string }).conclusionClaim || `实验 ${i + 1}`,
+    evidenceChain: [exp],
+  })) };
 }
 
 /**
@@ -673,7 +805,7 @@ export async function extractFromLongText(
   // 合并结果
   const merged = mergeExtractionResults(results);
 
-  console.log(`[Extraction] 分段提取完成: ${merged.experiments.length} 个实验 (来自 ${chunks.length} 个 chunk)`);
+  console.log(`[Extraction] 分段提取完成: ${getExperimentCount(merged)} 个实验 (来自 ${chunks.length} 个 chunk)`);
 
   return merged;
 }

@@ -39,7 +39,7 @@ export async function GET(
         fullText: true,
         createdAt: true,
         extractions: {
-          select: { id: true, drugName: true, pathway: true, conclusion: true },
+          select: { id: true, drugName: true, pathway: true, conclusion: true, conclusionClaim: true },
         },
       },
       orderBy: { createdAt: "desc" },

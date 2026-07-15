@@ -122,3 +122,46 @@ export async function PATCH(
     return Response.json({ error: "更新失败" }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ projectId: string }> }
+) {
+  const session = await auth();
+  if (!session?.user) {
+    return Response.json({ error: "未登录" }, { status: 401 });
+  }
+
+  if (!prisma) {
+    return Response.json({ error: "数据库未配置" }, { status: 503 });
+  }
+
+  const { projectId } = await params;
+  const { searchParams } = new URL(req.url);
+  const extractionId = searchParams.get("id");
+
+  if (!extractionId) {
+    return Response.json({ error: "id 必填" }, { status: 400 });
+  }
+
+  try {
+    // 验证 extraction 属于当前项目
+    const extraction = await prisma.extraction.findFirst({
+      where: { id: extractionId, paper: { projectId } },
+      select: { id: true },
+    });
+    if (!extraction) {
+      return Response.json({ error: "实验记录不存在" }, { status: 404 });
+    }
+
+    // 关联删除 pathway/phenotype effects
+    await prisma.pathwayEffect.deleteMany({ where: { extractionId } });
+    await prisma.phenotypeEffect.deleteMany({ where: { extractionId } });
+    await prisma.extraction.delete({ where: { id: extractionId } });
+
+    return Response.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to delete extraction:", error);
+    return Response.json({ error: "删除失败" }, { status: 500 });
+  }
+}
