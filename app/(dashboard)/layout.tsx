@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import FloatingTokenPanel from "@/components/token-usage/floating-panel";
+import { ExtractionProgressPanel } from "@/components/extraction-progress-panel";
 
 export default async function DashboardLayout({
   children,
@@ -16,6 +17,7 @@ export default async function DashboardLayout({
   return (
     <>
       {children}
+      <ExtractionProgressPanel />
       <FloatingTokenPanel />
     </>
   );

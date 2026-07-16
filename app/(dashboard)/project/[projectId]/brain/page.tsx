@@ -3,7 +3,8 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { FramerMotionDiv as MotionDiv, FramerMotionSection as MotionSection } from "@/components/ui/motion-wrapper";
-import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Plus } from "lucide-react";
+import { Brain, Search, ClipboardList, RefreshCw, CheckCircle, AlertTriangle, Plus, Beaker } from "lucide-react";
+import { useExtractionStore } from "@/stores/extraction-store";
 import { MechanismMatrix } from "@/components/matrix/mechanism-matrix";
 import { AIInsights } from "@/components/matrix/ai-insights";
 import { AnalysisReportPanel } from "@/components/matrix/analysis-report";
@@ -200,6 +201,15 @@ export default function BrainPage() {
     refreshExtractions();
   }, [refreshExtractions]);
 
+  // 监听全局提取完成事件，自动刷新
+  const { refreshTrigger } = useExtractionStore();
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      refreshExtractions();
+      rebuildMatrix();
+    }
+  }, [refreshTrigger, refreshExtractions, rebuildMatrix]);
+
   // 从 DB 文献构建 extractedPapers（用于 fallback）
   const extractedPapers = useMemo(() => {
     // 如果有 DB 提取数据，直接从 DB extractions 生成（不再需要 papers 中转）
@@ -392,15 +402,24 @@ export default function BrainPage() {
               : `${dbExtractions?.length ?? extractedPapers.length} 条实验数据 · 来自 ${extractedPapers.length} 篇文献`}
           </p>
         </div>
-        {useDemo && (
+        <div className="flex items-center gap-2">
           <a
-            href={`/project/${projectId}/papers/search`}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1.5"
+            href={`/project/${projectId}/papers`}
+            className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-1.5"
           >
-            <Search size={14} />
-            搜索文献
+            <Beaker size={14} />
+            提取论文
           </a>
-        )}
+          {useDemo && (
+            <a
+              href={`/project/${projectId}/papers/search`}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1.5"
+            >
+              <Search size={14} />
+              搜索文献
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Demo 提示 */}

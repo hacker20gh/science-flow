@@ -34,17 +34,17 @@ export async function GET(
     if (paper.pmid) {
       try {
         const pmcRes = await fetch(
-          `https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?ids=${paper.pmid}&format=json`,
+          `https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids=${paper.pmid}&format=json`,
           { signal: AbortSignal.timeout(10000) }
         );
         if (pmcRes.ok) {
           const pmcData = await pmcRes.json();
           const pmcid = pmcData?.records?.[0]?.pmcid;
           if (pmcid) {
-            // 尝试 Europe PMC 的直接 PDF 链接
+            // Europe PMC 直接 PDF（最可靠）
             urls.push(`https://europepmc.org/backend/ptpmcrender.fcgi?accid=${pmcid}&blobtype=pdf`);
-            // 尝试 PMC OA API
-            urls.push(`https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/pdf/`);
+            // PMC OA API 的 PDF（可能需要重定向）
+            urls.push(`https://pmc.ncbi.nlm.nih.gov/articles/${pmcid}/pdf/`);
           }
         }
       } catch { /* ignore */ }

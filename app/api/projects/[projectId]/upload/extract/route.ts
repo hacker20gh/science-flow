@@ -3,6 +3,8 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { auth } from "@/lib/auth";
 import { extractFromText, smartTruncate, flattenConclusions } from "@/lib/llm/extraction";
+import { validateExtraction } from "@/lib/llm/extraction-validator";
+import { postProcessExtractions } from "@/lib/llm/extraction-postprocess";
 import { prisma } from "@/lib/db-server";
 import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
 
@@ -40,7 +42,11 @@ export async function POST(req: NextRequest) {
 
     const title = safeFileName.replace(/\.pdf$/i, "").replace(/_/g, " ");
     const truncatedText = smartTruncate(fullText);
-    const extraction = await extractFromText(truncatedText, title);
+    const rawExtraction = await extractFromText(truncatedText, title);
+
+    // 质量校验 + 后处理
+    const validation = validateExtraction(rawExtraction);
+    const extraction = validation.cleaned;
 
     if (prisma && paperId && !paperId.startsWith("local-")) {
       try {
@@ -50,7 +56,15 @@ export async function POST(req: NextRequest) {
         });
 
         if (paper) {
-          const flatExps = flattenConclusions(extraction);
+          // 按结论分组做后处理
+          const processedConclusions = (extraction.conclusions || []).map(conc => {
+            const processed = postProcessExtractions({ experiments: conc.evidenceChain });
+            return { claim: conc.claim, evidenceChain: processed.experiments };
+          }).filter(c => c.evidenceChain.length > 0);
+
+          const flatExps = processedConclusions.flatMap((conc, i) =>
+            conc.evidenceChain.map(exp => ({ ...exp, conclusionIndex: i, conclusionClaim: conc.claim }))
+          );
           await prisma.$transaction(async (tx: any) => {
             for (const exp of flatExps) {
               const record = await tx.extraction.create({

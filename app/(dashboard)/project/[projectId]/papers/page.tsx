@@ -8,6 +8,7 @@ import {
   ExternalLink, Trash2, RefreshCw, Loader2, Download, Filter, ArrowUpDown, X,
 } from "lucide-react";
 import { PapersSkeleton } from "@/components/skeletons";
+import { useExtractionStore } from "@/stores/extraction-store";
 import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import { toast } from "sonner";
 import { exportToBibtex, exportToRis, downloadFile } from "@/lib/export";
@@ -721,9 +722,12 @@ const PaperCard = memo(function PaperCard({
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractProgress, setExtractProgress] = useState<string | null>(null);
   const { updatePaperExtraction } = useProjectStore();
+  const extractionStore = useExtractionStore();
 
   async function handleExtract() {
     setExtracting(true);
+    extractionStore.startExtraction([{ paperId: paper.id, title: paper.title }]);
+    extractionStore.updateProgress(paper.id, { status: "extracting", step: "准备提取..." });
     try {
       const res = await fetch("/api/papers/extract", {
         method: "POST",
@@ -743,6 +747,7 @@ const PaperCard = memo(function PaperCard({
       await consumeSSEStream(res, {
         onProgress: (step, current, total) => {
           setExtractProgress(`${step} (${current}/${total})`);
+          extractionStore.updateProgress(paper.id, { step, current, total });
         },
         onResult: (data) => {
           const d = data as { final?: boolean; results?: Array<{ extraction?: { experiments?: import("@/lib/llm/extraction").ExperimentResult[]; conclusions?: Array<{ claim?: string; evidenceChain: import("@/lib/llm/extraction").ExperimentResult[] }> }; error?: string; title?: string }> };
@@ -771,10 +776,12 @@ const PaperCard = memo(function PaperCard({
         const reason = extractionError || "未提取到实验数据";
         setExtractError(reason);
         setExtractProgress(null);
+        extractionStore.markError(paper.id, reason);
         toast.error("提取失败", { description: reason, duration: 8000 });
       } else {
         setExtractError(null);
         setExtractProgress(null);
+        extractionStore.updateProgress(paper.id, { status: "saving" });
         // 保存提取结果到 DB
         try {
           const saveRes = await fetch(`/api/projects/${projectId}/extractions/batch`, {
@@ -800,6 +807,7 @@ const PaperCard = memo(function PaperCard({
           const completeness = Math.round((completeCount / conclusionCount) * 100);
           qualitySummary = `提取完成：${exps.length} 个实验 | ${conclusionCount} 个结论 | 证据链完整度 ${completeness}%`;
         }
+        extractionStore.markDone(paper.id, { experiments: exps.length, conclusions: conclusions?.length || 0 });
         toast.success("提取完成", {
           description: qualitySummary,
           action: {
@@ -836,6 +844,7 @@ const PaperCard = memo(function PaperCard({
       const msg = err instanceof Error ? err.message : "未知错误";
       setExtractError(msg);
       setExtractProgress(null);
+      extractionStore.markError(paper.id, msg);
       toast.error("提取失败", { description: msg, duration: 8000 });
       // 浏览器通知（页面不可见时）
       if (document.hidden && "Notification" in window && Notification.permission === "granted") {
