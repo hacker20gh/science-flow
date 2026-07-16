@@ -7,12 +7,11 @@
  *
  * 注意：
  * - 此中间件是"安全网"，各 API Route 仍需自行调用 requireAuth() 验证
- * - middleware 运行在 Edge Runtime，不能使用 Node.js 专属模块
- * - matcher 配置排除了静态文件和 Next.js 内部路由
+ * - middleware 运行在 Edge Runtime，不使用 Node.js 专属模块
+ * - 仅检查 session cookie 是否存在，不验证 JWT 签名（由 API Route 负责）
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 
 // 需要登录才能访问的页面路径前缀
 const PROTECTED_PAGE_PREFIXES = ["/dashboard", "/project"];
@@ -40,7 +39,20 @@ const PUBLIC_PATHS = [
   "/courses",
 ];
 
-export async function middleware(request: NextRequest) {
+/**
+ * 检查请求是否携带 NextAuth session cookie
+ * NextAuth v5 JWT 模式使用 authjs.session-token 或 __Secure-authjs.session-token
+ */
+function hasSessionCookie(request: NextRequest): boolean {
+  return !!(
+    request.cookies.get("authjs.session-token") ||
+    request.cookies.get("__Secure-authjs.session-token") ||
+    request.cookies.get("next-auth.session-token") ||
+    request.cookies.get("__Secure-next-auth.session-token")
+  );
+}
+
+export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 跳过公开路径和静态资源
@@ -60,10 +72,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 验证认证状态
-  const session = await auth();
-
-  if (!session?.user?.id) {
+  // 检查 session cookie（不验证签名，仅做门禁检查）
+  if (!hasSessionCookie(request)) {
     // API 请求返回 401 JSON
     if (isProtectedApi) {
       return NextResponse.json(
