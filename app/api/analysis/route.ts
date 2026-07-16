@@ -1,8 +1,12 @@
 import { NextRequest } from "next/server";
 import { createSSEStream } from "@/lib/llm/streaming";
 import { analyzeData, parseCSV } from "@/lib/llm/analysis";
+import { requireAuth } from "@/lib/api-auth";
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   const body = await req.json();
   const { csvData, experimentContext } = body;
 

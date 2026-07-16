@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 /**
  * 获取项目成员列表
@@ -17,7 +18,14 @@ export async function GET(
   }
 
   try {
+    const authResult = await requireAuth();
+    if ("error" in authResult) return authResult.error;
+    const { userId } = authResult;
+
     const { projectId } = await params;
+
+    const accessResult = await requireProjectAccess(projectId, userId);
+    if ("error" in accessResult) return accessResult.error;
 
     const project = await prisma.project.findUnique({
       where: { id: projectId },
@@ -49,7 +57,14 @@ export async function POST(
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+  const { userId } = authResult;
+
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const { email } = await req.json();

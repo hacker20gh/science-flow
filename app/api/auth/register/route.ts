@@ -10,8 +10,11 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "邮箱和密码必填" }, { status: 400 });
     }
 
-    if (password.length < 6) {
-      return Response.json({ error: "密码至少 6 位" }, { status: 400 });
+    if (password.length < 8) {
+      return Response.json({ error: "密码至少 8 位" }, { status: 400 });
+    }
+    if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+      return Response.json({ error: "密码需包含大小写字母和数字" }, { status: 400 });
     }
 
     if (!process.env.DATABASE_URL || !prisma) {

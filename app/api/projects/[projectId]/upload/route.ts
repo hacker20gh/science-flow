@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import path from "path";
 import { prisma } from "@/lib/db-server";
 import { auth } from "@/lib/auth";
+import { requireProjectAccess } from "@/lib/api-auth";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require("pdf-parse-new");
@@ -33,6 +34,10 @@ export async function POST(req: NextRequest) {
     if (!projectId) {
       return Response.json({ error: "无效的 projectId" }, { status: 400 });
     }
+
+    // 验证项目所有权
+    const accessResult = await requireProjectAccess(projectId, session.user.id!);
+    if ("error" in accessResult) return accessResult.error;
 
     if (file.type !== "application/pdf") {
       return Response.json({ error: "只支持 PDF 文件" }, { status: 400 });

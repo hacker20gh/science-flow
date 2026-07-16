@@ -1,8 +1,12 @@
 import { NextRequest } from "next/server";
 import { troubleshootExperiment } from "@/lib/llm/troubleshoot";
 import { createSSEStream } from "@/lib/llm/streaming";
+import { requireAuth } from "@/lib/api-auth";
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   try {
     const body = await req.json();
     const { experiment, failure, literatureContext } = body;

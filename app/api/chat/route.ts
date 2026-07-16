@@ -59,6 +59,23 @@ export async function POST(req: NextRequest) {
   const session = await auth().catch(() => null);
   const userId = session?.user?.id;
 
+  // 如果提供了 projectId，必须登录且验证所有权
+  if (projectId) {
+    if (!userId) {
+      return new Response(JSON.stringify({ error: "登录后才能使用项目助手" }), { status: 401 });
+    }
+    if (!prisma) {
+      return new Response(JSON.stringify({ error: "数据库不可用" }), { status: 503 });
+    }
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    });
+    if (!project || project.userId !== userId) {
+      return new Response(JSON.stringify({ error: "无权访问该项目" }), { status: 403 });
+    }
+  }
+
   // 构建系统提示
   let richContext = "";
   if (projectId) {

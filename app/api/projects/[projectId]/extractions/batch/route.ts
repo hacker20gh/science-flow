@@ -75,12 +75,13 @@ export async function POST(
         results.push(record);
       }
 
+      const shortTitle = paper.title.length > 30 ? paper.title.slice(0, 30) + "…" : paper.title;
       await tx.timelineEvent.create({
         data: {
           projectId,
           type: "literature",
-          title: `提取了 ${extractions.length} 条实验数据`,
-          content: { paperId, count: extractions.length },
+          title: `提取了 ${extractions.length} 条数据：${shortTitle}`,
+          content: { paperId, paperTitle: paper.title, count: extractions.length },
         },
       });
 

@@ -1,8 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
-import { auth } from "@/lib/auth";
-
-const DEMO_USER_ID = "demo-user";
+import { requireAuth } from "@/lib/api-auth";
 
 export async function GET() {
   if (!prisma) {
@@ -10,8 +8,9 @@ export async function GET() {
   }
 
   try {
-    const session = await auth();
-    const userId = session?.user?.id || DEMO_USER_ID;
+    const authResult = await requireAuth();
+    if ("error" in authResult) return authResult.error;
+    const { userId } = authResult;
 
     const projects = await prisma.project.findMany({
       where: { userId, deletedAt: null },
@@ -34,19 +33,15 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const session = await auth();
-    const userId = session?.user?.id || DEMO_USER_ID;
+    const authResult = await requireAuth();
+    if ("error" in authResult) return authResult.error;
+    const { userId } = authResult;
+
     const body = await req.json();
 
     if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
       return Response.json({ error: "项目名称不能为空" }, { status: 400 });
     }
-
-    await prisma.user.upsert({
-      where: { id: userId },
-      create: { id: userId, email: `${userId}@sciflow.ai`, name: "用户" },
-      update: {},
-    });
 
     const project = await prisma.project.create({
       data: {

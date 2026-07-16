@@ -12,13 +12,15 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
 import { getLibraryItems, getCollections } from "@/lib/academic/zotero";
 
-// ===== 读取用户的 Zotero API Key =====
-async function getZoteroApiKey(): Promise<string | null> {
+// ===== 读取当前用户的 Zotero API Key（从 User.llmConfig） =====
+async function getZoteroApiKey(userId: string): Promise<string | null> {
   if (!prisma) return null;
-  const setting = await prisma.userSetting.findUnique({
-    where: { key: "zoteroApiKey" },
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { llmConfig: true },
   });
-  return (setting?.value as string) || null;
+  const config = user?.llmConfig as Record<string, unknown> | null;
+  return (config?.zoteroApiKey as string) || null;
 }
 
 /**
@@ -33,7 +35,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });
   }
 
-  const apiKey = await getZoteroApiKey();
+  const apiKey = await getZoteroApiKey(session.user.id!);
   if (!apiKey) {
     return NextResponse.json({ configured: false, items: [], total: 0, collections: [] });
   }

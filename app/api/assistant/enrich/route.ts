@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import type { AssistantCard } from "@/lib/assistant/process-assistant";
 import { getLLMClient, MODELS, withLLMRetry } from "@/lib/llm/client";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   try {
     const body = await req.json();
     const { projectId, cards } = body;
@@ -15,6 +19,9 @@ export async function POST(req: NextRequest) {
     if (!prisma) {
       return NextResponse.json({ cards });
     }
+
+    const accessResult = await requireProjectAccess(projectId, authResult.userId);
+    if ("error" in accessResult) return accessResult.error;
 
     // 获取项目上下文
     const [project, extractions, experiments] = await Promise.all([

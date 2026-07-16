@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 export async function POST(
   req: NextRequest,
@@ -9,7 +10,14 @@ export async function POST(
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+  const { userId } = authResult;
+
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();
