@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
+import { requireProjectAccess } from "@/lib/api-auth";
 
 // GET /api/projects/[projectId]/conversations — 列出项目所有对话
 export async function GET(
@@ -14,6 +15,9 @@ export async function GET(
     }
 
     const { projectId } = await params;
+
+    const accessResult = await requireProjectAccess(projectId, session.user.id);
+    if ("error" in accessResult) return accessResult.error;
 
     if (!prisma) {
       return NextResponse.json({ conversations: [] });
@@ -48,6 +52,10 @@ export async function POST(
     }
 
     const { projectId } = await params;
+
+    const accessResult = await requireProjectAccess(projectId, session.user.id);
+    if ("error" in accessResult) return accessResult.error;
+
     const body = await req.json();
     const { title } = body;
 

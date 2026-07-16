@@ -7,6 +7,7 @@ import { validateExtraction } from "@/lib/llm/extraction-validator";
 import { postProcessExtractions } from "@/lib/llm/extraction-postprocess";
 import { prisma } from "@/lib/db-server";
 import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
+import { requireProjectAccess } from "@/lib/api-auth";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
@@ -29,6 +30,10 @@ export async function POST(req: NextRequest) {
     if (!projectId || !fileName) {
       return Response.json({ error: "projectId 和 fileName 必填" }, { status: 400 });
     }
+
+    // 验证项目所有权
+    const accessResult = await requireProjectAccess(projectId, session.user.id!);
+    if ("error" in accessResult) return accessResult.error;
 
     const safeFileName = path.basename(fileName);
     const filePath = path.join(UPLOAD_DIR, projectId, safeFileName);
@@ -98,11 +103,12 @@ export async function POST(req: NextRequest) {
               }
             }
 
+            const shortName = safeFileName.length > 25 ? safeFileName.slice(0, 25) + "…" : safeFileName;
             await tx.timelineEvent.create({
               data: {
                 projectId,
                 type: "literature",
-                title: `从本地 PDF 提取了 ${flatExps.length} 条实验数据`,
+                title: `从 PDF 提取了 ${flatExps.length} 条数据：${shortName}`,
                 content: { paperId, fileName: safeFileName, count: flatExps.length },
               },
             });

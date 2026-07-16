@@ -40,6 +40,7 @@ export default function TimelinePage() {
               title: e.title as string,
               description: ((e.content as Record<string, unknown>)?.description as string) || "",
               timestamp: new Date(e.createdAt as string),
+              content: e.content as Record<string, unknown> | undefined,
               metadata: e.metadata as Record<string, unknown> | undefined,
             }))
           );
@@ -124,10 +125,17 @@ export default function TimelinePage() {
               className="w-full px-3 py-2 border rounded-lg mb-3 text-sm"
             >
               <option value="pivot">🔀 方向调整</option>
-              <option value="data_upload">📊 数据上传</option>
               <option value="hypothesis">💡 假设提出</option>
               <option value="experiment_design">🧪 实验设计</option>
+              <option value="experiment_completed">✅ 实验完成</option>
+              <option value="experiment_failed">⚠️ 实验失败</option>
+              <option value="literature">📖 文献操作</option>
+              <option value="extraction">🔬 信息提取</option>
+              <option value="data_upload">📊 数据上传</option>
+              <option value="matrix_updated">📊 矩阵更新</option>
               <option value="manuscript">📝 论文操作</option>
+              <option value="ai_chat">🤖 AI 对话</option>
+              <option value="note">📋 笔记</option>
             </select>
             <input
               type="text"

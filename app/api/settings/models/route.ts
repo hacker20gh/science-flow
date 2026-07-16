@@ -1,6 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import https from "https";
 import http from "http";
+import { requireAuth } from "@/lib/api-auth";
+
+// SSRF 防护：禁止内网/本地地址
+function isAllowedUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    if (!["http:", "https:"].includes(url.protocol)) return false;
+    const hostname = url.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return false;
+    if (hostname.startsWith("10.") || hostname.startsWith("172.") || hostname.startsWith("192.168.")) return false;
+    if (hostname.startsWith("169.254.")) return false;
+    if (hostname === "0.0.0.0") return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * POST /api/settings/models
@@ -8,12 +25,19 @@ import http from "http";
  * 使用 Node.js 原生 http/https 模块（避免 Next.js fetch 代理问题）
  */
 export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   try {
     const body = await req.json();
     const { baseUrl, apiKey } = body;
 
     if (!baseUrl || !apiKey) {
       return NextResponse.json({ error: "baseUrl and apiKey required" }, { status: 400 });
+    }
+
+    if (!isAllowedUrl(baseUrl)) {
+      return NextResponse.json({ error: "不允许的地址" }, { status: 400 });
     }
 
     const modelsUrl = `${baseUrl.replace(/\/+$/, "")}/models`;

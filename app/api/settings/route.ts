@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
 
-// GET - load settings
+/**
+ * GET - 加载当前用户的设置
+ * 使用 User.llmConfig 字段存储（用户级隔离），不使用全局 UserSetting
+ */
 export async function GET() {
   try {
     const session = await auth();
@@ -14,17 +17,16 @@ export async function GET() {
       return NextResponse.json({ config: null });
     }
 
-    const setting = await prisma.userSetting.findUnique({
-      where: { key: "llmConfig" },
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { llmConfig: true },
     });
 
-    const zoteroSetting = await prisma.userSetting.findUnique({
-      where: { key: "zoteroApiKey" },
-    });
+    const config = (user?.llmConfig as Record<string, unknown>) || null;
 
     return NextResponse.json({
-      config: setting?.value || null,
-      zoteroApiKey: (zoteroSetting?.value as string) || "",
+      config: config?.config || null,
+      zoteroApiKey: (config?.zoteroApiKey as string) || "",
     });
   } catch (error) {
     console.error("Failed to load settings:", error);
@@ -32,7 +34,10 @@ export async function GET() {
   }
 }
 
-// POST - save settings
+/**
+ * POST - 保存当前用户的设置
+ * 使用 User.llmConfig 字段存储（用户级隔离），不使用全局 UserSetting
+ */
 export async function POST(req: NextRequest) {
   try {
     const session = await auth();
@@ -51,21 +56,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "config is required" }, { status: 400 });
     }
 
-    // Save LLM config
-    await prisma.userSetting.upsert({
-      where: { key: "llmConfig" },
-      create: { key: "llmConfig", value: config },
-      update: { value: config },
+    // 读取现有配置，合并后保存到 User.llmConfig
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { llmConfig: true },
     });
 
-    // Save Zotero API key
-    if (zoteroApiKey !== undefined) {
-      await prisma.userSetting.upsert({
-        where: { key: "zoteroApiKey" },
-        create: { key: "zoteroApiKey", value: zoteroApiKey || "" },
-        update: { value: zoteroApiKey || "" },
-      });
-    }
+    const existing = (user?.llmConfig as Record<string, unknown>) || {};
+
+    const updatedConfig = {
+      ...existing,
+      config,
+      ...(zoteroApiKey !== undefined ? { zoteroApiKey: zoteroApiKey || "" } : {}),
+    };
+
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { llmConfig: updatedConfig },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

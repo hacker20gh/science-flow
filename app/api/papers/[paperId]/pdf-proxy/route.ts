@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth } from "@/lib/api-auth";
 
 /**
  * GET /api/papers/{paperId}/pdf-proxy
@@ -11,6 +12,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ paperId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   if (!prisma) {
     return new Response("数据库未配置", { status: 503 });
   }
@@ -20,10 +24,10 @@ export async function GET(
   try {
     const paper = await prisma.paper.findUnique({
       where: { id: paperId },
-      select: { id: true, pmid: true, doi: true, oaUrl: true, title: true },
+      select: { id: true, pmid: true, doi: true, oaUrl: true, title: true, project: { select: { userId: true } } },
     });
 
-    if (!paper) {
+    if (!paper || paper.project.userId !== authResult.userId) {
       return new Response("论文不存在", { status: 404 });
     }
 

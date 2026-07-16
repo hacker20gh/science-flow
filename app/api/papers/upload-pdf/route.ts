@@ -86,6 +86,15 @@ export async function POST(req: NextRequest) {
           return Response.json({ error: "论文记录不存在，请先保存文献" }, { status: 404 });
         }
 
+        // 验证论文属于当前用户的项目
+        const project = await prisma.project.findUnique({
+          where: { id: paper.projectId },
+          select: { userId: true },
+        });
+        if (!project || project.userId !== session.user.id) {
+          return Response.json({ error: "无权修改该论文" }, { status: 403 });
+        }
+
         // 上传 PDF 到 Supabase Storage
         let pdfUrl: string | null = null;
         try {

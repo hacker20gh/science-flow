@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 import type { MatrixData } from "@/lib/matrix/generator";
 
 /**
@@ -10,11 +11,17 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();

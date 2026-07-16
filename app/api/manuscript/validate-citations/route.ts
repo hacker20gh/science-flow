@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 import {
   parseCitations,
   matchCitations,
@@ -8,6 +9,9 @@ import {
 } from "@/lib/manuscript/citation-parser";
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   if (!prisma) {
     return NextResponse.json({ error: "Database not available" }, { status: 503 });
   }
@@ -22,6 +26,10 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+
+    // 验证项目所有权
+    const accessResult = await requireProjectAccess(projectId, authResult.userId);
+    if ("error" in accessResult) return accessResult.error;
 
     // 查询项目文献库
     const papers = await prisma.paper.findMany({

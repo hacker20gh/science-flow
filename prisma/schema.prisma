@@ -19,6 +19,8 @@ model User {
   chatMessages   ChatMessage[]
   conversations  Conversation[]
   courseProgress CourseProgress[]
+  settings       UserSetting[]
+  tokenUsage     TokenUsage[]
   createdAt      DateTime         @default(now())
 }
 
@@ -26,10 +28,15 @@ model User {
 
 model UserSetting {
   id        String   @id @default(cuid())
-  key       String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
   value     Json
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+
+  @@unique([userId, key])
+  @@index([userId])
 }
 
 // ===== 项目 =====
@@ -423,6 +430,8 @@ model CourseProgress {
 
 model TokenUsage {
   id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   feature      String // extraction, chat, design, troubleshoot, analysis, manuscript, review, preprocess
   model        String
   inputTokens  Int
@@ -432,6 +441,7 @@ model TokenUsage {
   isRetry      Boolean  @default(false)
   createdAt    DateTime @default(now())
 
+  @@index([userId, createdAt])
   @@index([feature, createdAt])
   @@index([createdAt])
 }

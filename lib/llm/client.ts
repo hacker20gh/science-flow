@@ -62,13 +62,17 @@ async function getDBConfig(): Promise<{ baseUrl: string; models: Record<string, 
     const { prisma } = await import("@/lib/db-server");
     if (!prisma) return null;
 
-    const settings = await prisma.userSetting?.findFirst?.({
-      where: { key: "llmConfig" },
-      orderBy: { updatedAt: "desc" },
+    // 从 User.llmConfig 读取（用户级存储，取最近配置的用户）
+    const user = await prisma.user.findFirst({
+      where: { llmConfig: { not: undefined } },
+      orderBy: { createdAt: "desc" },
+      select: { llmConfig: true },
     });
 
-    if (settings?.value) {
-      const config = settings.value as {
+    if (user?.llmConfig) {
+      // llmConfig 结构: { config: { mode, apiBaseUrl, apiKey, models, ... }, zoteroApiKey: "..." }
+      const raw = user.llmConfig as Record<string, unknown>;
+      const config = (raw.config || raw) as {
         mode?: string;
         provider?: string;
         apiBaseUrl?: string;

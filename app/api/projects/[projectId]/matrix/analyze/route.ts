@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 import { analyzeLiteratureStream, type AnalysisReport } from "@/lib/llm/literature-analyzer";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
 import type { MatrixData } from "@/lib/matrix/generator";
@@ -13,13 +13,15 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "未登录" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
 
   try {
     const { projectId } = await params;
+
+    const accessResult = await requireProjectAccess(projectId, authResult.userId);
+    if ("error" in accessResult) return accessResult.error;
+
     const matrix = await prisma?.mechanismMatrix.findUnique({
       where: { projectId },
       select: { analysisReport: true },
@@ -40,13 +42,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "未登录" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
 
   try {
     const { projectId } = await params;
+
+    const accessResult = await requireProjectAccess(projectId, authResult.userId);
+    if ("error" in accessResult) return accessResult.error;
+
     const body = await req.json();
     const { matrixData } = body as { matrixData: MatrixData };
 

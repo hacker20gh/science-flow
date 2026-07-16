@@ -60,3 +60,4 @@ test/data/
 
 .vercel
 .claude/worktrees/
+tmp/

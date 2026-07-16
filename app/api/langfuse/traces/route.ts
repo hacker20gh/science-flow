@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-auth";
 
 const LANGFUSE_HOST = process.env.LANGFUSE_HOST || "https://cloud.langfuse.com";
 const LANGFUSE_PUBLIC_KEY = process.env.LANGFUSE_PUBLIC_KEY;
@@ -69,6 +70,9 @@ async function langfuseFetchCached(path: string): Promise<unknown> {
  * ?traceId=xxx      → 返回指定 trace 的 observations（generations）
  */
 export async function GET(request: NextRequest) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   // 降级：未配置时返回空
   if (!LANGFUSE_PUBLIC_KEY || !LANGFUSE_SECRET_KEY) {
     return NextResponse.json({ traces: [], observations: [], enabled: false });

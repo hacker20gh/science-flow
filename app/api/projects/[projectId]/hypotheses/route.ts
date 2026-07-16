@@ -1,15 +1,20 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
   if (!prisma) {
     return Response.json({ error: "数据库未配置", hypotheses: [] }, { status: 503 });
   }
 
   const { projectId } = await params;
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const hypotheses = await prisma.hypothesis.findMany({
@@ -27,11 +32,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();
@@ -78,11 +87,15 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();
@@ -142,11 +155,15 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
   const id = req.nextUrl.searchParams.get("id");
 
   if (!id) {

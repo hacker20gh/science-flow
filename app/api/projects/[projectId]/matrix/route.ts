@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 /**
  * GET: 返回当前项目的机制矩阵（从 DB 读取），如无则返回 null
@@ -15,7 +16,14 @@ export async function GET(
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+  const { userId } = authResult;
+
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const matrix = await prisma.mechanismMatrix.findUnique({
@@ -38,7 +46,14 @@ export async function POST(
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+  const { userId } = authResult;
+
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();
@@ -60,11 +75,14 @@ export async function POST(
       // 从 data 中提取行数和列数（如果存在）
       const totalPapers = Array.isArray(data?.rows) ? data.rows.length : undefined;
       const totalExperiments = Array.isArray(data?.columns) ? data.columns.length : undefined;
+      const dims = totalPapers && totalExperiments
+        ? `（${totalPapers} 篇文献 × ${totalExperiments} 个实验）`
+        : "";
       await prisma.timelineEvent.create({
         data: {
           projectId,
           type: "matrix_updated",
-          title: "机制矩阵已更新",
+          title: `机制矩阵已更新${dims}`,
           content: { totalExperiments, totalPapers },
         },
       });
@@ -88,7 +106,14 @@ export async function DELETE(
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+  const { userId } = authResult;
+
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     // 删除旧矩阵，然后插入一个空的标记记录（防止自动重新生成）

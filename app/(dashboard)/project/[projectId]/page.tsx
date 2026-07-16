@@ -14,7 +14,6 @@ import {
   Pencil,
   AlertTriangle,
   Info,
-  Clock,
   ArrowRight,
   TrendingUp,
   Zap,
@@ -24,7 +23,6 @@ import { WorkflowProgress } from "@/components/project/workflow-progress";
 import { generateInsights } from "@/lib/workflow/rules";
 import type { ProactiveInsight } from "@/lib/workflow/event-bus";
 import { toast } from "sonner";
-import { EVENT_CONFIG, type TimelineEventType } from "@/lib/timeline/events";
 
 const fadeUp = {
   initial: { opacity: 0, y: 20 },
@@ -54,9 +52,6 @@ export default function ProjectPage({
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [saving, setSaving] = useState(false);
-  const [timelineEvents, setTimelineEvents] = useState<
-    { id: string; type: string; title: string; createdAt: string }[]
-  >([]);
 
   useEffect(() => {
     params.then((p) => {
@@ -64,19 +59,6 @@ export default function ProjectPage({
       fetchProject(p.projectId);
     });
   }, [params]);
-
-  // Fetch timeline events
-  useEffect(() => {
-    if (!projectId) return;
-    fetch(`/api/projects/${projectId}/timeline`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.events) setTimelineEvents(data.events.slice(0, 10));
-      })
-      .catch((err) => {
-        console.error("[Timeline] Failed to load timeline events:", err);
-      });
-  }, [projectId]);
 
   // Compute insights from project data
   const insights = useMemo<ProactiveInsight[]>(() => {
@@ -123,16 +105,6 @@ export default function ProjectPage({
       { label: "实验设计", value: experimentDesign, color: experimentDesign >= 70 ? "emerald" : "gray" },
     ];
   }, [project]);
-
-  function relativeTime(dateStr: string): string {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins} 分钟前`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours} 小时前`;
-    const days = Math.floor(hours / 24);
-    return `${days} 天前`;
-  }
 
   async function fetchProject(id: string) {
     try {
@@ -347,30 +319,6 @@ export default function ProjectPage({
                 </div>
               </MotionDiv>
             ))}
-          </div>
-        </section>
-      )}
-
-      {/* Recent Activity */}
-      {timelineEvents.length > 0 && (
-        <section className="mt-8">
-          <div className="flex items-center gap-2 mb-4">
-            <Clock size={18} className="text-gray-400" />
-            <h2 className="text-lg font-semibold">最近活动</h2>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-            {timelineEvents.map((event) => {
-                // 根据事件类型显示对应图标
-                const eventConfig = EVENT_CONFIG[event.type as TimelineEventType];
-                const icon = eventConfig?.icon || "📌";
-                return (
-                  <div key={event.id} className="flex items-center gap-3 px-4 py-3">
-                    <span className="text-sm shrink-0">{icon}</span>
-                    <span className="text-sm text-gray-700 truncate flex-1">{event.title}</span>
-                    <span className="text-xs text-gray-400 shrink-0">{relativeTime(event.createdAt)}</span>
-                  </div>
-                );
-              })}
           </div>
         </section>
       )}

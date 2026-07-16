@@ -9,14 +9,17 @@
 
 export type TimelineEventType =
   | "literature"
+  | "extraction"
   | "hypothesis"
   | "experiment_design"
   | "experiment_completed"
   | "experiment_failed"
-  | "pivot"           // 方向转变
+  | "pivot"
   | "matrix_updated"
   | "manuscript"
-  | "data_upload";
+  | "data_upload"
+  | "ai_chat"
+  | "note";
 
 export interface TimelineEvent {
   id: string;
@@ -24,6 +27,7 @@ export interface TimelineEvent {
   title: string;
   description: string;
   timestamp: number;
+  content?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   weekNumber?: number;
 }
@@ -106,6 +110,24 @@ export const EVENT_CONFIG: Record<
     color: "text-teal-600",
     bgColor: "bg-teal-100",
   },
+  extraction: {
+    icon: "🔬",
+    label: "信息提取",
+    color: "text-indigo-600",
+    bgColor: "bg-indigo-100",
+  },
+  ai_chat: {
+    icon: "🤖",
+    label: "AI 对话",
+    color: "text-sky-600",
+    bgColor: "bg-sky-100",
+  },
+  note: {
+    icon: "📋",
+    label: "笔记",
+    color: "text-gray-600",
+    bgColor: "bg-gray-100",
+  },
 };
 
 // ===== 时间格式化 =====
@@ -123,6 +145,81 @@ export function formatEventTime(timestamp: number): string {
     month: "short",
     day: "numeric",
   });
+}
+
+// ===== 日期分组 =====
+
+/**
+ * 按日期分组事件，返回 [{ label, date, events }]
+ * label: "今天" / "昨天" / "7月14日 周一" 等
+ */
+export interface DateGroup {
+  label: string;
+  date: string; // YYYY-MM-DD
+  events: TimelineEvent[];
+}
+
+export function groupByDate(events: TimelineEvent[]): DateGroup[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const groups = new Map<string, TimelineEvent[]>();
+
+  // 按时间倒序排列后分桶
+  const sorted = [...events].sort((a, b) => b.timestamp - a.timestamp);
+  for (const event of sorted) {
+    const d = new Date(event.timestamp);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(event);
+  }
+
+  const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+  return Array.from(groups.entries()).map(([date, evts]) => {
+    const d = new Date(date + "T00:00:00");
+    let label: string;
+    if (d.getTime() === today.getTime()) {
+      label = "今天";
+    } else if (d.getTime() === yesterday.getTime()) {
+      label = "昨天";
+    } else {
+      label = `${d.getMonth() + 1}月${d.getDate()}日 ${weekdays[d.getDay()]}`;
+    }
+    return { label, date, events: evts };
+  });
+}
+
+/**
+ * 本周统计：按类型分组计数
+ */
+export function computeWeekStats(events: TimelineEvent[]): {
+  total: number;
+  thisWeek: number;
+  byType: Map<string, number>;
+} {
+  const now = new Date();
+  const weekStart = new Date(now);
+  // 回到本周一 00:00
+  const day = weekStart.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  weekStart.setDate(weekStart.getDate() - diff);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekStartTime = weekStart.getTime();
+
+  const byType = new Map<string, number>();
+  let thisWeek = 0;
+
+  for (const event of events) {
+    if (event.timestamp >= weekStartTime) {
+      thisWeek++;
+      byType.set(event.type, (byType.get(event.type) || 0) + 1);
+    }
+  }
+
+  return { total: events.length, thisWeek, byType };
 }
 
 // ===== 演示数据 =====

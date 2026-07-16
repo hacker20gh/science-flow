@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 const MAX_BATCH_SIZE = 50;
 
@@ -20,11 +21,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();
@@ -105,15 +110,16 @@ export async function POST(
         }
 
         // Single timeline event for the batch
+        const src = toCreate[0]?.source || "batch";
         await tx.timelineEvent.create({
           data: {
             projectId,
             type: "literature",
-            title: `批量添加 ${created.length} 篇文献`,
+            title: `批量添加 ${created.length} 篇文献（来源：${src}）`,
             content: {
               count: created.length,
               skipped: skipped.length,
-              source: toCreate[0]?.source || "batch",
+              source: src,
             },
           },
         });

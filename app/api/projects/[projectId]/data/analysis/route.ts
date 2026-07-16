@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db-server";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 const EXPERIMENT_TYPE = "data_analysis";
 
@@ -12,11 +13,17 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   if (!prisma) {
     return Response.json({ error: "Database not available" }, { status: 503 });
   }
 
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     // Find the latest ExperimentData.analysis for this project's data_analysis experiments
@@ -45,11 +52,17 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
+
   if (!prisma) {
     return Response.json({ error: "Database not available" }, { status: 503 });
   }
 
   const { projectId } = await params;
+
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   let body: { analysis: unknown; fileName?: string; csvData?: string };
   try {
