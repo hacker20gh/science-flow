@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { extractWithFallback, flattenConclusions, getExperimentCount, type ExtractionResult } from "@/lib/llm/extraction";
+import { extractWithFallback, extractTwoPhase, verifyExtractionCompleteness, flattenConclusions, getExperimentCount, type ExtractionResult } from "@/lib/llm/extraction";
 import { validateExtraction } from "@/lib/llm/extraction-validator";
 import { postProcessExtractions } from "@/lib/llm/extraction-postprocess";
 import { createSSEStream, type SSEEvent } from "@/lib/llm/streaming";
@@ -141,7 +141,16 @@ export async function POST(req: NextRequest) {
             }
 
             emit({ type: "progress", step: `正在提取: ${paper.title}`, current: results.length, total: papers.length });
-            const rawExtraction = await extractWithFallback(text, paper.title);
+            // 全文用两阶段提取（更精准），摘要用单次提取（更快）
+            const isFullText = text.length > 800;
+            let rawExtraction = isFullText
+              ? await extractTwoPhase(text, paper.title)
+              : await extractWithFallback(text, paper.title);
+
+            // 完整性验证（全文才验证，摘要跳过）
+            if (isFullText && getExperimentCount(rawExtraction) >= 3) {
+              rawExtraction = await verifyExtractionCompleteness(text, paper.title, rawExtraction);
+            }
 
             // 质量校验 + 自动修正
             const validation = validateExtraction(rawExtraction);

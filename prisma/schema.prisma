@@ -139,6 +139,8 @@ model Extraction {
   experimentRole    String? // main, supporting, control
   conclusionIndex   Int?    // 属于论文的第几个结论（0-based）
   conclusionClaim   String? // 此实验所属结论的 claim 文本
+  evidenceFigure    String? // 此实验来自哪个 Figure（如 "Fig 2c", "Fig S3"）
+  evidenceTable     String? // 此实验来自哪个 Table（如 "Table 1"）
 
   // 剂量-反应 + 因果链（新增）
   doseResponse     Json? // [{concentration, effect_size, direction}]

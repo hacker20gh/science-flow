@@ -104,7 +104,7 @@ export async function fetchFullText(paper: {
 async function getPMCID(pmid: string): Promise<string | null> {
   try {
     const res = await fetch(
-      `https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?ids=${pmid}&format=json`,
+      `https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids=${pmid}&format=json`,
       { signal: AbortSignal.timeout(10000), headers: { "User-Agent": USER_AGENT } }
     );
     if (!res.ok) return null;
@@ -325,10 +325,45 @@ async function fetchXML(url: string): Promise<FullTextResult | null> {
     if (!contentType.includes("xml") && !contentType.includes("text")) return null;
 
     const xml = await res.text();
+
+    // 提取 Figure legends（保留结构）
+    const figureLegends: string[] = [];
+    const figRegex = /<fig[^>]*>([\s\S]*?)<\/fig>/gi;
+    let figMatch;
+    while ((figMatch = figRegex.exec(xml)) !== null) {
+      const figContent = figMatch[1];
+      const figId = figMatch[0].match(/id="([^"]+)"/)?.[1] || "";
+      const label = extractXmlText(figContent.match(/<label[^>]*>([\s\S]*?)<\/label>/)?.[1] || "");
+      const caption = extractXmlText(figContent.match(/<caption[^>]*>([\s\S]*?)<\/caption>/)?.[1] || "");
+      if (label || caption) {
+        figureLegends.push(`[${label || figId}] ${caption}`.trim());
+      }
+    }
+
+    // 提取 Table 数据（保留结构）
+    const tableData: string[] = [];
+    const tableRegex = /<table-wrap[^>]*>([\s\S]*?)<\/table-wrap>/gi;
+    let tableMatch;
+    while ((tableMatch = tableRegex.exec(xml)) !== null) {
+      const tableContent = tableMatch[1];
+      const tableLabel = extractXmlText(tableContent.match(/<label[^>]*>([\s\S]*?)<\/label>/)?.[1] || "");
+      const tableCaption = extractXmlText(tableContent.match(/<caption[^>]*>([\s\S]*?)<\/caption>/)?.[1] || "");
+      const tableHtml = tableContent.match(/<table[^>]*>([\s\S]*?)<\/table>/)?.[1] || "";
+
+      if (tableHtml) {
+        const mdTable = htmlTableToMarkdown(tableHtml);
+        if (mdTable) {
+          tableData.push(`[${tableLabel}] ${tableCaption}\n${mdTable}`);
+        }
+      }
+    }
+
     // XML → 纯文本：保留段落结构
-    const text = xml
+    let text = xml
       // 段落/节标题 → 换行
-      .replace(/<\/?(p|sec|body|abstract|title|h[1-6]|fig|table-wrap|list)[^>]*>/gi, "\n")
+      .replace(/<\/?(p|sec|body|abstract|title|h[1-6]|list)[^>]*>/gi, "\n")
+      // fig/table-wrap → 移除（已单独提取）
+      .replace(/<\/?(fig|table-wrap)[^>]*>/gi, "")
       // br → 换行
       .replace(/<br\s*\/?>/gi, "\n")
       // 其他标签 → 移除
@@ -343,6 +378,14 @@ async function fetchXML(url: string): Promise<FullTextResult | null> {
       .join("\n")
       .trim();
 
+    // 追加 Figure legends 和 Table 数据到正文末尾
+    if (figureLegends.length > 0) {
+      text += "\n\n=== FIGURE LEGENDS ===\n" + figureLegends.join("\n\n");
+    }
+    if (tableData.length > 0) {
+      text += "\n\n=== TABLES ===\n" + tableData.join("\n\n");
+    }
+
     if (text.length > 500) {
       return { text, url, source: "XML" };
     }
@@ -350,4 +393,51 @@ async function fetchXML(url: string): Promise<FullTextResult | null> {
   } catch {
     return null;
   }
+}
+
+/** 从 XML 片段中提取纯文本 */
+function extractXmlText(xmlFragment: string): string {
+  if (!xmlFragment) return "";
+  return xmlFragment
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 将 HTML table 转换为 Markdown 格式 */
+function htmlTableToMarkdown(tableHtml: string): string | null {
+  const rows: string[][] = [];
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(tableHtml)) !== null) {
+    const cells: string[] = [];
+    const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+      cells.push(extractXmlText(cellMatch[1]));
+    }
+    if (cells.length > 0) rows.push(cells);
+  }
+
+  if (rows.length === 0) return null;
+
+  // 生成 Markdown table
+  const maxCols = Math.max(...rows.map(r => r.length));
+  const header = rows[0];
+  const separator = header.map(() => "---");
+  const body = rows.slice(1);
+
+  let md = "| " + header.map(c => c || " ").join(" | ") + " |\n";
+  md += "| " + separator.join(" | ") + " |\n";
+  for (const row of body) {
+    // 补齐列数
+    while (row.length < maxCols) row.push("");
+    md += "| " + row.map(c => c || " ").join(" | ") + " |\n";
+  }
+
+  return md;
 }

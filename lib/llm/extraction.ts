@@ -89,6 +89,12 @@ export const ExperimentSchema = z.object({
   sample_size: z.number().nullable().optional(),
   conclusion: z.string().optional(),
   evidence_quote: z.string().optional(),
+  evidence_figure: z.string().nullable().optional().describe(
+    "此实验来自哪个 Figure（如 'Fig 2c', 'Fig S3'）。如果论文中明确标注了 Figure 编号，填写。"
+  ),
+  evidence_table: z.string().nullable().optional().describe(
+    "此实验来自哪个 Table（如 'Table 1', 'Supplementary Table 2'）。如果有，填写。"
+  ),
   confidence: z.number().min(0).max(1).optional(),
 });
 
@@ -178,217 +184,125 @@ const EXTRACTION_TOOL = createToolFromSchema(
 
 // ===== Prompt =====
 
-const CORE_PROMPT = `You are a biomedical literature analysis expert.
+// ===== 模块化 Prompt =====
 
-STEP 1 — IDENTIFY THE PAPER'S OVERALL CLAIM:
-Read the paper and identify its overall claim (claim field).
-- Usually found in the Abstract conclusion or Discussion
-- One sentence summarizing the paper's main contribution
+/** 核心 prompt（~50行）— 每次都用 */
+const PROMPT_CORE = `You are a biomedical literature analysis expert. Extract structured experimental data.
 
-STEP 2 — BREAK DOWN INTO CONCLUSIONS:
-A paper typically proves 2-4 conclusions (sub-claims) that together support the overall claim.
-Each conclusion is supported by a chain of experiments.
+STEP 1 — CLAIM: Identify the paper's overall claim (Abstract conclusion or Discussion). One sentence.
 
-Example for a paper about "TCAF2 promotes CRC liver metastasis via TRPM8":
-- Conclusion 1: "TCAF2 is highly expressed in tumor pericytes"
-  Evidence chain: Patient sample isolation → Proteomics → TCAF2 identification
-- Conclusion 2: "TCAF2 inhibits TRPM8 channel activity"
-  Evidence chain: Electrophysiology → Calcium imaging → Menthol activation
-- Conclusion 3: "TCAF2-TRPM8 axis promotes liver metastasis"
-  Evidence chain: In vitro migration → In vivo xenograft → Survival analysis
+STEP 2 — CONCLUSIONS (use the paper's own structure):
+First, scan Results for SUB-HEADINGS. Use them directly as conclusion claims.
+Patterns: numbered "3.1 X is Y", bold lead sentences, "We next examined...", "To determine if..."
+Chinese: "结果" section sub-headings.
 
-STEP 3 — EXTRACT EVIDENCE CHAINS:
-For each conclusion, extract the experiments in LOGICAL ORDER (how the authors built their argument).
-- First experiment: initial discovery or setup
-- Middle experiments: core validation
-- Last experiments: in vivo or clinical confirmation
+If NO sub-headings, fallback:
+1. Group by main Figure (Fig 1→结论1, Fig 2→结论2). Supplementary figures: same question→supporting, new question→separate conclusion.
+2. Topic sentences: "We next examined...", "Having established X, we investigated Y"
+3. Logical flow: observation → mechanism → validation → in vivo/clinical
 
-Each experiment has a "role":
-- "main": Directly proves the conclusion (the key experiment)
-- "supporting": Validates or extends (different cell line, dose, timepoint)
-- "control": Rules out alternatives (negative control, vehicle)
+STEP 3 — EVIDENCE CHAINS per conclusion, in logical order. Roles: main (key experiment), supporting (validates), control (rules out alternatives).
 
-QUALITY RULES:
-- Total experiments per paper: 6-15 (not 20+)
-- Each conclusion: 2-5 experiments in its chain
-- Only extract findings EXPLICITLY stated in the text
-- If information is not available, use null
+QUALITY: 6-15 experiments total, 2-5 per conclusion. Only EXPLICITLY stated findings. Use null if unavailable.
 
-MULTILINGUAL SUPPORT:
-- This paper may be in Chinese, Japanese, or other non-English language.
-- Extract ALL information regardless of the paper's language.
-- Always output in English (translate pathway/phenotype names to standard English).
-- Chinese papers often have: 目的(Objective), 方法(Methods), 结果(Results), 结论(Conclusion)
-- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
+LANGUAGE: Output claim and conclusions[].claim in Chinese (简体中文). Keep experiment details (intervention.target, model.cell_line, pathway names, phenotype names, evidence_quote) in English for data consistency.
 
-EXTRACTION RULES:
-- Only extract findings EXPLICITLY stated in the text. Do NOT infer or hallucinate.
-- If information is not available, use null.
+RULES:
+- Negative results: "not affected", "no change" → direction "no_change". ALWAYS extract.
+- Anti-hallucination: every field needs evidence_quote. Never guess. Concentrations need units.
+- Merging: same drug+cell+timepoint = ONE experiment. Separate only for different drugs/cells/timepoints/in vitro vs in vivo.
+- NOT experiments: method descriptions, observational correlations, figure legends without data.
+- Confidence: 1.0=explicit, 0.8=strongly implied, 0.5=inferred, 0.3=uncertain.
+- experiment_type: describe the BIOLOGICAL SYSTEM (cell_line, animal_model, patient_sample, omics), NOT the method (CoIP, WB).
+- intervention.type: drug(chemicals), knockdown(siRNA/shRNA), overexpression(plasmid), knockout(CRISPR), stimulation(agonists/factors), inhibition(antagonists). Gene names are NOT drugs.
+- pathway_effects[].method: experimental technique (WB, qPCR), NOT statistical method.`;
 
-NEGATIVE RESULTS ARE IMPORTANT:
-- "not affected", "no significant change", "unchanged", "no effect" = direction "no_change"
-- ALWAYS extract these as experiments with direction "no_change". Do NOT skip them.
-- Negative results are as scientifically valuable as positive results.
-- If a paper states "p53 expression was not affected by treatment X", extract it as:
-  pathway_effects: [{ pathway: "p53", direction: "no_change", ... }]
+/** 表格规则 — 文本含表格时加载 */
+const PROMPT_TABLE_RULES = `
+TABLE HANDLING:
+- Each ROW with numeric data = potentially SEPARATE experiment.
+- Column headers = what is measured (p-AKT, Apoptosis %).
+- Different concentration/dose/cell per row = separate entry.
+- Extract ALL rows. Set evidence_quote to "Table 1, row 3".
+- Dose-response: fill dose_response array AND create separate experiment for highest concentration.`;
 
-TABLE HANDLING RULES:
-- When you see a Markdown table, each ROW with numeric data is potentially a SEPARATE experiment.
-- Column headers define what is being measured (e.g., p-AKT, p-mTOR, Apoptosis rate).
-- Each row with different concentration/dose/cell line = separate experiment entry.
-- Extract ALL rows, not just the one with the most significant result.
-- For table data, set evidence_quote to include the table reference (e.g., "Table 1, row 3").
-- If a table shows dose-response data across multiple concentrations, fill the dose_response array AND create a separate experiment for the highest/most significant concentration.
+/** 多语言规则 — 文本含 CJK 字符时加载 */
+const PROMPT_MULTILINGUAL = `
+MULTILINGUAL: Extract ALL info regardless of language. Always output in English.
+Chinese: 目的=Objective, 方法=Methods, 结果=Results, 结论=Conclusion.
+Chinese terms: 上调/表达增加=up, 下调/表达降低=down, 无显著变化=no_change.`;
 
-TABLE EXAMPLE:
-| Concentration | p53 (WB) | Apoptosis (%) |
-| 1 μM         | 1.2-fold  | 15%           |
-| 5 μM         | 2.3-fold  | 35%           |
-| 10 μM        | 3.1-fold  | 60%           |
+/** 命名规范 — 精简版，后处理器会二次标准化 */
+const PROMPT_NAMING = `
+NAMING: Use standard names. Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Apoptosis, ECM, TME.
+Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Colony Formation, Tumor Growth, Angiogenesis.
+Variant names → use standard name above.`;
 
--> Extract 3 experiments (one per concentration), plus fill dose_response array for the concentration series.
+/** Few-shot 示例 */
+const PROMPT_FEW_SHOT = `
+EXAMPLE:
+Input: "HeLa cells treated with 5 μM cisplatin for 24h showed upregulation of p53 (WB, p<0.01, n=3) and increased apoptosis (flow cytometry, 2.5-fold). DMSO vehicle control."
+Output: { "claim": "顺铂上调p53并诱导细胞凋亡", "conclusions": [{ "claim": "顺铂在HeLa细胞中上调p53并诱导凋亡", "evidenceChain": [{ "role": "main", "intervention": {"type":"drug","target":"cisplatin","concentration":"5 μM","duration":"24h"}, "model": {"cell_line":"HeLa","species":"human"}, "pathway_effects": [{"pathway":"p53","direction":"up","significance":"p<0.01","method":"Western blot"}], "phenotype_effects": [{"phenotype":"Apoptosis","direction":"up","fold_change":"2.5-fold"}], "controls": ["DMSO vehicle control"], "sample_size": 3, "evidence_quote": "HeLa cells treated with 5 μM cisplatin for 24h showed upregulation of p53", "confidence": 0.95 }] }] }`;
 
-ANTI-HALLUCINATION (hard rules):
-- Each field MUST have an evidence_quote from the original text.
-- If you cannot find evidence for a field, set it to null. NEVER guess.
-- Concentrations/doses MUST include units (e.g. "2 μM", "10 mg/kg").
-- Statistical methods must be explicitly mentioned in the text, not inferred.
-- Sample size: set to null if not explicitly stated.
+/**
+ * 智能组装 prompt：核心 + 条件模块
+ */
+function buildPrompt(text: string, mode: "standard" | "abstract" | "relaxed" | "minimal" = "standard"): string {
+  const parts: string[] = [PROMPT_CORE];
 
-MERGING RULES (important for quality):
-- Do NOT split a single experiment into multiple entries just because it has multiple readouts.
-- Example: "Cisplatin increased p53 (WB) and apoptosis (flow cytometry)" = ONE experiment with multiple pathway_effects, NOT two experiments.
-- Same drug + same cell line + same timepoint = ONE experiment (combine all readouts).
-- Different concentrations of the same drug = ONE experiment with dose_response array (not separate experiments).
-- Only create separate experiments for: different drugs, different cell lines, different timepoints, or in vitro vs in vivo.
+  // 条件加载：表格规则
+  if (/\|.*\|.*\|/.test(text) || /Table \d/i.test(text)) {
+    parts.push(PROMPT_TABLE_RULES);
+  }
 
-INTERVENTION TYPE CLASSIFICATION (critical):
-- "drug": only for chemical compounds, small molecules, antibodies (e.g., cisplatin, doxorubicin, anti-PD-1)
-- "knockdown": siRNA, shRNA, antisense oligonucleotide targeting a gene
-- "overexpression": plasmid transfection, lentiviral overexpression of a gene
-- "knockout": CRISPR/Cas9 gene deletion, homozygous KO
-- "stimulation": growth factors (EGF, LPS), cytokines (TNF-α), environmental conditions (hypoxia), receptor agonists (menthol for TRPM8)
-- "inhibition": receptor antagonists, pathway inhibitors (AMG333 for TRPM8, LY294002 for PI3K)
-- DO NOT classify gene names (TCAF2, HIF-1α, TP53) as "drug" — they are targets, use knockdown/overexpression/knockout instead.
+  // 条件加载：多语言
+  if (/[一-鿿぀-ゟ゠-ヿ]/.test(text)) {
+    parts.push(PROMPT_MULTILINGUAL);
+  }
 
-WHAT IS NOT AN EXPERIMENT (do not extract):
-- Observational correlations ("X expression correlated with Y in patient samples") — only extract if there is a clear intervention
-- Method descriptions ("we performed Western blot to detect...") — not an experiment
-- Figure legends without new data
-- Review/summary sentences
+  // 命名规范 + 示例（总是加载，但精简了）
+  parts.push(PROMPT_NAMING);
+  parts.push(PROMPT_FEW_SHOT);
 
-NAMING CONVENTIONS:
-STANDARD PATHWAY NAMES (you MUST use one of these exact names):
-NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
-
-If the paper uses a variant name (e.g. "NF-kappaB", "PI3K-Akt pathway"), output the standard name above.
-
-STANDARD PHENOTYPE NAMES (you MUST use one of these exact names):
-Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50
-
-If the paper uses a variant (e.g. "programmed cell death", "cell survival"), output the standard name.
-
-- pathway_effects[].method: experimental technique (e.g. "Western blot", "qPCR"), NOT statistical method.
-- Confidence (0-1): 1.0 = explicitly stated, 0.8 = strongly implied, 0.5 = inferred, 0.3 = uncertain.
-
-FEW-SHOT EXAMPLE:
-Input excerpt: "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53 (Western blot, p<0.01, n=3) and increased apoptosis (flow cytometry, 2.5-fold). DMSO was used as vehicle control."
-Expected output:
-{
-  "experiments": [{
-    "role": "main",
-    "intervention": {"type": "drug", "target": "cisplatin", "concentration": "5 μM", "duration": "24h", "co_treatment": null},
-    "model": {"cell_line": "HeLa", "species": "human", "passage": null},
-    "pathway_effects": [{"pathway": "p53", "direction": "up", "significance": "p<0.01", "method": "Western blot"}],
-    "phenotype_effects": [{"phenotype": "Apoptosis", "direction": "up", "fold_change": "2.5-fold"}],
-    "controls": ["DMSO vehicle control"],
-    "statistical_test": null,
-    "sample_size": 3,
-    "conclusion": "Cisplatin upregulates p53 and induces apoptosis in HeLa cells",
-    "evidence_quote": "HeLa cells treated with 5 μM cisplatin for 24h showed significant upregulation of p53",
-    "confidence": 0.95
-  }]
-}`;
-
-// ===== 摘要专用 Prompt =====
-
-const ABSTRACT_PROMPT = `You are analyzing a paper ABSTRACT (not full text).
-Many experimental details will be unavailable - this is expected and OK.
-
-MULTILINGUAL SUPPORT:
-- This paper may be in Chinese, Japanese, or other non-English language.
-- Extract ALL information regardless of the paper's language.
-- Always output in English (translate pathway/phenotype names to standard English).
-- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
-
-RELAXED RULES:
-- intervention.concentration/duration/co_treatment/method: use null if not explicitly stated
-- model.passage: almost always unavailable in abstracts, use null
-- experiment_type: infer from context (cell_line for cell experiments, bioinformatics for data mining, etc.)
-- experiment_methods: list from context, empty array if unknown
-- statistical_test/sample_size: often not in abstract, use null
-- controls: empty array if not mentioned
+  // 模式特定补充
+  if (mode === "abstract") {
+    parts.push(`
+ABSTRACT MODE: Many details unavailable — this is OK.
+- Relax: concentration/duration/co_treatment/method → null if not stated
+- experiment_type: infer from context
 - confidence: cap at 0.6
-- Focus on what IS available: intervention target, cell line, pathway direction, phenotype direction
-- For evidence_quote: use the EXACT sentence from the abstract
+- Focus on: intervention target, cell line, pathway direction, phenotype direction`);
+  } else if (mode === "relaxed") {
+    parts.push(`
+RETRY MODE: Previous extraction returned empty. Be MORE LENIENT.
+- Extract even with incomplete fields (null for missing)
+- Focus on ANY pathway direction changes and phenotype effects
+- Drug name + cell line are MOST important
+- confidence: 0.4-0.7`);
+  } else if (mode === "minimal") {
+    return `Extract MINIMAL data. Focus ONLY on: drug/intervention name, pathway names+direction, phenotype names+direction. Everything else null. confidence=0.4.\n${PROMPT_NAMING}`;
+  }
 
-NEGATIVE RESULTS: "no_change" direction is important. Extract "not affected", "no significant change", "unchanged" as experiments with direction "no_change". Do NOT skip them.
+  return parts.join("\n");
+}
 
-TABLE HANDLING: When you see table data, each row with different concentration/dose/cell line = separate experiment entry. Extract ALL rows.
+/** 检测文本是否包含表格 */
+function hasTableContent(text: string): boolean {
+  return /\|.*\|.*\|/.test(text) || /Table \d/i.test(text);
+}
 
-NAMING CONVENTIONS (same as standard - use exact names):
-Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
-Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50
+/** 检测文本是否包含 CJK 字符 */
+function hasCJKContent(text: string): boolean {
+  return /[一-鿿぀-ゟ゠-ヿ]/.test(text);
+}
 
-Keep all anti-hallucination rules. Only extract what is explicitly stated.`;
+// ===== 向后兼容：旧代码引用 CORE_PROMPT =====
+const CORE_PROMPT = buildPrompt("", "standard");
 
-// ===== 空结果重试 Prompts =====
-
-/**
- * 宽松 Prompt：首次提取为空时的重试
- * 降低提取门槛，允许不完整字段
- */
-const RELAXED_PROMPT = `You are extracting experimental data from a biomedical paper.
-This is a RETRY because the previous extraction returned no results.
-
-MULTILINGUAL SUPPORT:
-- This paper may be in Chinese, Japanese, or other non-English language.
-- Extract ALL information regardless of the paper's language.
-- Always output in English (translate pathway/phenotype names to standard English).
-- For Chinese papers, look for: 上调/表达增加 = up, 下调/表达降低 = down, 无显著变化 = no_change
-
-Be MORE LENIENT in extraction:
-- Extract even when fields are incomplete (set missing fields to null)
-- Focus on identifying ANY pathway direction changes (up/down/no_change)
-- Focus on identifying ANY phenotype effects
-- Drug name and cell line are the MOST important fields
-- If the paper mentions results but lacks specific numbers, still extract them with null for numeric fields
-- confidence can be 0.4-0.7 (acknowledging this is less certain)
-
-NEGATIVE RESULTS: "no_change" direction is important. Extract "not affected", "no significant change", "unchanged" as experiments with direction "no_change". Do NOT skip them.
-
-TABLE HANDLING: When you see table data, each row with different concentration/dose/cell line = separate experiment entry. Extract ALL rows.
-
-Keep: anti-hallucination rules (evidence_quote required), naming conventions
-
-NAMING CONVENTIONS (use exact names):
-Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
-Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50`;
-
-/**
- * 最小 Prompt：最后一次尝试，仅提取最关键信息
- */
-const MINIMAL_PROMPT = `You are extracting MINIMAL experimental data from a paper abstract.
-Focus ONLY on:
-- Drug/intervention name (REQUIRED)
-- Pathway names and their direction (up/down) (REQUIRED)
-- Phenotype names and their direction (up/down) (REQUIRED)
-Everything else can be null. Set confidence to 0.4.
-Keep: evidence_quote required, naming conventions.
-
-STANDARD NAMES (use exact names):
-Pathways: NF-κB, PI3K/AKT, MAPK/ERK, JAK/STAT, Wnt/β-catenin, Notch, TGF-β/SMAD, p53, mTOR, AMPK, HIF-1α, PD-1/PD-L1, EGFR, VEGF, ROS, ER Stress, Autophagy, Ferroptosis, Pyroptosis, Necroptosis, DNA Damage, DNA Repair, Cell Cycle, Apoptosis, AKT, ERK, JNK, p38 MAPK, STAT3, JAK2, PI3K, SMAD, β-catenin, Hedgehog, TME
-Phenotypes: Apoptosis, Cell Viability, Cell Proliferation, Cell Migration, Cell Invasion, Metastasis, EMT, Drug Resistance, Drug Sensitivity, Colony Formation, Cell Growth, Tumor Growth, Cytotoxicity, Cell Death, Necrosis, Angiogenesis, Tube Formation, Wound Healing, Immune Response, Inflammation, Inflammatory Response, T Cell Activation, T Cell Exhaustion, Macrophage Polarization, PD-L1 Expression, IC50`;
+// ===== 向后兼容：旧 prompt 常量 =====
+const ABSTRACT_PROMPT = buildPrompt("", "abstract");
+const RELAXED_PROMPT = buildPrompt("", "relaxed");
+const MINIMAL_PROMPT = buildPrompt("", "minimal");
 
 // ===== 智能截断 =====
 
@@ -490,7 +404,7 @@ export async function extractFromText(
     const llmParams = {
       model: extractionModel,
       max_tokens: maxTokens,
-      system: CORE_PROMPT,
+      system: buildPrompt(text, "standard"),
       messages: [{ role: "user" as const, content: userMessage }],
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: "tool" as const, name: "extract_paper_data" },
@@ -528,7 +442,7 @@ export async function extractFromText(
       retryFn: createRetryFunction(client, {
         model: extractionModel,
         maxTokens,
-        system: CORE_PROMPT,
+        system: buildPrompt(text, "standard"),
         userMessage,
         originalContent: userMessage,
         schema: ExtractionResultSchema,
@@ -808,6 +722,293 @@ export async function extractFromLongText(
   console.log(`[Extraction] 分段提取完成: ${getExperimentCount(merged)} 个实验 (来自 ${chunks.length} 个 chunk)`);
 
   return merged;
+}
+
+// ===== 两阶段提取 =====
+
+/**
+ * 阶段 1：识别结论框架
+ *
+ * 只提取 claim + conclusions 的标题，不提取实验细节。
+ * 速度快，token 少，用于确定"论文证明了哪几个结论"。
+ */
+const ConclusionFrameworkSchema = z.object({
+  claim: z.string().describe("论文的总体核心主张，一句话概括"),
+  conclusions: z.array(z.object({
+    claim: z.string().describe("结论标题，直接使用论文 Results 小标题或 Figure 描述"),
+    sectionHint: z.string().nullable().optional().describe("该结论在论文中的位置提示，如 'Results section 3.1' 或 'Fig 2'"),
+  })).describe("论文的核心结论列表（2-6个）"),
+});
+
+const FRAMEWORK_TOOL = createToolFromSchema(
+  "identify_conclusions",
+  "Identify the paper's main conclusions without extracting detailed experiments",
+  ConclusionFrameworkSchema,
+);
+
+const FRAMEWORK_PROMPT = `You are a biomedical literature analyst. Read this paper and identify its MAIN CONCLUSIONS.
+
+Rules:
+- Scan the Results section for sub-headings. Use them as conclusion claims.
+- If no sub-headings, group by main Figure (Fig 1=结论1, Fig 2=结论2).
+- Supplementary figures: same question as main figure → skip (will be merged later). New question → add as separate conclusion.
+- Output 2-6 conclusions. Each should be ONE specific finding, not a vague summary.
+- Include section/figure hints (e.g. "Results 3.1", "Fig 2") for each conclusion.
+- Output conclusion claims in Chinese (简体中文). Keep section/figure hints in English.`;
+
+/**
+ * 阶段 2：逐结论提取实验
+ *
+ * 对每个结论单独调用 LLM，提取该结论的 evidenceChain。
+ * Context 更聚焦，提取更精准。
+ */
+const ConclusionDetailSchema = z.object({
+  evidenceChain: z.array(ExperimentSchema).describe(
+    "支持此结论的实验证据链，按逻辑顺序排列。2-5 个实验。"
+  ),
+});
+
+const DETAIL_TOOL = createToolFromSchema(
+  "extract_evidence_chain",
+  "Extract the evidence chain supporting a specific conclusion",
+  ConclusionDetailSchema,
+);
+
+/**
+ * 两阶段提取主函数
+ *
+ * 阶段 1：识别结论框架（1 次 LLM 调用）
+ * 阶段 2：逐结论提取证据链（N 次 LLM 调用，N = 结论数）
+ *
+ * 优势：每次 LLM 只关注一个结论，提取更精准，不容易漏实验。
+ * 劣势：LLM 调用次数多，总耗时更长。
+ */
+export async function extractTwoPhase(
+  text: string,
+  title: string,
+  options?: { maxTokens?: number; onToken?: (event: SSEEvent) => void }
+): Promise<ExtractionResult> {
+  const client = getLLMClient();
+  const extractionModel = await getModelForFeature("extraction");
+  const truncatedText = smartTruncate(text);
+
+  // ===== 阶段 1：识别结论框架 =====
+  options?.onToken?.({ type: "progress", step: "识别论文结论框架...", current: 0, total: 1 });
+
+  const frameworkPrompt = buildPrompt(truncatedText, "standard")
+    + "\n\nIMPORTANT: For this step, ONLY identify the conclusions. Do NOT extract detailed experiments.";
+
+  const frameworkParams = {
+    model: extractionModel,
+    max_tokens: 2000,
+    system: frameworkPrompt,
+    messages: [{ role: "user" as const, content: `Identify the main conclusions of this paper:\n\nTitle: ${title}\n\nContent:\n${truncatedText}` }],
+    tools: [FRAMEWORK_TOOL],
+    tool_choice: { type: "tool" as const, name: "identify_conclusions" },
+  };
+
+  let framework: z.infer<typeof ConclusionFrameworkSchema>;
+  try {
+    const response = await client.messages.create({
+      ...frameworkParams,
+      _sciflowFeature: "extraction-phase1",
+    } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
+
+    const raw = await extractStructuredOutput(response, ConclusionFrameworkSchema, {
+      label: "extraction-phase1",
+      retryFn: createRetryFunction(client, {
+        model: extractionModel,
+        maxTokens: 2000,
+        system: frameworkPrompt,
+        userMessage: `Identify the main conclusions of this paper:\n\nTitle: ${title}\n\nContent:\n${truncatedText}`,
+        originalContent: truncatedText,
+        schema: ConclusionFrameworkSchema,
+        feature: "extraction-phase1",
+      }),
+    });
+    framework = raw as z.infer<typeof ConclusionFrameworkSchema>;
+  } catch (error) {
+    console.warn("[TwoPhase] 阶段1失败，回退到单次提取:", (error as Error)?.message);
+    return extractWithFallback(text, title, options);
+  }
+
+  if (!framework.conclusions || framework.conclusions.length === 0) {
+    console.warn("[TwoPhase] 阶段1返回空结论，回退到单次提取");
+    return extractWithFallback(text, title, options);
+  }
+
+  console.log(`[TwoPhase] 阶段1完成: ${framework.conclusions.length} 个结论`);
+
+  // ===== 阶段 2：逐结论提取证据链 =====
+  const conclusions: ConclusionResult[] = [];
+  const CONCURRENCY = 2; // 并发度（避免 API 限流）
+
+  const queue = [...framework.conclusions];
+  let completedCount = 0;
+
+  async function extractConclusionWorker() {
+    while (queue.length > 0) {
+      const conc = queue.shift()!;
+      completedCount++;
+      options?.onToken?.({
+        type: "progress",
+        step: `提取结论 ${completedCount}/${framework.conclusions.length}: ${conc.claim.slice(0, 50)}...`,
+        current: completedCount,
+        total: framework.conclusions.length,
+      });
+
+      const detailPrompt = buildPrompt(truncatedText, "standard")
+        + `\n\nFOCUS: Extract experiments that support THIS specific conclusion: "${conc.claim}"
+${conc.sectionHint ? `Look in: ${conc.sectionHint}` : ""}
+Extract 2-5 experiments in logical order. Each needs evidence_quote from the original text.`;
+
+      const detailParams = {
+        model: extractionModel,
+        max_tokens: 4000,
+        system: detailPrompt,
+        messages: [{ role: "user" as const, content: `Title: ${title}\n\nPaper content:\n${truncatedText}\n\nExtract experiments supporting: "${conc.claim}"` }],
+        tools: [DETAIL_TOOL],
+        tool_choice: { type: "tool" as const, name: "extract_evidence_chain" },
+      };
+
+      try {
+        const response = await client.messages.create({
+          ...detailParams,
+          _sciflowFeature: "extraction-phase2",
+        } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
+
+        const raw = await extractStructuredOutput(response, ConclusionDetailSchema, {
+          label: `extraction-phase2-${completedCount}`,
+        });
+
+        const detail = raw as z.infer<typeof ConclusionDetailSchema>;
+        if (detail.evidenceChain && detail.evidenceChain.length > 0) {
+          conclusions.push({ claim: conc.claim, evidenceChain: detail.evidenceChain });
+        }
+      } catch (error) {
+        console.warn(`[TwoPhase] 结论 "${conc.claim.slice(0, 40)}" 提取失败:`, (error as Error)?.message);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => extractConclusionWorker()));
+
+  if (conclusions.length === 0) {
+    console.warn("[TwoPhase] 阶段2全部失败，回退到单次提取");
+    return extractWithFallback(text, title, options);
+  }
+
+  const totalExps = conclusions.reduce((sum, c) => sum + c.evidenceChain.length, 0);
+  console.log(`[TwoPhase] 完成: ${conclusions.length} 个结论, ${totalExps} 个实验`);
+
+  return { claim: framework.claim, conclusions };
+}
+
+// ===== 完整性验证 =====
+
+/**
+ * 提取后验证：检查是否有遗漏的实验
+ *
+ * 用 LLM 对比论文原文和已提取结果，找出遗漏的实验。
+ * 比使用不同模型更便宜，但能显著减少遗漏。
+ */
+export async function verifyExtractionCompleteness(
+  text: string,
+  title: string,
+  currentResult: ExtractionResult,
+): Promise<ExtractionResult> {
+  const client = getLLMClient();
+  const extractionModel = await getModelForFeature("extraction");
+  const truncatedText = smartTruncate(text);
+
+  const currentExps = flattenConclusions(currentResult);
+  if (currentExps.length < 3) return currentResult; // 太少就不验证了
+
+  // 构建已提取摘要
+  const extractedSummary = currentResult.conclusions?.map(c =>
+    `结论: ${c.claim}\n  实验: ${c.evidenceChain.map(e =>
+      `${e.intervention?.target || "?"} (${e.intervention?.type || "?"}) → ${e.pathway_effects?.[0]?.pathway || "?"} ${e.pathway_effects?.[0]?.direction || "?"}`
+    ).join("; ")}`
+  ).join("\n") || "";
+
+  const MissingSchema = z.object({
+    hasMissing: z.boolean().describe("是否有遗漏的实验"),
+    missingExperiments: z.array(ExperimentSchema).describe("遗漏的实验列表，如果没有遗漏则为空数组"),
+    missingConclusions: z.array(z.object({
+      claim: z.string(),
+      evidenceChain: z.array(ExperimentSchema),
+    })).describe("遗漏的结论（如果论文有未覆盖的重要发现）"),
+  });
+
+  const verifyTool = createToolFromSchema(
+    "check_completeness",
+    "Check if any experiments were missed in the extraction",
+    MissingSchema,
+  );
+
+  const verifyPrompt = `You are verifying the completeness of a paper extraction.
+Compare the original paper text with the already-extracted results.
+Find any IMPORTANT experiments that were MISSED.
+
+Rules:
+- Only flag genuinely important missing experiments, not minor variations
+- Focus on: experiments with different cell lines, different drugs, in vivo vs in vivo, clinical data
+- Do NOT flag: duplicate experiments, minor methodological variations
+- If the extraction is reasonably complete, return hasMissing: false
+- Be CONSERVATIVE: better to miss a minor experiment than to add a false one`;
+
+  try {
+    const response = await client.messages.create({
+      model: extractionModel,
+      max_tokens: 4000,
+      system: verifyPrompt,
+      messages: [{
+        role: "user" as const,
+        content: `Title: ${title}\n\nPaper:\n${truncatedText.slice(0, 10000)}\n\nAlready extracted (${currentExps.length} experiments):\n${extractedSummary}\n\nAre there any IMPORTANT missing experiments or conclusions?`
+      }],
+      tools: [verifyTool],
+      tool_choice: { type: "tool" as const, name: "check_completeness" },
+      _sciflowFeature: "extraction-verify",
+    } as any) as import("@anthropic-ai/sdk/resources/messages").Message;
+
+    const raw = await extractStructuredOutput(response, MissingSchema, {
+      label: "extraction-verify",
+    });
+
+    const verification = raw as z.infer<typeof MissingSchema>;
+
+    if (!verification.hasMissing) {
+      console.log("[Verify] 提取完整性检查通过，无遗漏");
+      return currentResult;
+    }
+
+    // 合并遗漏的实验
+    const missingExps = verification.missingExperiments || [];
+    const missingConcs = verification.missingConclusions || [];
+
+    if (missingExps.length === 0 && missingConcs.length === 0) {
+      return currentResult;
+    }
+
+    console.log(`[Verify] 发现遗漏: ${missingExps.length} 个实验, ${missingConcs.length} 个结论`);
+
+    // 合并到现有结果
+    const existingConclusions = currentResult.conclusions || [];
+
+    // 遗漏的独立结论直接追加
+    const newConclusions = [...existingConclusions, ...missingConcs];
+
+    // 遗漏的实验追加到最后一个结论（如果没有指定归属）
+    if (missingExps.length > 0 && newConclusions.length > 0) {
+      const lastConc = newConclusions[newConclusions.length - 1];
+      lastConc.evidenceChain.push(...missingExps);
+    }
+
+    return { claim: currentResult.claim, conclusions: newConclusions };
+  } catch (error) {
+    console.warn("[Verify] 验证失败，返回原结果:", (error as Error)?.message);
+    return currentResult;
+  }
 }
 
 // ===== 批量提取 =====

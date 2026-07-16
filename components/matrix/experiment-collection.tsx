@@ -187,6 +187,7 @@ export const ExperimentCollection = memo(function ExperimentCollection({ extract
   const [viewingEvidence, setViewingEvidence] = useState<{ paperId: string; paperTitle: string; quote: string; pdfUrl?: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showCompare, setShowCompare] = useState(false);
+  const [showSelectMenu, setShowSelectMenu] = useState(false);
   const [groupBy, setGroupBy] = useState<"claim" | "role" | "tier" | "paper" | "none">("claim");
 
   // ===== 收集所有实验方法选项 =====
@@ -448,9 +449,18 @@ export const ExperimentCollection = memo(function ExperimentCollection({ extract
                           if (res.ok) {
                             const data = await res.json();
                             const pdfUrl = data.pdfUrl || data.oaUrl;
-                            if (pdfUrl) { setViewingEvidence({ paperId: ext.paperId, paperTitle: ext.paper.title || "", quote, pdfUrl }); return; }
+                            if (pdfUrl) {
+                              // 先检查 PDF 是否可用
+                              try {
+                                const pdfCheck = await fetch(pdfUrl, { method: "HEAD" });
+                                if (pdfCheck.ok && (pdfCheck.headers.get("content-type") || "").includes("pdf")) {
+                                  setViewingEvidence({ paperId: ext.paperId, paperTitle: ext.paper.title || "", quote, pdfUrl });
+                                  return;
+                                }
+                              } catch { /* PDF 不可用，降级到文本 */ }
+                            }
                           }
-                        } catch { /* fallback */ }
+                        } catch { /* fallback */}
                         setViewingEvidence({ paperId: ext.paperId, paperTitle: ext.paper.title || "", quote });
                       }}
                       className="text-left w-full group"
@@ -537,11 +547,90 @@ export const ExperimentCollection = memo(function ExperimentCollection({ extract
               </button>
             ))}
           </div>
-          {selectedIds.size > 0 && (
-            <button onClick={() => setShowCompare(true)}
-              className="px-2.5 py-1.5 text-xs border border-purple-300 bg-purple-50 text-purple-600 rounded-lg flex items-center gap-1 hover:bg-purple-100">
-              <GitCompare size={12} /> 对比 ({selectedIds.size})
+          {/* 全选下拉菜单 */}
+          <div className="relative">
+            <button onClick={() => setShowSelectMenu(!showSelectMenu)}
+              className={`px-2.5 py-1.5 text-xs border rounded-lg flex items-center gap-1 transition-colors ${
+                selectedIds.size > 0
+                  ? "border-blue-300 bg-blue-50 text-blue-600"
+                  : "border-gray-200 text-gray-500 hover:bg-gray-50"
+              }`}>
+              {selectedIds.size > 0 ? `已选 ${selectedIds.size}` : "全选"}
+              <ChevronDown size={10} />
             </button>
+            {showSelectMenu && (
+              <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+                <button onClick={() => {
+                  setSelectedIds(new Set(filteredExtractions.map(ext => ext.id)));
+                  setShowSelectMenu(false);
+                }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50">
+                  全选当前筛选结果 ({filteredExtractions.length})
+                </button>
+                <button onClick={() => {
+                  setSelectedIds(new Set());
+                  setShowSelectMenu(false);
+                }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-400">
+                  取消全选
+                </button>
+                <div className="border-t border-gray-100 my-1" />
+                {/* 按论文选择 */}
+                {[...new Set(filteredExtractions.map(e => e.paper.title))].map(title => {
+                  const count = filteredExtractions.filter(e => e.paper.title === title).length;
+                  return (
+                    <button key={title} onClick={() => {
+                      const ids = filteredExtractions.filter(e => e.paper.title === title).map(e => e.id);
+                      setSelectedIds(prev => { const next = new Set(prev); ids.forEach(id => next.add(id)); return next; });
+                      setShowSelectMenu(false);
+                    }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 truncate">
+                      📄 {title.slice(0, 30)}... ({count})
+                    </button>
+                  );
+                })}
+                <div className="border-t border-gray-100 my-1" />
+                {/* 按实验类型选择 */}
+                {[...new Set(filteredExtractions.map(e => (e as unknown as Record<string, unknown>).experimentTier as string || "in_vitro"))].map(tier => {
+                  const count = filteredExtractions.filter(e => ((e as unknown as Record<string, unknown>).experimentTier as string || "in_vitro") === tier).length;
+                  const labels: Record<string, string> = { in_vitro: "🧫 体外实验", in_vivo: "🐁 体内实验", clinical: "🏥 临床/患者", computational: "💻 生信/组学" };
+                  return (
+                    <button key={tier} onClick={() => {
+                      const ids = filteredExtractions.filter(e => ((e as unknown as Record<string, unknown>).experimentTier as string || "in_vitro") === tier).map(e => e.id);
+                      setSelectedIds(prev => { const next = new Set(prev); ids.forEach(id => next.add(id)); return next; });
+                      setShowSelectMenu(false);
+                    }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50">
+                      {labels[tier] || tier} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {selectedIds.size > 0 && (
+            <>
+              <button onClick={() => setShowCompare(true)}
+                className="px-2.5 py-1.5 text-xs border border-purple-300 bg-purple-50 text-purple-600 rounded-lg flex items-center gap-1 hover:bg-purple-100">
+                <GitCompare size={12} /> 对比 ({selectedIds.size})
+              </button>
+              <button onClick={async () => {
+                if (!confirm(`确定删除选中的 ${selectedIds.size} 条实验记录？此操作不可撤销。`)) return;
+                const ids = Array.from(selectedIds);
+                const results = await Promise.allSettled(
+                  ids.map(id => fetch(`/api/projects/${encodeURIComponent(projectId)}/extractions?id=${id}`, { method: "DELETE" }))
+                );
+                const successCount = results.filter(r => r.status === "fulfilled" && (r as PromiseFulfilledResult<Response>).value.ok).length;
+                const failCount = ids.length - successCount;
+                if (successCount > 0) {
+                  toast.success(`已删除 ${successCount} 条记录`);
+                  onDelete?.();
+                  setSelectedIds(new Set());
+                }
+                if (failCount > 0) {
+                  toast.error(`${failCount} 条删除失败`);
+                }
+              }}
+                className="px-2.5 py-1.5 text-xs border border-red-300 bg-red-50 text-red-600 rounded-lg flex items-center gap-1 hover:bg-red-100">
+                <Trash2 size={12} /> 删除 ({selectedIds.size})
+              </button>
+            </>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -586,7 +675,21 @@ export const ExperimentCollection = memo(function ExperimentCollection({ extract
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               <th className="w-6 px-1 py-2" />
-              <th className="w-8 px-1 py-2" />
+              <th className="w-10 px-2 py-2">
+                <input type="checkbox"
+                  checked={filteredExtractions.length > 0 && filteredExtractions.every(ext => selectedIds.has(ext.id))}
+                  onChange={() => {
+                    const allSelected = filteredExtractions.every(ext => selectedIds.has(ext.id));
+                    if (allSelected) {
+                      setSelectedIds(new Set());
+                    } else {
+                      setSelectedIds(new Set(filteredExtractions.map(ext => ext.id)));
+                    }
+                  }}
+                  className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                  title="全选/取消全选"
+                />
+              </th>
               <th className="text-left px-2 py-2 font-medium text-gray-600 cursor-pointer select-none hover:bg-gray-100" onClick={() => toggleSort("paper")}>
                 <span className="inline-flex items-center">论文{getSortIcon("paper")}</span>
               </th>

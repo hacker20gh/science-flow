@@ -42,6 +42,8 @@ export function mapExtractionToDB(experiment: Record<string, unknown>, paperId: 
     experimentRole: experiment.role || null,
     conclusionIndex: (experiment as Record<string, unknown>).conclusionIndex ?? null,
     conclusionClaim: (experiment as Record<string, unknown>).conclusionClaim || null,
+    evidenceFigure: experiment.evidence_figure || null,
+    evidenceTable: experiment.evidence_table || null,
   };
 }
 

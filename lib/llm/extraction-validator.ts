@@ -221,18 +221,42 @@ export function validateExtraction(result: ExtractionResult): ExtractionValidati
   const overallQuality: ExtractionValidation["overallQuality"] =
     averageScore >= 70 ? "good" : averageScore >= 40 ? "partial" : "poor";
 
+  // 保留原始结论结构，只替换验证后的实验
+  // 用 validation index 追踪每个实验对应的验证结果
+  let validationIdx = 0;
+  const cleanedConclusions = (result.conclusions || []).map(conc => {
+    const cleanedChain = conc.evidenceChain.map(() => {
+      const v = validations[validationIdx];
+      validationIdx++;
+      return v.cleaned;
+    });
+    return { claim: conc.claim, evidenceChain: cleanedChain };
+  });
+
+  // 如果没有 conclusions（旧格式），用兼容方式
+  if (cleanedConclusions.length === 0) {
+    return {
+      overallQuality,
+      averageScore,
+      experimentValidations: validations,
+      totalIssues,
+      autoFixedCount,
+      cleaned: {
+        claim: result.claim,
+        conclusions: validations.map((v, i) => ({
+          claim: (v.cleaned as ExperimentResult & { conclusionClaim?: string }).conclusionClaim || `实验 ${i + 1}`,
+          evidenceChain: [v.cleaned],
+        })),
+      },
+    };
+  }
+
   return {
     overallQuality,
     averageScore,
     experimentValidations: validations,
     totalIssues,
     autoFixedCount,
-    cleaned: {
-      claim: undefined,
-      conclusions: validations.map((v, i) => ({
-        claim: (v.cleaned as ExperimentResult & { conclusionClaim?: string }).conclusionClaim || `实验 ${i + 1}`,
-        evidenceChain: [v.cleaned],
-      })),
-    },
+    cleaned: { claim: result.claim, conclusions: cleanedConclusions },
   };
 }

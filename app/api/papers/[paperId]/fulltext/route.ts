@@ -30,7 +30,7 @@ export async function GET(
     if (paper.pmid) {
       try {
         const pmcRes = await fetch(
-          `https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?ids=${paper.pmid}&format=json`,
+          `https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids=${paper.pmid}&format=json`,
           { signal: AbortSignal.timeout(10000) }
         );
         if (pmcRes.ok) {
