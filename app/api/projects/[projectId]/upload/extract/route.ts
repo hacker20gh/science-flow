@@ -6,7 +6,7 @@ import { extractFromText, smartTruncate, flattenConclusions } from "@/lib/llm/ex
 import { validateExtraction } from "@/lib/llm/extraction-validator";
 import { postProcessExtractions } from "@/lib/llm/extraction-postprocess";
 import { prisma } from "@/lib/db-server";
-import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
+import { saveExtractionsToDB } from "@/lib/extraction-mapper";
 import { requireProjectAccess } from "@/lib/api-auth";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
@@ -70,47 +70,16 @@ export async function POST(req: NextRequest) {
           const flatExps = processedConclusions.flatMap((conc, i) =>
             conc.evidenceChain.map(exp => ({ ...exp, conclusionIndex: i, conclusionClaim: conc.claim }))
           );
+
+          const shortName = safeFileName.length > 25 ? safeFileName.slice(0, 25) + "…" : safeFileName;
+
           await prisma.$transaction(async (tx: any) => {
-            for (const exp of flatExps) {
-              const record = await tx.extraction.create({
-                data: mapExtractionToDB(exp, paperId),
-              });
-
-              // 创建关联的关系型通路/表型效果
-              const { pathwayEffects, phenotypeEffects } = extractRelationalEffects(exp);
-
-              if (pathwayEffects.length > 0) {
-                await tx.pathwayEffect.createMany({
-                  data: pathwayEffects.map(pe => ({
-                    extractionId: record.id,
-                    pathway: pe.pathway,
-                    direction: pe.direction,
-                    significance: pe.significance,
-                    method: pe.method,
-                  })),
-                });
-              }
-
-              if (phenotypeEffects.length > 0) {
-                await tx.phenotypeEffect.createMany({
-                  data: phenotypeEffects.map(ph => ({
-                    extractionId: record.id,
-                    phenotype: ph.phenotype,
-                    direction: ph.direction,
-                    foldChange: ph.foldChange,
-                  })),
-                });
-              }
-            }
-
-            const shortName = safeFileName.length > 25 ? safeFileName.slice(0, 25) + "…" : safeFileName;
-            await tx.timelineEvent.create({
-              data: {
-                projectId,
-                type: "literature",
-                title: `从 PDF 提取了 ${flatExps.length} 条数据：${shortName}`,
-                content: { paperId, fileName: safeFileName, count: flatExps.length },
-              },
+            await saveExtractionsToDB({
+              tx,
+              paperId,
+              projectId,
+              experiments: flatExps,
+              sourceLabel: `从 PDF 提取了 ${flatExps.length} 条数据：${shortName}`,
             });
           });
         }

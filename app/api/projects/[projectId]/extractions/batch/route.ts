@@ -1,22 +1,24 @@
 import { NextRequest } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
-import { mapExtractionToDB, extractRelationalEffects } from "@/lib/extraction-mapper";
+import { saveExtractionsToDB } from "@/lib/extraction-mapper";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return Response.json({ error: "未登录" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
 
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
+
+  // 验证项目所有权
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();
@@ -37,58 +39,19 @@ export async function POST(
       return Response.json({ error: "文献不存在或不属于此项目" }, { status: 404 });
     }
 
-    const created = await prisma.$transaction(async (tx: any) => {
-      const results: any[] = [];
+    const shortTitle = paper.title.length > 30 ? paper.title.slice(0, 30) + "…" : paper.title;
 
-      for (const ext of extractions) {
-        const record = await tx.extraction.create({
-          data: mapExtractionToDB(ext, paperId),
-        });
-
-        // 创建关联的关系型通路/表型效果
-        const { pathwayEffects, phenotypeEffects } = extractRelationalEffects(ext);
-
-        if (pathwayEffects.length > 0) {
-          await tx.pathwayEffect.createMany({
-            data: pathwayEffects.map(pe => ({
-              extractionId: record.id,
-              pathway: pe.pathway,
-              direction: pe.direction,
-              significance: pe.significance,
-              method: pe.method,
-              foldChange: pe.foldChange,
-            })),
-          });
-        }
-
-        if (phenotypeEffects.length > 0) {
-          await tx.phenotypeEffect.createMany({
-            data: phenotypeEffects.map(ph => ({
-              extractionId: record.id,
-              phenotype: ph.phenotype,
-              direction: ph.direction,
-              foldChange: ph.foldChange,
-            })),
-          });
-        }
-
-        results.push(record);
-      }
-
-      const shortTitle = paper.title.length > 30 ? paper.title.slice(0, 30) + "…" : paper.title;
-      await tx.timelineEvent.create({
-        data: {
-          projectId,
-          type: "literature",
-          title: `提取了 ${extractions.length} 条数据：${shortTitle}`,
-          content: { paperId, paperTitle: paper.title, count: extractions.length },
-        },
+    const savedCount = await prisma.$transaction(async (tx: any) => {
+      return saveExtractionsToDB({
+        tx,
+        paperId,
+        projectId,
+        experiments: extractions,
+        sourceLabel: `${extractions.length} 条数据：${shortTitle}`,
       });
-
-      return results;
     });
 
-    return Response.json({ saved: created.length, extractions: created }, { status: 201 });
+    return Response.json({ saved: savedCount }, { status: 201 });
   } catch (error) {
     console.error("Failed to batch save extractions:", error);
     return Response.json({ error: "批量保存提取结果失败" }, { status: 500 });
