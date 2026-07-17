@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { prefetchProjectData } from "@/lib/api-cache";
 import {
   FolderOpen,
   BookOpen,
@@ -37,6 +38,11 @@ const globalNav = [
 function ProjectNav({ projectId, onNavigate }: { projectId: string; onNavigate?: () => void }) {
   const pathname = usePathname();
   const base = `/project/${projectId}`;
+
+  // 首次渲染时预取项目数据
+  useEffect(() => {
+    prefetchProjectData(projectId);
+  }, [projectId]);
 
   const items = [
     { label: "概览", href: base, icon: LayoutDashboard },

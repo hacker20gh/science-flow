@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { Timeline } from "@/components/timeline/timeline";
 import { TimelineSkeleton } from "@/components/skeletons";
 import type { TimelineEvent, TimelineEventType } from "@/lib/timeline/events";
+import { cachedFetch } from "@/lib/api-cache";
 
 // 本地 demo 数据 — 仅当 DB 为空时显示，不影响其他项目
 const DEMO_EVENTS: TimelineEvent[] = [
@@ -26,28 +27,27 @@ export default function TimelinePage() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newEvent, setNewEvent] = useState({ type: "pivot" as TimelineEventType, title: "", description: "" });
 
-  // 加载事件列表
+  // 加载事件列表（使用缓存，sidebar 预取后秒级返回）
   const loadEvents = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/timeline`);
-      if (res.ok) {
-        const d = await res.json();
-        if (d.events && d.events.length > 0) {
-          setDbEvents(
-            d.events.map((e: Record<string, unknown>) => ({
-              id: e.id as string,
-              type: e.type as TimelineEvent["type"],
-              title: e.title as string,
-              description: ((e.content as Record<string, unknown>)?.description as string) || "",
-              timestamp: new Date(e.createdAt as string),
-              content: e.content as Record<string, unknown> | undefined,
-              metadata: e.metadata as Record<string, unknown> | undefined,
-            }))
-          );
-          setShowDemo(false);
-        } else {
-          setShowDemo(true);
-        }
+      const d = await cachedFetch<{ events: Record<string, unknown>[] }>(
+        `/api/projects/${projectId}/timeline?pageSize=50`
+      );
+      if (d.events && d.events.length > 0) {
+        setDbEvents(
+          d.events.map((e) => ({
+            id: e.id as string,
+            type: e.type as TimelineEvent["type"],
+            title: e.title as string,
+            description: ((e.content as Record<string, unknown>)?.description as string) || "",
+            timestamp: new Date(e.createdAt as string).getTime(),
+            content: e.content as Record<string, unknown> | undefined,
+            metadata: e.metadata as Record<string, unknown> | undefined,
+          }))
+        );
+        setShowDemo(false);
+      } else {
+        setShowDemo(true);
       }
     } catch {
       setShowDemo(true);
