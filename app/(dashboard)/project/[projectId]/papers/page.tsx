@@ -12,6 +12,7 @@ import { useExtractionStore } from "@/stores/extraction-store";
 import { consumeSSEStream } from "@/lib/llm/sse-consumer";
 import { toast } from "sonner";
 import { exportToBibtex, exportToRis, downloadFile } from "@/lib/export";
+import { cachedFetch } from "@/lib/api-cache";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,13 +81,30 @@ export default function PapersPage() {
   const [showZoteroImport, setShowZoteroImport] = useState(false);
   const [dismissedUnextracted, setDismissedUnextracted] = useState(false);
 
+  // 期刊指标
+  const [journalMetrics, setJournalMetrics] = useState<Record<string, { impactFactor: number | null; jcrQuartile: string | null; casZone: string | null; isWarning: boolean }>>({});
+
   useEffect(() => {
-    fetch(`/api/projects/${projectId}/papers`)
-      .then((r) => r.json())
+    cachedFetch<{ papers: Paper[] }>(`/api/projects/${projectId}/papers`)
       .then((d) => setPapers(d.papers || []))
       .catch(() => setPapers([]))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  // 获取期刊指标（IF、分区等）
+  useEffect(() => {
+    const journals = [...new Set(papers.map(p => p.journal).filter(Boolean))] as string[];
+    if (journals.length === 0) return;
+
+    fetch("/api/journal-metrics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ journals }),
+    })
+      .then(r => r.json())
+      .then(data => { if (data.metrics) setJournalMetrics(data.metrics); })
+      .catch(() => {});
+  }, [papers]);
 
   // 请求浏览器通知权限
   useEffect(() => {
@@ -546,6 +564,7 @@ export default function PapersPage() {
                     onDelete={() => handleDelete(paper.id)}
                     projectId={projectId}
                     onExtractionDone={setPapers}
+                    journalMetrics={journalMetrics}
                   />
                 ))}
               </div>
@@ -706,7 +725,7 @@ function DoiQuickImport({ projectId, onImported }: { projectId: string; onImport
 // ===== 论文卡片组件 =====
 
 const PaperCard = memo(function PaperCard({
-  paper, expanded, onToggle, selected, onSelect, onDelete, projectId, onExtractionDone, onExtractionNotify,
+  paper, expanded, onToggle, selected, onSelect, onDelete, projectId, onExtractionDone, onExtractionNotify, journalMetrics,
 }: {
   paper: Paper;
   expanded: boolean;
@@ -717,6 +736,7 @@ const PaperCard = memo(function PaperCard({
   projectId: string;
   onExtractionDone: React.Dispatch<React.SetStateAction<Paper[]>>;
   onExtractionNotify?: (title: string, body: string, isError?: boolean) => void;
+  journalMetrics?: Record<string, { impactFactor: number | null; jcrQuartile: string | null; casZone: string | null; isWarning: boolean }>;
 }) {
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -895,6 +915,43 @@ const PaperCard = memo(function PaperCard({
               }`}>
                 {SOURCE_LABELS[paper.source] || paper.source}
               </span>
+            )}
+            {/* 期刊指标（IF、分区、预警） */}
+            {paper.journal && journalMetrics?.[paper.journal] && (
+              <>
+                {journalMetrics[paper.journal].jcrQuartile && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                    journalMetrics[paper.journal].jcrQuartile === "Q1"
+                      ? "bg-amber-50 text-amber-700 border border-amber-200"
+                      : journalMetrics[paper.journal].jcrQuartile === "Q2"
+                        ? "bg-blue-50 text-blue-600 border border-blue-200"
+                        : "bg-gray-100 text-gray-500 border border-gray-200"
+                  }`}>
+                    {journalMetrics[paper.journal].jcrQuartile}
+                  </span>
+                )}
+                {journalMetrics[paper.journal].casZone && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                    journalMetrics[paper.journal].casZone === "1区"
+                      ? "bg-red-50 text-red-600"
+                      : journalMetrics[paper.journal].casZone === "2区"
+                        ? "bg-orange-50 text-orange-600"
+                        : "bg-gray-100 text-gray-500"
+                  }`}>
+                    中科院{journalMetrics[paper.journal].casZone}
+                  </span>
+                )}
+                {journalMetrics[paper.journal].impactFactor && journalMetrics[paper.journal].impactFactor! > 0 && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-600">
+                    IF {journalMetrics[paper.journal].impactFactor}
+                  </span>
+                )}
+                {journalMetrics[paper.journal].isWarning && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+                    ⚠ 预警
+                  </span>
+                )}
+              </>
             )}
             {paper.extractions.length > 0 && (
               <>
