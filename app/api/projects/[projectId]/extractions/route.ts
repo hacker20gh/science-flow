@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db-server";
-import { mapExtractionToDB } from "@/lib/extraction-mapper";
+import { saveExtractionsToDB } from "@/lib/extraction-mapper";
+import { requireAuth, requireProjectAccess } from "@/lib/api-auth";
 
 export async function GET(
   req: NextRequest,
@@ -39,16 +39,18 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return Response.json({ error: "未登录" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
 
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
   }
 
   const { projectId } = await params;
+
+  // 验证项目所有权
+  const accessResult = await requireProjectAccess(projectId, authResult.userId);
+  if ("error" in accessResult) return accessResult.error;
 
   try {
     const body = await req.json();
@@ -66,25 +68,19 @@ export async function POST(
       return Response.json({ error: "文献不存在或不属于此项目" }, { status: 404 });
     }
 
-    await prisma.$transaction(async (tx: any) => {
-      for (const ext of extractions) {
-        await tx.extraction.create({
-          data: mapExtractionToDB(ext, paperId),
-        });
-      }
+    const shortTitle = paper.title.length > 30 ? paper.title.slice(0, 30) + "…" : paper.title;
 
-      const shortTitle = paper.title.length > 30 ? paper.title.slice(0, 30) + "…" : paper.title;
-      await tx.timelineEvent.create({
-        data: {
-          projectId,
-          type: "literature",
-          title: `提取了 ${extractions.length} 条数据：${shortTitle}`,
-          content: { paperId, paperTitle: paper.title, count: extractions.length },
-        },
+    const savedCount = await prisma.$transaction(async (tx: any) => {
+      return saveExtractionsToDB({
+        tx,
+        paperId,
+        projectId,
+        experiments: extractions,
+        sourceLabel: `${extractions.length} 条数据：${shortTitle}`,
       });
     });
 
-    return Response.json({ count: extractions.length }, { status: 201 });
+    return Response.json({ count: savedCount }, { status: 201 });
   } catch (error) {
     console.error("Failed to save extractions:", error);
     return Response.json({ error: "保存提取结果失败" }, { status: 500 });
@@ -95,10 +91,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return Response.json({ error: "未登录" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
 
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });
@@ -128,10 +122,8 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return Response.json({ error: "未登录" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if ("error" in authResult) return authResult.error;
 
   if (!prisma) {
     return Response.json({ error: "数据库未配置" }, { status: 503 });

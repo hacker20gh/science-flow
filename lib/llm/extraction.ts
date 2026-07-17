@@ -169,9 +169,10 @@ export function flattenConclusions(result: ExtractionResult): ExperimentResult[]
  */
 export function getExperimentCount(result: ExtractionResult): number {
   if (result.conclusions && result.conclusions.length > 0) {
-    return result.conclusions.reduce((sum, c) => sum + c.evidenceChain.length, 0);
+    return result.conclusions.reduce((sum, c) => sum + (c.evidenceChain?.length || 0), 0);
   }
-  return (result as unknown as { experiments?: ExperimentResult[] }).experiments?.length || 0;
+  const exps = (result as unknown as { experiments?: unknown }).experiments;
+  return Array.isArray(exps) ? exps.length : 0;
 }
 
 // ===== Tool 定义 =====
@@ -952,7 +953,7 @@ Find any IMPORTANT experiments that were MISSED.
 
 Rules:
 - Only flag genuinely important missing experiments, not minor variations
-- Focus on: experiments with different cell lines, different drugs, in vivo vs in vivo, clinical data
+- Focus on: experiments with different cell lines, different drugs, in vivo vs in vitro, clinical data
 - Do NOT flag: duplicate experiments, minor methodological variations
 - If the extraction is reasonably complete, return hasMissing: false
 - Be CONSERVATIVE: better to miss a minor experiment than to add a false one`;

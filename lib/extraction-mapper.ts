@@ -99,3 +99,87 @@ export function extractRelationalEffects(experiment: Record<string, unknown>): {
 
   return { pathwayEffects, phenotypeEffects };
 }
+
+// ===== 统一提取保存管线 =====
+
+interface SaveExtractionsOptions {
+  /** Prisma 事务客户端 */
+  tx: any;
+  /** 目标论文 ID */
+  paperId: string;
+  /** 所属项目 ID（用于 TimelineEvent） */
+  projectId: string;
+  /** 扁平化的实验数组（已含 conclusionIndex / conclusionClaim） */
+  experiments: Record<string, unknown>[];
+  /** 用于 TimelineEvent 的标题片段 */
+  sourceLabel?: string;
+}
+
+/**
+ * 统一的提取结果保存管线
+ *
+ * 幂等：先删除该论文的旧 extraction 记录（cascade 自动清理关联表），
+ * 再创建新记录。确保"重新提取"不会导致数据翻倍。
+ *
+ * 所有保存路径（/extractions POST、/extractions/batch POST、/upload/extract POST）
+ * 必须通过此函数保存，保证一致性。
+ */
+export async function saveExtractionsToDB(options: SaveExtractionsOptions): Promise<number> {
+  const { tx, paperId, projectId, experiments, sourceLabel } = options;
+
+  // 1. 幂等保护：删除该论文的旧提取记录
+  //    Extraction → PathwayEffect / PhenotypeEffect 通过 onDelete: Cascade 自动清理
+  const deleted = await tx.extraction.deleteMany({ where: { paperId } });
+  if (deleted.count > 0) {
+    console.log(`[SaveExtractions] 清除旧记录: ${deleted.count} 条 (paperId: ${paperId.slice(0, 10)})`);
+  }
+
+  // 2. 批量创建新记录
+  for (const exp of experiments) {
+    const record = await tx.extraction.create({
+      data: mapExtractionToDB(exp, paperId),
+    });
+
+    // 3. 创建关系型通路/表型效果
+    const { pathwayEffects, phenotypeEffects } = extractRelationalEffects(exp);
+
+    if (pathwayEffects.length > 0) {
+      await tx.pathwayEffect.createMany({
+        data: pathwayEffects.map(pe => ({
+          extractionId: record.id,
+          pathway: pe.pathway,
+          direction: pe.direction,
+          significance: pe.significance,
+          method: pe.method,
+          foldChange: pe.foldChange,
+        })),
+      });
+    }
+
+    if (phenotypeEffects.length > 0) {
+      await tx.phenotypeEffect.createMany({
+        data: phenotypeEffects.map(ph => ({
+          extractionId: record.id,
+          phenotype: ph.phenotype,
+          direction: ph.direction,
+          foldChange: ph.foldChange,
+        })),
+      });
+    }
+  }
+
+  // 4. 记录时间线事件
+  const label = sourceLabel || `${experiments.length} 条数据`;
+  await tx.timelineEvent.create({
+    data: {
+      projectId,
+      type: "literature",
+      title: deleted.count > 0
+        ? `重新提取了 ${label}`
+        : `提取了 ${label}`,
+      content: { paperId, count: experiments.length, isReExtraction: deleted.count > 0 },
+    },
+  });
+
+  return experiments.length;
+}

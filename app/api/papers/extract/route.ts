@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 如果有 paperId，批量从 DB 查询 fullText + oaUrl（一次查询，避免 N+1）
+    // 同时验证论文属于当前用户的项目（安全检查）
     const dbFullTexts: Record<string, string> = {};
     const paperIds = papers.filter(p => p.paperId && !p.fullText).map(p => p.paperId);
     if (paperIds.length > 0) {
@@ -58,7 +59,10 @@ export async function POST(req: NextRequest) {
           // 用局部变量收窄类型，确保 async 闭包中不会丢失 null 收窄
           const db = prisma;
           const dbPapers = await db.paper.findMany({
-            where: { id: { in: paperIds } },
+            where: {
+              id: { in: paperIds },
+              project: { userId: session.user.id! },  // 只查询属于当前用户的项目
+            },
             select: { id: true, title: true, fullText: true, oaUrl: true, doi: true, pmid: true },
           });
 
