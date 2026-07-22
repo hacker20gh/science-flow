@@ -115,6 +115,23 @@ export const ExtractionResultSchema = z.object({
   claim: z.string().optional().describe(
     "论文的总体核心主张 — 一句话概括这篇论文的主要贡献。"
   ),
+  articleType: z.enum([
+    "研究论文", "综述", "系统综述", "Meta 分析", "RCT", "临床试验",
+    "病例报告", "观察性研究", "生信/组学", "临床指南", "其他",
+  ]).optional().describe(
+    "论文类型: " +
+    "研究论文(原始实验研究，有自己采集的数据和结论), " +
+    "综述(对已有文献的总结评述，无新实验数据), " +
+    "系统综述(按PRISMA等规范系统检索和评价文献), " +
+    "Meta 分析(用统计方法合并多项研究的结果), " +
+    "RCT(随机对照试验), " +
+    "临床试验(非随机的临床研究，如队列/前后对照), " +
+    "病例报告(单个或多个病例的描述), " +
+    "观察性研究(队列/病例对照/横断面研究), " +
+    "生信/组学(纯计算分析：scRNA-seq/GWAS/分子对接/网络药理学等), " +
+    "临床指南(诊疗规范/专家共识), " +
+    "其他(社论/信件/勘误等)"
+  ),
   conclusions: z.array(ConclusionSchema).optional().describe(
     "论文的核心结论列表（通常 2-4 个），每个结论下面挂一组实验证据链。" +
     "结论之间应该有逻辑递进关系。"
@@ -129,16 +146,18 @@ export const ExtractionResultSchema = z.object({
  */
 export function normalizeExtractionResult(data: unknown): ExtractionResult {
   const d = data as Record<string, unknown>;
+  const articleType = d.articleType as ExtractionResult["articleType"];
   if (d.conclusions && Array.isArray(d.conclusions) && d.conclusions.length > 0) {
-    return { claim: d.claim as string | undefined, conclusions: d.conclusions as ConclusionResult[] };
+    return { claim: d.claim as string | undefined, articleType, conclusions: d.conclusions as ConclusionResult[] };
   }
   if (d.experiments && Array.isArray(d.experiments) && d.experiments.length > 0) {
     return {
       claim: d.claim as string | undefined,
+      articleType,
       conclusions: [{ claim: (d.claim as string) || "论文的主要发现", evidenceChain: d.experiments as ExperimentResult[] }],
     };
   }
-  return { claim: d.claim as string | undefined, conclusions: [] };
+  return { claim: d.claim as string | undefined, articleType, conclusions: [] };
 }
 
 export type ConclusionResult = z.infer<typeof ConclusionSchema>;
@@ -189,6 +208,21 @@ const EXTRACTION_TOOL = createToolFromSchema(
 
 /** 核心 prompt（~50行）— 每次都用 */
 const PROMPT_CORE = `You are a biomedical literature analysis expert. Extract structured experimental data.
+
+STEP 0 — PAPER TYPE: Classify the paper type FIRST (before extraction).
+- 研究论文: Original research with new experimental data and conclusions
+- 综述: Narrative review, overview, or summary of existing literature (no new data)
+- 系统综述: Systematic review following PRISMA/similar protocols
+- Meta 分析: Statistical pooling of multiple studies' results
+- RCT: Randomized controlled trial
+- 临床试验: Non-randomized clinical study (cohort, before-after, single-arm)
+- 病例报告: Case report or case series
+- 观察性研究: Cohort, case-control, or cross-sectional study
+- 生信/组学: Pure computational analysis (scRNA-seq, GWAS, docking, network pharmacology)
+- 临床指南: Clinical practice guideline or expert consensus
+- 其他: Editorial, letter, erratum, etc.
+
+Key distinction: If the paper presents NEW experimental data → 研究论文. If it only summarizes OTHER papers' data → 综述/系统综述/Meta.
 
 STEP 1 — CLAIM: Identify the paper's overall claim (Abstract conclusion or Discussion). One sentence.
 
@@ -1049,4 +1083,132 @@ export async function batchExtract(
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   return results;
+}
+
+// ===== 轻量级论文类型分类（搜索结果用） =====
+
+const ARTICLE_TYPES = [
+  "研究论文", "综述", "系统综述", "Meta 分析", "RCT", "临床试验",
+  "病例报告", "观察性研究", "生信/组学", "临床指南", "其他",
+] as const;
+
+export type ArticleType = typeof ARTICLE_TYPES[number];
+
+const ClassifyResultSchema = z.object({
+  classifications: z.array(z.object({
+    index: z.number().describe("论文在列表中的索引（0-based）"),
+    type: z.enum(ARTICLE_TYPES).describe("论文类型"),
+  })).describe("每篇论文的分类结果"),
+});
+
+const CLASSIFY_TOOL = createToolFromSchema(
+  "classify_papers",
+  "Classify academic papers by type",
+  ClassifyResultSchema,
+);
+
+const CLASSIFY_PROMPT = `You are an academic paper classifier. Classify each paper into ONE type.
+
+Types:
+- 研究论文: Original research with NEW experimental data
+- 综述: Narrative review, overview, summary of existing literature (no new data)
+- 系统综述: Systematic review (PRISMA, structured search protocol)
+- Meta 分析: Statistical pooling of multiple studies
+- RCT: Randomized controlled trial
+- 临床试验: Non-randomized clinical study
+- 病例报告: Case report or case series
+- 观察性研究: Cohort, case-control, cross-sectional
+- 生信/组学: Pure computational (scRNA-seq, GWAS, docking, network pharmacology)
+- 临床指南: Clinical guideline or expert consensus
+- 其他: Editorial, letter, erratum, etc.
+
+Rules:
+- Title is the PRIMARY signal. Abstract confirms.
+- "X: a review" or "Recent advances in X" → 综述
+- "meta-analysis" in title → Meta 分析
+- "systematic review" in title → 系统综述
+- If title has "review" but also "randomized/trial/experiment" → 研究论文 (NOT 综述)
+- Default to 研究论文 if uncertain`;
+
+/**
+ * 轻量级论文类型批量分类
+ *
+ * 只用标题+摘要，一次 LLM 调用分类所有论文。
+ * 比 regex 准确率高得多，比全文提取便宜得多。
+ *
+ * @param papers 论文列表（需包含 title 和 abstract）
+ * @returns Map<索引, 文章类型>
+ */
+export async function classifyPaperTypes(
+  papers: Array<{ title: string; abstract?: string | null }>
+): Promise<Map<number, ArticleType>> {
+  const result = new Map<number, ArticleType>();
+
+  if (papers.length === 0) return result;
+
+  try {
+    const { getOpenAIClient, MODELS } = await import("@/lib/llm/client");
+    const openai = getOpenAIClient();
+    if (!openai) {
+      console.warn("[Classify] OpenAI 客户端未配置");
+      return result;
+    }
+
+    const model = MODELS.extraction;
+
+    // 分批分类（每批 10 篇，减少单次 LLM 调用时间）
+    const BATCH_SIZE = 10;
+    for (let start = 0; start < papers.length; start += BATCH_SIZE) {
+      const batch = papers.slice(start, start + BATCH_SIZE);
+      const paperList = batch.map((p, i) =>
+        `[${start + i}] ${p.title}\n${(p.abstract || "").slice(0, 300)}`
+      ).join("\n\n");
+
+      const response = await openai.chat.completions.create({
+        model,
+        max_tokens: 16384,
+        temperature: 0,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...({ extra_body: { enable_thinking: false, thinking: false } } as any),
+        messages: [
+          { role: "system", content: "Output ONLY a JSON array. Do not think. Do not explain." },
+          { role: "user", content: `Classify each paper. Use BOTH title and abstract.
+
+KEY RULE: If abstract says "this review", "we review", "we summarize", "recent advances", "an overview" → it IS a review, even if title doesn't say so.
+
+${paperList}
+
+Types: 研究论文(has new data),综述(summarizes others),系统综述,Meta分析,RCT,临床试验,病例报告,观察性研究,生信/组学,临床指南,其他
+
+[{"index":0,"type":"研究论文"}]` },
+        ],
+      });
+
+      const text = response.choices?.[0]?.message?.content || "";
+      const reasoning = (response.choices?.[0]?.message as any)?.reasoning_content || "";
+      const fullText = text || reasoning;
+      console.log(`[Classify] 批次 ${start}-${start + batch.length}: ${fullText.length}字, ${fullText.slice(0, 100)}`);
+
+      const jsonMatch = fullText.match(/\[[\s\S]*?\]/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as Array<{ index: number; type: string }>;
+        for (const item of parsed) {
+          if (typeof item.index === "number" && item.type) {
+            // 模糊匹配（处理空格差异，如 "Meta分析" vs "Meta 分析"）
+            const normalized = item.type.replace(/\s+/g, "");
+            const matched = ARTICLE_TYPES.find(t => t.replace(/\s+/g, "") === normalized);
+            if (matched) {
+              result.set(item.index, matched);
+            }
+          }
+        }
+      }
+    }
+
+    console.log(`[Classify] 成功分类 ${result.size}/${papers.length} 篇`);
+  } catch (error) {
+    console.error("[Classify] 分类失败:", (error as Error)?.message);
+  }
+
+  return result;
 }

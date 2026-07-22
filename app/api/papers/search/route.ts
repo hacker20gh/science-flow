@@ -67,13 +67,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 缓存命中检查
-    const cacheKey = getCacheKey(body);
-    const cached = resultCache.get(cacheKey);
-    if (cached) {
-      console.log("[Search] 缓存命中");
-      return NextResponse.json(cached);
-    }
+    // 缓存已移除：LLM 论文类型分类需要每次实时执行
 
     // 1. LLM 预处理：自然语言 → 优化的英文搜索查询（快速模式跳过 LLM）
     const processed = fastMode ? fastPreprocess(query) : await preprocessQuery(query);
@@ -140,6 +134,51 @@ export async function POST(req: NextRequest) {
     // OA 结果缓存 24 小时，下次搜索直接命中
     const enriched = papers; // 先返回搜索结果
     enrichWithOa(papers).then(() => enrichWithBioRxiv(papers)).catch(() => {});
+
+    // 3.5 LLM 论文类型分类（同步等待，确保返回时类型已正确）
+    try {
+      const { classifyPaperTypes } = await import("@/lib/llm/extraction");
+      const { inferArticleType } = await import("@/lib/academic/aggregator");
+      console.log(`[Search] 开始 LLM 分类 ${enriched.length} 篇...`);
+      const classifications = await classifyPaperTypes(
+        enriched.map(p => ({ title: p.title, abstract: p.abstract }))
+      );
+      let applied = 0;
+      for (const [idx, type] of classifications) {
+        if (enriched[idx]) {
+          enriched[idx].articleType = type;
+          applied++;
+        }
+      }
+      // 对 LLM 未分类的论文，用标题关键词兜底
+      for (let i = 0; i < enriched.length; i++) {
+        if (!classifications.has(i)) {
+          enriched[i].articleType = inferArticleType(enriched[i].title, enriched[i].abstract || "", enriched[i].articleType || "研究论文");
+        }
+      }
+      // 二次检测：对 LLM 判为"研究论文"的论文，用摘要关键词检测综述/Meta
+      for (const paper of enriched) {
+        if (paper.articleType === "研究论文") {
+          const abs = (paper.abstract || "").toLowerCase();
+          const title = paper.title.toLowerCase();
+          // 摘要明确说是综述
+          if (/\bthis\s+review\b|\bwe\s+review\b|\bthis\s+article\s+reviews?\b|\bthis\s+paper\s+reviews?\b|\bin\s+this\s+review\b/i.test(abs)) {
+            paper.articleType = "综述";
+          }
+          // 摘要明确说是 Meta 分析
+          else if (/meta[\s-]?analysis|pooled\s+analysis|random[\s-]effects?\s+model|forest\s+plot|funnel\s+plot/i.test(abs)) {
+            paper.articleType = "Meta 分析";
+          }
+          // 标题含 review 但 LLM 没识别
+          else if (/comprehensive\s+review|narrative\s+review|a\s+review\b|\breview\s+of\b/i.test(title)) {
+            paper.articleType = "综述";
+          }
+        }
+      }
+      console.log(`[Search] LLM 分类完成: ${applied}/${enriched.length} 篇已应用`);
+    } catch (classifyErr) {
+      console.error("[Search] LLM 分类失败:", (classifyErr as Error)?.message);
+    }
 
     // 4. OA 偏好排序：有 OA PDF 的排前面（"优先显示" = 排序，不是过滤）
     if (onlyOpenAccess) {
@@ -250,8 +289,32 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    // 写入结果缓存
-    resultCache.set(cacheKey, responseData, RESULT_CACHE_TTL);
+    // 标记已纳入项目论文（isInProject）
+    if (projectId && typeof projectId === "string" && prisma) {
+      try {
+        const dois = enriched.map(p => p.doi).filter(Boolean) as string[];
+        const pmids = enriched.map(p => p.pmid).filter(Boolean) as string[];
+        if (dois.length > 0 || pmids.length > 0) {
+          const existingPapers = await prisma.paper.findMany({
+            where: {
+              projectId,
+              OR: [
+                ...(dois.length > 0 ? [{ doi: { in: dois } }] : []),
+                ...(pmids.length > 0 ? [{ pmid: { in: pmids } }] : []),
+              ],
+            },
+            select: { doi: true, pmid: true },
+          });
+          const existingDois = new Set(existingPapers.map(p => p.doi).filter(Boolean));
+          const existingPmids = new Set(existingPapers.map(p => p.pmid).filter(Boolean));
+          for (const paper of responseData.papers) {
+            (paper as any).isInProject = !!(paper.doi && existingDois.has(paper.doi)) || !!(paper.pmid && existingPmids.has(paper.pmid));
+          }
+        }
+      } catch (err) {
+        console.warn("[Search] 查询已纳入论文失败:", (err as Error)?.message);
+      }
+    }
 
     return NextResponse.json(responseData);
   } catch (error) {

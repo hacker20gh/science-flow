@@ -88,6 +88,7 @@ model Paper {
 
   source String? // pubmed, semantic_scholar, user_upload
   oaUrl  String? // Open Access URL
+  articleType String? // 研究论文, 综述, Meta 分析, 临床试验, RCT 等
 
   createdAt DateTime @default(now())
 

@@ -189,6 +189,20 @@ export async function POST(req: NextRequest) {
               results.push(result);
               emit({ type: "result", data: { single: result, completed: results.length, total: papers.length } });
             } else {
+              // 回写 Paper.articleType（LLM 判断的论文类型）
+              const llmArticleType = extraction.articleType;
+              if (llmArticleType && paper.paperId) {
+                try {
+                  const { prisma } = await import("@/lib/db-server");
+                  if (prisma) {
+                    await prisma.paper.update({
+                      where: { id: paper.paperId },
+                      data: { articleType: llmArticleType },
+                    }).catch(() => {}); // 静默失败（paperId 可能不是 DB ID）
+                  }
+                } catch { /* 静默 */ }
+              }
+
               // 同时返回两种格式，兼容新旧前端
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const result: any = {
@@ -196,6 +210,7 @@ export async function POST(req: NextRequest) {
                 title: paper.title,
                 extraction: {
                   claim: extraction.claim,
+                  articleType: extraction.articleType,
                   experiments: finalExperiments,  // 旧格式：扁平数组（兼容 search/page.tsx）
                   conclusions: processedConclusions,  // 新格式：结论 + 证据链
                 },
