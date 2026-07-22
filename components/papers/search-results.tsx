@@ -26,6 +26,7 @@ export interface Paper {
   tldr: string | null;
   articleType: string;
   sources: string[];
+  isInProject?: boolean;
 }
 
 interface SearchResultsProps {
@@ -63,6 +64,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   const [filterMaxYear, setFilterMaxYear] = useState<string>("");
   const [filterJournal, setFilterJournal] = useState("");
   const [filterArticleType, setFilterArticleType] = useState<string | null>(null);
+  const [filterExcludeInProject, setFilterExcludeInProject] = useState(false);
 
   // 快捷筛选预设
   const QUICK_FILTERS = [
@@ -70,6 +72,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
     { label: "近3年", action: () => { const y = new Date().getFullYear(); setFilterMinYear(String(y - 3)); setFilterMaxYear(""); setShowFilters(true); } },
     { label: "Q1 期刊", action: () => { setFilterJournal("Q1"); setShowFilters(true); } },
     { label: "仅 OA", action: () => { setFilterOaOnly(true); setShowFilters(true); } },
+    { label: "排除已纳入", action: () => { setFilterExcludeInProject(true); }, hide: !papers.some(p => p.isInProject) },
   ];
 
   // 文献类型选项
@@ -108,7 +111,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
   const PAGE_SIZE = pageSize ?? 20;
 
   // 客户端过滤
-  useEffect(() => { setCurrentPage(0); setSelected(new Set()); }, [filterText, filterSource, filterOaOnly, filterMinCitations, sortBy, filterMinYear, filterMaxYear, filterJournal, filterArticleType]);
+  useEffect(() => { setCurrentPage(0); setSelected(new Set()); }, [filterText, filterSource, filterOaOnly, filterMinCitations, sortBy, filterMinYear, filterMaxYear, filterJournal, filterArticleType, filterExcludeInProject]);
 
   const filteredPapers = useMemo(() => {
     const filtered = papers.filter((p) => {
@@ -134,6 +137,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
         }
       }
       if (filterArticleType && p.articleType !== filterArticleType) return false;
+      if (filterExcludeInProject && p.isInProject) return false;
       return true;
     });
 
@@ -255,7 +259,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
     );
   }
 
-  const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0, filterMinYear, filterMaxYear, filterJournal, filterArticleType].filter(Boolean).length;
+  const activeFilterCount = [filterText, filterSource, filterOaOnly, filterMinCitations > 0, filterMinYear, filterMaxYear, filterJournal, filterArticleType, filterExcludeInProject].filter(Boolean).length;
 
   return (
     <div className="space-y-4">
@@ -320,21 +324,25 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
           </select>
         </div>
 
-        {/* 快捷筛选按钮 */}
-        {!showFilters && activeFilterCount === 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs text-gray-400">快捷：</span>
-            {QUICK_FILTERS.map((qf, i) => (
-              <button
-                key={i}
-                onClick={qf.action}
-                className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
-              >
-                {qf.label}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* 快捷筛选按钮（始终可见） */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-gray-400">快捷：</span>
+          {QUICK_FILTERS.filter(qf => !qf.hide).map((qf, i) => (
+            <button
+              key={i}
+              onClick={qf.action}
+              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                (qf.label === "仅 OA" && filterOaOnly) ||
+                (qf.label === "Q1 期刊" && filterJournal === "Q1") ||
+                (qf.label === "排除已纳入" && filterExcludeInProject)
+                  ? "bg-blue-50 border-blue-300 text-blue-700"
+                  : "bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600"
+              }`}
+            >
+              {qf.label}
+            </button>
+          ))}
+        </div>
 
         {/* 激活的筛选条件 pills */}
         {activeFilterCount > 0 && (
@@ -382,8 +390,14 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
                 <button onClick={() => setFilterArticleType(null)} className="hover:text-rose-900">×</button>
               </span>
             )}
+            {filterExcludeInProject && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+                排除已纳入
+                <button onClick={() => setFilterExcludeInProject(false)} className="hover:text-green-900">×</button>
+              </span>
+            )}
             <button
-              onClick={() => { setFilterText(""); setFilterSource(null); setFilterOaOnly(false); setFilterMinCitations(0); setFilterMinYear(""); setFilterMaxYear(""); setFilterJournal(""); setFilterArticleType(null); }}
+              onClick={() => { setFilterText(""); setFilterSource(null); setFilterOaOnly(false); setFilterMinCitations(0); setFilterMinYear(""); setFilterMaxYear(""); setFilterJournal(""); setFilterArticleType(null); setFilterExcludeInProject(false); }}
               className="text-xs text-red-500 hover:text-red-700 ml-1"
             >
               清除全部
@@ -549,7 +563,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
                 />
                 <div className="flex-1 min-w-0">
                   <h3 className="font-medium text-sm leading-5">
-                    {paper.title}
+                    {filterText ? highlightText(paper.title, filterText) : paper.title}
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
                     {paper.authors.slice(0, 3).join(", ")}
@@ -569,7 +583,7 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
                   {paper.abstract && (
                     <div className="mt-1">
                       <p className={`text-xs text-gray-400 ${expandedAbstract.has(key) ? "" : "line-clamp-2"}`}>
-                        {paper.abstract}
+                        {filterText ? highlightText(paper.abstract, filterText) : paper.abstract}
                       </p>
                       {paper.abstract.length > 200 && (
                         <button
@@ -642,6 +656,13 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
                     {paper.articleType && (
                       <span className="text-xs px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded">
                         {paper.articleType}
+                      </span>
+                    )}
+
+                    {/* 已纳入标记 */}
+                    {paper.isInProject && (
+                      <span className="text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded font-medium">
+                        ✓ 已纳入
                       </span>
                     )}
 
@@ -795,4 +816,16 @@ export function SearchResults({ papers, onSelect, projectId, onLoadMore, hasMore
 
 function paperKey(paper: Paper): string {
   return paper.doi || paper.pmid || `${paper.title}|${paper.authors?.[0] || ""}`;
+}
+
+/** 高亮文本中匹配的关键词 */
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query || query.length < 2) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    regex.test(part) ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5">{part}</mark> : part
+  );
 }

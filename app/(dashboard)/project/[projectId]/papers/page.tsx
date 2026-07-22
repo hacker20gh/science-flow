@@ -48,6 +48,7 @@ interface Paper {
   source: string | null;
   oaUrl: string | null;
   fullText: string | null;
+  articleType: string | null;
   createdAt: string;
   extractions: Extraction[];
 }
@@ -952,6 +953,12 @@ const PaperCard = memo(function PaperCard({
                   </span>
                 )}
               </>
+            )}
+            {/* 文献类型 */}
+            {paper.articleType && (
+              <span className="text-xs px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded">
+                {paper.articleType}
+              </span>
             )}
             {paper.extractions.length > 0 && (
               <>

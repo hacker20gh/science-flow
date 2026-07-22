@@ -19,6 +19,7 @@ export interface PubMedPaper {
   abstract: string;
   doi: string | null;
   publicationTypes: string[];
+  meshTerms: string[];  // MeSH 描述词（用于更精确的文献类型识别）
 }
 
 interface SearchOptions {
@@ -163,6 +164,14 @@ function parsePubmedXml(xml: string): PubMedPaper[] {
         if (typeName) pubTypes.push(typeName);
       }
 
+      // 提取 MeSH 描述词（NLM 人工标引，比 PublicationType 更精确）
+      const meshTerms: string[] = [];
+      const meshBlocks = block.split("<MeshHeading>").slice(1);
+      for (const mb of meshBlocks) {
+        const descriptor = mb.match(/<DescriptorName[^>]*>([^<]+)<\/DescriptorName>/i)?.[1]?.trim();
+        if (descriptor) meshTerms.push(descriptor);
+      }
+
       papers.push({
         pmid,
         title: cleanXmlText(title),
@@ -172,6 +181,7 @@ function parsePubmedXml(xml: string): PubMedPaper[] {
         abstract: abstract || "",
         doi,
         publicationTypes: pubTypes,
+        meshTerms,
       });
     }
   }

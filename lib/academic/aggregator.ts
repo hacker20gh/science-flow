@@ -280,7 +280,78 @@ function sortGroup(
 
 // ---- Internal ----
 
+/**
+ * MeSH 描述词 → 文献类型（最可靠的分类信号）
+ *
+ * MeSH 是 NLM 人工标引的受控词表，准确率远高于关键词匹配。
+ * 只匹配明确指示文献类型的 MeSH 词。
+ */
+const MESH_TYPE_MAP: Record<string, string> = {
+  "Review": "综述",
+  "Systematic Review": "系统综述",
+  "Meta-Analysis": "Meta 分析",
+  "Randomized Controlled Trial": "RCT",
+  "Clinical Trial": "临床试验",
+  "Clinical Trial, Phase I": "临床试验",
+  "Clinical Trial, Phase II": "临床试验",
+  "Clinical Trial, Phase III": "临床试验",
+  "Clinical Trial, Phase IV": "临床试验",
+  "Pragmatic Clinical Trial": "临床试验",
+  "Adaptive Clinical Trial": "临床试验",
+  "Case Reports": "病例报告",
+  "Observational Study": "观察性研究",
+  "Cohort Studies": "观察性研究",
+  "Cross-Sectional Studies": "观察性研究",
+  "Case-Control Studies": "观察性研究",
+  "Practice Guideline": "临床指南",
+  "Guideline": "临床指南",
+  "Consensus": "临床指南",
+  "Editorial": "社论",
+  "Comment": "评论",
+  "Letter": "通信",
+  "Retraction of Publication": "撤稿论文",
+  "Published Erratum": "勘误",
+};
+
+/** MeSH 类型优先级（越具体越优先） */
+const MESH_PRIORITY: Record<string, number> = {
+  "系统综述": 100,
+  "Meta 分析": 95,
+  "RCT": 90,
+  "临床试验": 85,
+  "病例报告": 80,
+  "观察性研究": 75,
+  "临床指南": 70,
+  "综述": 65,
+};
+
+/**
+ * 从 MeSH 术语中推断文献类型
+ * 返回 null 表示 MeSH 中没有类型相关信息
+ */
+function classifyFromMesh(meshTerms: string[]): string | null {
+  let bestType: string | null = null;
+  let bestPriority = 0;
+  for (const term of meshTerms) {
+    const type = MESH_TYPE_MAP[term];
+    if (type) {
+      const priority = MESH_PRIORITY[type] ?? 0;
+      if (priority > bestPriority) {
+        bestType = type;
+        bestPriority = priority;
+      }
+    }
+  }
+  return bestType;
+}
+
 function fromPubmed(p: PubMedPaper): UnifiedPaper {
+  // 优先用 MeSH 分类（最可靠），其次用 PublicationType，最后兜底"研究论文"
+  const meshType = classifyFromMesh(p.meshTerms);
+  const pubType = normalizeArticleType(p.publicationTypes);
+  // MeSH 有具体类型 → 用 MeSH；否则用 PublicationType
+  const articleType = meshType || pubType;
+
   return {
     pmid: p.pmid,
     doi: p.doi,
@@ -298,7 +369,7 @@ function fromPubmed(p: PubMedPaper): UnifiedPaper {
     oaPdfUrl: null,
     oaStatus: "unknown",
     tldr: null,
-    articleType: normalizeArticleType(p.publicationTypes),
+    articleType,
     sources: ["pubmed"],
   };
 }
@@ -584,34 +655,46 @@ function normalizeOpenAlexType(type: string): string {
 }
 
 /**
- * 基于标题/摘要关键词推断文献类型（fallback）
- * 当源数据的类型字段不准确时，从文本内容推断
+ * 泛化类型集合 — 这些类型不够具体，可以被推断结果覆盖
  */
-export function inferArticleType(title: string, abstract: string, currentType: string): string {
-  // 如果已有较具体的类型，不覆盖
-  if (currentType !== "研究论文") return currentType;
+const GENERIC_TYPES = new Set(["研究论文", "Journal Article", "article", "其他", "Study"]);
 
-  const text = `${title} ${abstract}`.toLowerCase();
+/**
+ * 基于标题/摘要关键词推断文献类型（增强版）
+ *
+ * 策略：
+ * 1. API 已给出具体类型（如 S2 的 "Review"、PubMed 的 "Meta-Analysis"）→ 直接保留
+ * 2. API 只给出泛化类型（"Journal Article"/"研究论文"）→ 尝试推断
+ * 3. 推断采用"标题强命中优先"策略，避免摘要中的泛化描述导致误判
+ */
+/**
+ * 基于标题关键词推断文献类型（极保守兜底）
+ *
+ * 仅在标题中有明确标识时才推断，不做摘要分析。
+ * 主要分类由 LLM 在提取阶段完成（更准确），此函数仅处理搜索结果的初始展示。
+ *
+ * 规则：只匹配标题中的明确标识词，宁可漏判也不误判。
+ */
+export function inferArticleType(title: string, _abstract: string, currentType: string): string {
+  if (!GENERIC_TYPES.has(currentType)) return currentType;
 
-  // 按优先级匹配关键词
-  const patterns: [RegExp, string][] = [
-    [/systematic\s+review/i, "系统综述"],
-    [/meta-analysis|meta\s+analysis|荟萃分析/i, "Meta 分析"],
-    [/metaanalytic/i, "Meta 分析"],
-    [/\breview\b.*\bof\b|\breview\b.*\bliterature|\bnarrative\s+review|\bliterature\s+review|\bcomprehensive\s+review|\bupdated\s+review|\bstate[- ]of[- ]the[- ]art\s+review/i, "综述"],
-    [/\breview\b.*\barticle|\breview\b.*\bpaper/i, "综述"],
-    [/randomized\s+controlled\s+trial|rct\b/i, "RCT"],
-    [/clinical\s+trial|phase\s+[iI1-3]+/i, "临床试验"],
-    [/case[- ]report|case\s+series/i, "病例报告"],
-    [/observational\s+study|cohort\s+study|cross[- ]sectional/i, "观察性研究"],
-    [/practice\s+guideline|clinical\s+guideline|consensus/i, "临床指南"],
-    [/erratum|corrigendum|retraction/i, "勘误"],
-    [/comment|editorial|letter|correspondence/i, "通信"],
-  ];
+  // 标题明确命中 → 直接采纳（标题是作者自己写的，不会误判）
+  if (/systematic\s+review/i.test(title)) return "系统综述";
+  if (/meta[\s-]?analysis|metaanalysis|荟萃分析/i.test(title)) return "Meta 分析";
+  if (/randomized\s+controlled\s+trial|randomised\s+controlled\s+trial/i.test(title)) return "RCT";
+  if (/case\s+report|case\s+series/i.test(title)) return "病例报告";
+  if (/practice\s+guideline|clinical\s+guideline|consensus\s+(?:statement|guideline)/i.test(title)) return "临床指南";
+  if (/erratum|corrigendum|retraction/i.test(title)) return "勘误";
+  // 中文标题
+  if (/荟萃分析|Meta分析/.test(title)) return "Meta 分析";
+  if (/系统综述/.test(title)) return "系统综述";
+  if (/病例报告|病例系列/.test(title)) return "病例报告";
 
-  for (const [pattern, type] of patterns) {
-    if (pattern.test(text)) return type;
-  }
+  // 综述：需要 "review of/on" 模式，且不含实验相关词
+  if (/narrative\s+review|literature\s+review|scoping\s+review|mini[\s-]review/i.test(title)) return "综述";
+  if (/^review\s*[:\-]/i.test(title)) return "综述";
+  if (/研究进展|综述|最新进展|展望/.test(title)) return "综述";
 
+  // 不做摘要推断 — 交给 LLM
   return currentType;
 }

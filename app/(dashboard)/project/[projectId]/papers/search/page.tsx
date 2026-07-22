@@ -330,6 +330,7 @@ export default function ProjectPaperSearchPage() {
             abstract: p.abstract,
             source: p.sources?.[0] || "semantic_scholar",
             oaUrl: p.oaPdfUrl || null,
+            articleType: p.articleType || null,
           })),
         }),
       });
@@ -355,7 +356,7 @@ export default function ProjectPaperSearchPage() {
         paperId: dbId, title: p.title, authors: p.authors, journal: p.journal,
         year: p.year, abstract: p.abstract, doi: p.doi, pmid: p.pmid,
         citationCount: p.citationCount, isOpenAccess: p.isOpenAccess,
-        oaPdfUrl: p.oaPdfUrl, articleType: "研究论文",
+        oaPdfUrl: p.oaPdfUrl, articleType: p.articleType || "研究论文",
         extractionStatus: "extracting" as const, experiments: [],
       };
     });

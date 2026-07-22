@@ -15,6 +15,7 @@ interface BatchPaperInput {
   source?: string | null;
   oaUrl?: string | null;
   impactFactor?: number | null;
+  articleType?: string | null;
 }
 
 export async function POST(
@@ -104,6 +105,7 @@ export async function POST(
               abstract: paper.abstract || null,
               source: paper.source || null,
               oaUrl: paper.oaUrl || null,
+              articleType: paper.articleType || null,
             },
           });
           created.push(p);

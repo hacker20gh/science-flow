@@ -37,6 +37,7 @@ export async function GET(
         source: true,
         oaUrl: true,
         fullText: true,
+        articleType: true,
         createdAt: true,
         extractions: {
           select: { id: true, drugName: true, pathway: true, conclusion: true, conclusionClaim: true },
